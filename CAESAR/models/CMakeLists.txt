@@ -11,13 +11,23 @@ target_include_directories(compressModules3dMidSR
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-# Link Torch
 target_link_libraries(compressModules3dMidSR
     PUBLIC "${TORCH_LIBRARIES}"
+    PUBLIC caesar_lib
 )
 
-# Optionally link to caesar_lib if needed
-target_link_libraries(compressModules3dMidSR
+
+add_library(utils
+    utils.cpp
+    utils.h
+)
+
+target_include_directories(utils
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(utils
+    PUBLIC "${TORCH_LIBRARIES}"
     PUBLIC caesar_lib
 )
 

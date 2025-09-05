@@ -46,6 +46,18 @@ target_link_libraries(test_bcrn
         stdc++fs
 )
 
+# Test: Utils
+add_executable(test_utils
+    testUtils.cpp
+)
+target_link_libraries(test_utils
+    PRIVATE
+        utils
+        caesar_lib
+        "${TORCH_LIBRARIES}"
+        stdc++fs
+)
+
 # Handle DLL copying on Windows (keep as is)
 if (MSVC)
   file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
