@@ -420,7 +420,79 @@ int main() {
     test_edge_cases();
     test_error_handling();
     test_training_simulation();
-    
+  {
+        auto res = numToGroups(10, 2);
+        std::vector<int> expected{2, 2, 2, 2, 2};
+        assert(res == expected);
+    }
+
+    // Test 2: with remainder
+    {
+        auto res = numToGroups(10, 3);
+        std::vector<int> expected{3, 3, 3, 1};
+        assert(res == expected);
+    }
+
+    // Test 3: num smaller than divisor
+    {
+        auto res = numToGroups(2, 5);
+        std::vector<int> expected{2};
+        assert(res == expected);
+    }
+
+    // Test 4: num equal to divisor
+    {
+        auto res = numToGroups(5, 5);
+        std::vector<int> expected{5};
+        assert(res == expected);
+    }
+
+    // Test 5: num zero
+    {
+        auto res = numToGroups(0, 3);
+        std::vector<int> expected{};
+        assert(res == expected);
+    }
+
+    // Test 6: divisor one
+    {
+        auto res = numToGroups(4, 1);
+        std::vector<int> expected{1,1,1,1};
+        assert(res == expected);
+    }
+
+    // Test 7: large numbers
+    {
+        auto res = numToGroups(100, 33);
+        std::vector<int> expected{33,33,33,1};
+        assert(res == expected);
+    }
+
+    // Test 8: divisor greater than num
+    {
+        auto res = numToGroups(7, 10);
+        std::vector<int> expected{7};
+        assert(res == expected);
+    }
+
+    // Test 9: divisor equals 1
+    {
+        auto res = numToGroups(7, 1);
+        std::vector<int> expected{1,1,1,1,1,1,1};
+        assert(res == expected);
+    }
+
+    // Test 10: divisor equals num+1
+    {
+        auto res = numToGroups(9, 10);
+        std::vector<int> expected{9};
+        assert(res == expected);
+    }
+
+    std::cout << " All numToGroups tests passed!" << std::endl;
+
+
+
     std::cout << "=== ALL TESTS COMPLETED ===\n";
 
 

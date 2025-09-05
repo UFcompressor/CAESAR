@@ -50,18 +50,20 @@ target_link_libraries(test_bcrn
 add_executable(test_utils
     testUtils.cpp
 )
+
+# LINK the utils library AND make sure CAESAR/models is added before tests
 target_link_libraries(test_utils
     PRIVATE
-        utils
         caesar_lib
+        utils        # link the utils library
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Handle DLL copying on Windows (keep as is)
-if (MSVC)
+if(MSVC)
   file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
-  foreach(test_exe test_caesar test_bsconvu test_blocks)
+  foreach(test_exe test_caesar test_bsconvu test_blocks test_utils)
     add_custom_command(TARGET ${test_exe}
                        POST_BUILD
                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -69,3 +71,4 @@ if (MSVC)
                        $<TARGET_FILE_DIR:${test_exe}>)
   endforeach()
 endif()
+

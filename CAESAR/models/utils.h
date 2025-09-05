@@ -88,7 +88,7 @@ cycle<Container> make_cycle(const Container& dl) {
 } 
          
 
-
+std::vector<int> numToGroups(int num, int divisor);
 
 
 
