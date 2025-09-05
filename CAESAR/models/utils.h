@@ -92,9 +92,7 @@ std::vector<int> numToGroups(int num, int divisor);
 
 
 
-
-
-
+torch::Tensor extract(const torch::Tensor& a, const torch::Tensor& t, const std::vector<int64_t>& x_shape);
 
 
 

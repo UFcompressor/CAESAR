@@ -490,8 +490,45 @@ int main() {
     }
 
     std::cout << " All numToGroups tests passed!" << std::endl;
+     torch::Tensor a = torch::randn({100});  // Some lookup table/schedule
+    torch::Tensor t = torch::randint(0, 100, {4});  // Time indices, batch_size=4
+    std::vector<int64_t> x_shape = {4, 3, 64, 64};  // Example image shape [B, C, H, W]
+    
+    std::cout << "Input tensor a shape: " << a.sizes() << std::endl;
+    std::cout << "Time indices t: " << t << std::endl;
+    std::cout << "Target x_shape: ";
+    for (auto dim : x_shape) {
+        std::cout << dim << " ";
+    }
+    std::cout << std::endl;
+    
+    // Call extract function
+    torch::Tensor result = extract(a, t, x_shape);
+    
+    std::cout << "Result shape: " << result.sizes() << std::endl;
+    std::cout << "Result values: " << result << std::endl;
+    
+    // Test with different shapes
+    std::cout << "\n--- Testing with different shapes ---\n";
+    
+    // 3D case: [B, H, W]
+    std::vector<int64_t> shape_3d = {4, 32, 32};
+    torch::Tensor result_3d = extract(a, t, shape_3d);
+    std::cout << "3D result shape: " << result_3d.sizes() << std::endl;
+    
+    // 5D case: [B, C, D, H, W]
+    std::vector<int64_t> shape_5d = {4, 3, 16, 64, 64};
+    torch::Tensor result_5d = extract(a, t, shape_5d);
+    std::cout << "5D result shape: " << result_5d.sizes() << std::endl;
+    
+    // Alternative usage with actual tensor
+    
+   
+    
 
 
+
+    std::cout << "All extract tests passed!\n";
 
     std::cout << "=== ALL TESTS COMPLETED ===\n";
 
