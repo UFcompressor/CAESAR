@@ -147,6 +147,46 @@ y.backward(grad);
 std::cout << "done testing LowerBound" << std::endl;
 
 
+std::cout<<"Starting to test UpperBound"<<std::endl;
+
+auto X = torch::tensor({0.5, 1.2, -0.3}, torch::requires_grad());
+auto Bound = torch::tensor(1.0);
+
+auto Y = UpperBound::apply(X, Bound);
+std::cout << Y << std::endl;
+
+auto Grad = torch::ones_like(Y);
+Y.backward(Grad);
+
+std::cout << "done testing UpperBound" << std::endl;
+
+
+
+std::cout<<"Testing NormalDistrubtion" <<std::endl;
+
+    auto Loc = torch::tensor({0.0, 1.0, -1.0});
+    auto scale = torch::tensor({1.0, 0.5, 2.0});
+
+    NormalDistribution dist(Loc, scale);
+
+    std::cout << "Mean: " << dist.mean() << std::endl;
+
+    auto sample = dist.sample();
+    std::cout << "Sample: " << sample << std::endl;
+
+    auto T = torch::tensor({0.5, 1.2, -0.3});
+    auto likelihood = dist.likelihood(T);
+    std::cout << "Likelihood: " << likelihood << std::endl;
+
+    auto scaled_likelihood = dist.scaledLikelihood(T, 2.0);
+    std::cout << "Scaled Likelihood: " << scaled_likelihood << std::endl;
+
+    std::cout<<"Done testing NormalDistrubtion" <<std::endl;
+
+
+
+
+
 
     std::cout<< "DONE TESTING\n";
     return 0;

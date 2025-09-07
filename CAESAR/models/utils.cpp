@@ -1,12 +1,11 @@
 #include "utils.h"
 
 
-
- std::vector<int>numToGroups(int num, int divisor){
-    if(divisor <= 0){
-        throw std::invalid_argument("Divisor must be positive +");
+std::vector<int> numToGroups(int num, int divisor) {
+    if (divisor <= 0) {
+        throw std::invalid_argument("Divisor must be positive");
     }
-    if(num < 0){
+    if (num < 0) {
         throw std::invalid_argument("Num must be non-negative");
     }
 
@@ -14,12 +13,13 @@
     int rem = num % divisor;
 
     std::vector<int> arr(groups, divisor);
-    if(rem > 0){
+    if (rem > 0) {
         arr.push_back(rem);
     }
 
     return arr;
 }
+
 torch::Tensor extract(const torch::Tensor& a, const torch::Tensor& t, const std::vector<int64_t>& x_shape) {
 
     int64_t b = t.size(0);
@@ -182,15 +182,60 @@ torch::autograd::tensor_list LowerBound::backward(
 }
 
 
+torch::Tensor UpperBound::forward(torch::autograd::AutogradContext* ctx,
+                                  const torch::Tensor& inputs,
+                                  const torch::Tensor& bound) {
+    auto b = torch::ones_like(inputs) * bound;
+    ctx->save_for_backward({inputs, b});
+    return torch::min(inputs, b);
+}
 
 
+torch::autograd::tensor_list UpperBound::backward(torch::autograd::AutogradContext* ctx,
+                                                  torch::autograd::tensor_list gradOutputs) {
+    auto saved = ctx->get_saved_variables();
+    auto inputs = saved[0];
+    auto b = saved[1];
 
+    auto gradOutput = gradOutputs[0];
+    auto passThrough = (inputs <= b) | (gradOutput > 0);
 
+    return {passThrough.to(gradOutput.dtype()) * gradOutput, torch::Tensor()};
+}
 
+NormalDistribution::NormalDistribution(const torch::Tensor& loc, const torch::Tensor& scale)
+    : loc_(loc), scale_(scale) 
+{
+    TORCH_CHECK(loc_.sizes() == scale_.sizes(), "loc and scale must have the same shape");
+}
 
+torch::Tensor NormalDistribution::mean() const {
+    return loc_.detach();
+}
 
+torch::Tensor NormalDistribution::stdCDF(const torch::Tensor& inputs) const {
+    double half = 0.5;
+    double const_val = -1.0 / std::sqrt(2.0);
+    return half * torch::erfc(const_val * inputs);
+}
 
+torch::Tensor NormalDistribution::sample() const {
+    return scale_ * torch::randn_like(scale_) + loc_;
+}
 
+torch::Tensor NormalDistribution::likelihood(const torch::Tensor& x, double min_val) const {
+    auto diff = torch::abs(x - loc_);
+    auto upper = stdCDF((0.5 - diff) / scale_);
+    auto lower = stdCDF((-0.5 - diff) / scale_);
+    return LowerBound::apply(upper - lower, torch::tensor(min_val, loc_.options()));
+}
 
+torch::Tensor NormalDistribution::scaledLikelihood(const torch::Tensor& x, double s, double min_val) const {
+    auto diff = torch::abs(x - loc_);
+    double half_s = s * 0.5;
+    auto upper = stdCDF((half_s - diff) / scale_);
+    auto lower = stdCDF((-half_s - diff) / scale_);
+    return LowerBound::apply(upper - lower, torch::tensor(min_val, loc_.options()));
+}
 
 

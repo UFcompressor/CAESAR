@@ -144,9 +144,30 @@ struct LowerBound : public torch::autograd::Function<LowerBound> {
 
 
 
+struct UpperBound : public torch::autograd::Function<UpperBound> {
+static torch::Tensor forward(torch::autograd::AutogradContext* ctx,
+        const torch::Tensor& inputs, 
+        const torch::Tensor& bounds);
+
+static torch::autograd::tensor_list backward(torch::autograd::AutogradContext* ctx,
+        torch::autograd::tensor_list gradOutputs);
+};
 
 
 
+class NormalDistribution {
+public:
+    NormalDistribution(const torch::Tensor& loc, const torch::Tensor& scale);
 
+    torch::Tensor mean() const;
+    torch::Tensor stdCDF(const torch::Tensor& inputs) const;
+    torch::Tensor sample() const;
+       torch::Tensor likelihood(const torch::Tensor& x, double min_val = 1e-9) const;
+    torch::Tensor scaledLikelihood(const torch::Tensor& x, double s = 1.0, double min_val = 1e-9) const;
+
+private:
+    torch::Tensor loc_;
+    torch::Tensor scale_;
+};
 
 
