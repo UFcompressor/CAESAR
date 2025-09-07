@@ -95,6 +95,56 @@ std::vector<int> numToGroups(int num, int divisor);
 torch::Tensor extract(const torch::Tensor& a, const torch::Tensor& t, const std::vector<int64_t>& x_shape);
 
 
+torch::Tensor extractTensor(const torch::Tensor& a, const torch::Tensor& t, 
+        const torch::Tensor& placeHolder = torch::Tensor());
+
+
+torch::Tensor noiseLike(const std::vector<int64_t>& shape, 
+        torch::Device device = torch::kCPU,
+        bool repeat = false);
+
+// NOTE: scale is a float  not a double ask later ----------
+torch::Tensor noise(const torch::Tensor& input, float scale);
+
+// why 0.008 idk
+torch::Tensor cosineBetaSchedule(int64_t timeSteps, double s = 0.008);
+
+
+torch::Tensor linearBetaSchedule(int64_t timeSteps);
+
+
+torch::Tensor roundWOffset(const torch::Tensor& input, const torch::Tensor& loc);
+
+struct STERound : public torch::autograd::Function<STERound> {
+    static torch::Tensor forward(torch::autograd::AutogradContext* ctx,
+                                 const torch::Tensor& x);
+
+    static torch::autograd::tensor_list backward(torch::autograd::AutogradContext* ctx,
+                                                 torch::autograd::tensor_list grad_outputs);
+};
+
+
+torch::Tensor roundWOffset(const torch::Tensor& input, const torch::Tensor& loc);
+
+torch::Tensor quantize(const torch::Tensor& x, const std::string& mode = "noise", const torch::Tensor& offset = {});
+
+
+struct LowerBound : public torch::autograd::Function<LowerBound> {
+ 
+    static torch::Tensor forward(torch::autograd::AutogradContext* ctx,
+                                 const torch::Tensor& inputs,
+                                 const torch::Tensor& bound);
+
+
+  static torch::autograd::tensor_list backward(torch::autograd::AutogradContext* ctx,
+                                             torch::autograd::tensor_list grad_outputs);
+ 
+  
+};
+
+
+
+
 
 
 

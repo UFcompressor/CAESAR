@@ -60,10 +60,31 @@ target_link_libraries(test_utils
         stdc++fs
 )
 
-# Handle DLL copying on Windows (keep as is)
+add_executable(test_utils2
+    testUtils2.cpp
+)
+
+target_link_libraries(test_utils2
+    PRIVATE
+        caesar_lib
+        utils        # link the utils library
+        "${TORCH_LIBRARIES}"
+        stdc++fs
+)
+
+# Collect all tests
+set(TEST_TARGETS
+    test_caesar
+    test_bsconvu
+    test_blocks
+    test_bcrn
+    test_utils
+    test_utils2
+)
+
 if(MSVC)
   file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
-  foreach(test_exe test_caesar test_bsconvu test_blocks test_utils)
+  foreach(test_exe ${TEST_TARGETS})
     add_custom_command(TARGET ${test_exe}
                        POST_BUILD
                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
