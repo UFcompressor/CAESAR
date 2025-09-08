@@ -30,4 +30,17 @@ target_link_libraries(utils
     PUBLIC "${TORCH_LIBRARIES}"
     PUBLIC caesar_lib
 )
+add_library(runGaeCuda
+    runGaeCuda.cpp
+    runGaeCuda.h
+)
+
+target_include_directories(runGaeCuda
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(runGaeCuda
+    PUBLIC "${TORCH_LIBRARIES}"
+    PUBLIC caesar_lib
+)
 

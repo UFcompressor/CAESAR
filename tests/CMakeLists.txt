@@ -72,7 +72,18 @@ target_link_libraries(test_utils2
         stdc++fs
 )
 
-# Collect all tests
+add_executable(test_runGaeCuda
+    testRunGaeCuda.cpp
+)
+
+target_link_libraries(test_runGaeCuda
+    PRIVATE
+        caesar_lib
+        runGaeCuda
+        "${TORCH_LIBRARIES}"
+        stdc++fs
+)
+
 set(TEST_TARGETS
     test_caesar
     test_bsconvu
@@ -80,7 +91,9 @@ set(TEST_TARGETS
     test_bcrn
     test_utils
     test_utils2
+    test_runGaeCuda
 )
+
 
 if(MSVC)
   file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
