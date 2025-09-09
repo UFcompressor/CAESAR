@@ -13,6 +13,7 @@
 #include <map>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -50,3 +51,10 @@ torch::Tensor block2Vector(const torch::Tensor& blockdata,
 torch::Tensor vector2Block(const torch::Tensor& vectors,
                            const std::vector<int64_t>& originalShape,
                            std::pair<int, int> patchSize);
+
+std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(const torch::Tensor& arr2d);
+
+torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
+                                 const torch::Tensor& maskLength,
+                                 int64_t numCols);
+

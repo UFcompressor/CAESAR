@@ -55,6 +55,21 @@ int main() {
     }
     std::cout<<"done testing both block2Vector and vector2Block"<<std::endl;
 
+   std::cout << "Starting to test indexMaskPrefix..." << std::endl;
+    auto arr_2d = torch::tensor({{0, 1, 0, 0},
+                                 {1, 0, 0, 1},
+                                 {0, 0, 0, 1}}, torch::kFloat32);
+
+    // Step 1: run prefix
+    auto [prefix_mask, mask_length] = indexMaskPrefix(arr_2d);
+    std::cout << "prefix_mask: " << prefix_mask << std::endl;
+    std::cout << "mask_length: " << mask_length << std::endl;
+
+    // Step 2: run reverse
+    auto arr_2d_reconstructed = indexMaskReverse(prefix_mask, mask_length, arr_2d.size(1));
+    std::cout << "Reconstructed arr_2d:\n" << arr_2d_reconstructed << std::endl;
+    std::cout << "Done testing indexMaskReverse." << std::endl;
+
 
     std::cout<<"Done testing runGAECUDA"<<std::endl;
     return 0;

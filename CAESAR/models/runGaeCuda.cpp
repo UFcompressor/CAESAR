@@ -117,3 +117,49 @@ permuteOrder.push_back(batchDims + 4);
     return permuted.reshape(originalShape);
 }
 
+std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(const torch::Tensor& arr2d){
+    int64_t numCols =  arr2d.size(1);
+
+    auto reversedArr = torch::flip(arr2d, {1});
+
+    auto lastOneFromRight = reversedArr.to(torch::kInt32).argmax(1, false);
+
+    auto maskLen = numCols - lastOneFromRight - 1;
+
+    auto arange = torch::arange(numCols, arr2d.options().dtype(torch::kLong));
+auto mask = arange.unsqueeze(0).le(maskLen.unsqueeze(1));
+
+   
+    auto result =  arr2d.masked_select(mask);
+
+    auto maskLenUint8 = maskLen.to(torch::kUInt8);
+    
+    return {result, maskLenUint8};
+}
+
+torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
+                                 const torch::Tensor& maskLength,
+                                 int64_t numCols) {
+    auto device = prefixMask.device();
+
+    auto arange = torch::arange(numCols, torch::dtype(torch::kLong).device(device));
+    auto mask = arange.unsqueeze(0).le(maskLength.unsqueeze(1));
+
+    auto arr2d = torch::zeros({maskLength.size(0), numCols},
+                               torch::dtype(torch::kBool).device(device));
+
+    arr2d.index_put_({mask}, prefixMask.reshape({-1}));
+
+    return arr2d;
+}
+
+
+
+
+
+
+
+
+
+
+
