@@ -45,13 +45,11 @@ add_library(runGaeCuda
 
 target_include_directories(runGaeCuda
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
-    PUBLIC "${CMAKE_SOURCE_DIR}/external"
 )
 
 target_link_libraries(runGaeCuda
     PUBLIC "${TORCH_LIBRARIES}"
     PUBLIC caesar_lib
-    PUBLIC nlohmann_json
     PUBLIC nvcomp::nvcomp    
 )
 

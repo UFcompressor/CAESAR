@@ -80,7 +80,6 @@ target_link_libraries(test_runGaeCuda
     PRIVATE
         caesar_lib
         runGaeCuda
-        nlohmann_json
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
