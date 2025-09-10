@@ -1,6 +1,5 @@
 #include "runGaeCuda.h"
 
-
 PCA::PCA(int numComponents, const std::string& device)
     : numComponents_(numComponents), device_(torch::Device(device)) {}
 
@@ -9,14 +8,15 @@ PCA& PCA::fit(const torch::Tensor& x) {
     mean_ = torch::mean(xDevice, 0);
     auto xCentered = xDevice - mean_;
 
-    auto C = torch::matmul(xCentered.t(), xCentered) / (xCentered.size(0) - 1);
+
+    auto C = torch::matmul(xCentered.transpose(0, 1), xCentered) / (xCentered.size(0) - 1);
 
     auto eigen = torch::linalg_eigh(C);
     auto evals = std::get<0>(eigen);
     auto evecs = std::get<1>(eigen);
 
-    auto idx = std::get<1>(torch::sort(evals, /*dim=*/0, /*descending=*/true));
-    auto Vt = torch::index_select(evecs, 1, idx).t();
+    auto idx = std::get<1>(torch::sort(evals, 0, true));
+    auto Vt = torch::index_select(evecs, 1, idx).transpose(0, 1);
 
     if (numComponents_ > 0) {
         Vt = Vt.slice(0, 0, numComponents_);
@@ -27,7 +27,6 @@ PCA& PCA::fit(const torch::Tensor& x) {
     return *this;
 }
 
-// this may work correly
 torch::Tensor block2Vector(const torch::Tensor& blockData, std::pair<int, int> patchSize) {
     int patchH = patchSize.first;
     int patchW = patchSize.second;
@@ -42,7 +41,6 @@ torch::Tensor block2Vector(const torch::Tensor& blockData, std::pair<int, int> p
     int nH = H / patchH;
     int nW = W / patchW;
 
-
     std::vector<int64_t> newShape;
     for (int i = 0; i < dims - 3; ++i)
         newShape.push_back(sizes[i]);
@@ -54,14 +52,13 @@ torch::Tensor block2Vector(const torch::Tensor& blockData, std::pair<int, int> p
 
     auto reshaped = blockData.reshape(newShape);
 
-
     std::vector<int64_t> permuteOrder;
     for (int i = 0; i < dims - 3; ++i) permuteOrder.push_back(i);
-    permuteOrder.push_back(dims - 3);
-    permuteOrder.push_back(dims - 1); 
+    permuteOrder.push_back(dims - 3); 
+    permuteOrder.push_back(dims - 1);
     permuteOrder.push_back(dims - 2);
     permuteOrder.push_back(dims);   
-    permuteOrder.push_back(dims + 1); 
+    permuteOrder.push_back(dims + 1);
 
     auto permuted = reshaped.permute(permuteOrder);
 
@@ -74,7 +71,7 @@ torch::Tensor block2Vector(const torch::Tensor& blockData, std::pair<int, int> p
 
     return permuted.reshape(finalShape);
 }
-// idk if this works properly
+
 torch::Tensor vector2Block(const torch::Tensor& vectors,
                            const std::vector<int64_t>& originalShape,
                            std::pair<int, int> patchSize) {
@@ -89,28 +86,25 @@ torch::Tensor vector2Block(const torch::Tensor& vectors,
     int nH = H / patchH;
     int nW = W / patchW;
 
-
     std::vector<int64_t> reshapedShape;
     for (int i = 0; i < dims - 3; ++i) reshapedShape.push_back(originalShape[i]);
+    reshapedShape.push_back(T);
     reshapedShape.push_back(nH);
     reshapedShape.push_back(nW);
-    reshapedShape.push_back(T); 
     reshapedShape.push_back(patchH);
     reshapedShape.push_back(patchW);
 
     auto reshaped = vectors.reshape(reshapedShape);
 
-std::vector<int64_t> permuteOrder;
-int batchDims = dims - 3;
-for (int i = 0; i < batchDims; ++i) permuteOrder.push_back(i);
+    std::vector<int64_t> permuteOrder;
+    int batchDims = dims - 3;
+    for (int i = 0; i < batchDims; ++i) permuteOrder.push_back(i);
 
-
-permuteOrder.push_back(batchDims + 2); 
-permuteOrder.push_back(batchDims + 0);
-permuteOrder.push_back(batchDims + 3);
-permuteOrder.push_back(batchDims + 1);
-permuteOrder.push_back(batchDims + 4);
-
+    permuteOrder.push_back(batchDims + 0);
+    permuteOrder.push_back(batchDims + 1);
+    permuteOrder.push_back(batchDims + 3); 
+    permuteOrder.push_back(batchDims + 2);
+    permuteOrder.push_back(batchDims + 4);
 
     auto permuted = reshaped.permute(permuteOrder).contiguous();
 
@@ -118,20 +112,16 @@ permuteOrder.push_back(batchDims + 4);
 }
 
 std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(const torch::Tensor& arr2d){
-    int64_t numCols =  arr2d.size(1);
+    int64_t numCols = arr2d.size(1);
 
     auto reversedArr = torch::flip(arr2d, {1});
-
     auto lastOneFromRight = reversedArr.to(torch::kInt32).argmax(1, false);
-
     auto maskLen = numCols - lastOneFromRight - 1;
 
     auto arange = torch::arange(numCols, arr2d.options().dtype(torch::kLong));
-auto mask = arange.unsqueeze(0).le(maskLen.unsqueeze(1));
-
-   
-    auto result =  arr2d.masked_select(mask);
-
+    auto mask = arange.unsqueeze(0).le(maskLen.unsqueeze(1));
+    
+    auto result = arr2d.masked_select(mask);
     auto maskLenUint8 = maskLen.to(torch::kUInt8);
     
     return {result, maskLenUint8};
@@ -150,9 +140,7 @@ torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
     return arr2d;
 }
 
-
 std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
-
     torch::Tensor bits;
     if (bitArray.dtype() != torch::kUInt8) {
         bits = bitArray.to(torch::kUInt8);
@@ -160,7 +148,6 @@ std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
         bits = bitArray.clone();
     }
     
-    // Ensure tensor is contiguous and on CPU may change to gpu later???????
     bits = bits.contiguous().cpu();
     
     auto data = bits.data_ptr<uint8_t>();
@@ -175,7 +162,6 @@ std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
         for (int bitIdx = 0; bitIdx < 8; ++bitIdx) {
             int64_t globalBitIdx = byteIdx * 8 + bitIdx;
             if (globalBitIdx < numBits) {
-                // Pack bits in big-endian order 
                 if (data[globalBitIdx]) {
                     byte |= (1 << (7 - bitIdx));
                 }
@@ -203,7 +189,6 @@ torch::Tensor BitUtils::bytesToBits(const std::vector<uint8_t>& byteSeq, int64_t
         int64_t byteIdx = bitIdx / 8;
         int64_t bitInByte = bitIdx % 8;
         
-        // Unpack bits in big-endian order
         uint8_t byte = byteSeq[byteIdx];
         bool bitValue = (byte >> (7 - bitInByte)) & 1;
         data[bitIdx] = bitValue;
@@ -229,6 +214,7 @@ void BitUtils::unpackByte(uint8_t byte, uint8_t* bits) {
 }
 
 
+// bugs below  ------ --------------------------------------------------------------------
 PCACompressor::PCACompressor(double nrmse, 
                            double quanFactor, 
                            const std::string& device,
@@ -250,6 +236,7 @@ PCACompressor::PCACompressor(double nrmse,
     std::cout << "  Error bound: " << errorBound_ << std::endl;
 }
 
+
 PCACompressor::~PCACompressor() {
     cleanupGPUMemory();
 }
@@ -259,42 +246,58 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     
     auto inputShape = originalData.sizes();
     
-    // Move data to target device
-    torch::Tensor originalDataDevice = originalData.to(device_, /*non_blocking=*/true);
-    torch::Tensor reconsDataDevice = reconsData.to(device_, /*non_blocking=*/true);
+    torch::Tensor originalDataDevice = originalData.to(device_, true);
+    torch::Tensor reconsDataDevice = reconsData.to(device_, true);
     
-    // Handle different input shapes
+   
     if (inputShape.size() == 2) {
-        // Already in vector format
+  
         assert(originalDataDevice.size(1) == vectorSize_);
     } else {
-        // Convert blocks to vectors
+ 
         originalDataDevice = block2Vector(originalDataDevice, patchSize_);
         reconsDataDevice = block2Vector(reconsDataDevice, patchSize_);
     }
     
-    // Calculate residual
+
     torch::Tensor residualPca = originalDataDevice - reconsDataDevice;
-    torch::Tensor norms = torch::linalg_norm(residualPca, /*dim=*/1);
+    
+
+    torch::Tensor norms = torch::linalg_norm(residualPca, c10::nullopt, {1});
     torch::Tensor processMask = norms > errorBound_;
     
-    // Early exit if nothing to process
+
     if (torch::sum(processMask).item<int64_t>() <= 0) {
         MetaData metaData;
         metaData.dataBytes = 0;
         return {metaData, nullptr, 0};
     }
     
-    // Extract residuals that need processing
+ 
     residualPca = residualPca.index({processMask});
     
-    // Perform PCA
-    PCA pca(-1, device_.str()); // -1 means use all components
+
+    PCA pca(-1, device_.str());
     pca.fit(residualPca);
     torch::Tensor pcaBasis = pca.components();
+    std::cout << "PCA basis shape: " << pcaBasis.sizes() << std::endl;
+    
+
+    if (pcaBasis.size(0) == 0 || pcaBasis.size(1) == 0) {
+        std::cout << "PCA failed - empty basis" << std::endl;
+        MetaData metaData;
+        metaData.dataBytes = 0;
+        metaData.pcaBasis = torch::empty({0, 0});
+        metaData.uniqueVals = torch::empty({0});
+        metaData.quanBin = quanBin_;
+        metaData.nVec = originalDataDevice.size(0);
+        metaData.prefixLength = 0;
+        return {metaData, nullptr, 0};
+    }
+    
     torch::Tensor allCoeff = torch::matmul(residualPca, pcaBasis.transpose(0, 1));
     
-    // Check reconstruction error and switch to double precision if needed
+  
     torch::Tensor reconstructedResidual = torch::matmul(allCoeff, pcaBasis);
     torch::Tensor reconError = torch::abs(reconstructedResidual - residualPca);
     double reconErrorMax = reconError.max().item<double>();
@@ -309,55 +312,51 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
         allCoeff = torch::matmul(residualPca, pcaBasis.transpose(0, 1));
     }
     
-    // Clean up intermediate tensors
+ 
     originalDataDevice = torch::Tensor();
     reconsDataDevice = torch::Tensor();
     residualPca = torch::Tensor();
     cleanupGPUMemory();
     
-    // Calculate coefficient powers and sort
+
     torch::Tensor allCoeffPower = allCoeff.pow(2);
-    torch::Tensor sortIndex = torch::argsort(allCoeffPower, /*dim=*/1, /*descending=*/true);
+    torch::Tensor sortIndex = torch::argsort(allCoeffPower, 1, true);
     
     torch::Tensor allCoeffSorted = torch::gather(allCoeff, 1, sortIndex);
     torch::Tensor quanCoeffSorted = torch::round(allCoeffSorted / quanBin_) * quanBin_;
     torch::Tensor resCoeffSorted = allCoeffSorted - quanCoeffSorted;
     
-    // Clean up
+
     allCoeffSorted = torch::Tensor();
     cleanupGPUMemory();
     
-    // Calculate step errors
+
     torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower, 1, sortIndex) - resCoeffSorted.pow(2);
     torch::Tensor stepErrors = torch::ones_like(allCoeffPowerDesc);
-    torch::Tensor remainErrors = torch::sum(allCoeffPower, /*dim=*/1);
+    torch::Tensor remainErrors = torch::sum(allCoeffPower, 1);
     
     for (int64_t i = 0; i < stepErrors.size(1); ++i) {
         remainErrors = remainErrors - allCoeffPowerDesc.select(1, i);
         stepErrors.select(1, i) = remainErrors;
     }
     
-    // Clean up
     allCoeffPowerDesc = torch::Tensor();
     remainErrors = torch::Tensor();
     cleanupGPUMemory();
     
-    // Create mask for significant coefficients
     torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
     stepErrors = torch::Tensor();
     cleanupGPUMemory();
     
-    // Find first false index and set it to true
-    torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt), /*dim=*/1);
+ 
+    torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt), 1);
     auto batchIndices = torch::arange(mask.size(0), torch::TensorOptions().device(device_));
     mask.index_put_({batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1)}, true);
     
-    // Apply mask to quantized coefficients
     torch::Tensor selectedCoeffQ = quanCoeffSorted * mask;
     quanCoeffSorted = torch::Tensor();
     cleanupGPUMemory();
     
-    // Unsort the selected coefficients
     torch::Tensor selectedCoeffUnsortQ = torch::zeros_like(selectedCoeffQ);
     auto idx = torch::arange(selectedCoeffQ.size(0), torch::TensorOptions().device(device_)).unsqueeze(1);
     selectedCoeffUnsortQ.scatter_(1, sortIndex, selectedCoeffQ);
@@ -366,7 +365,6 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     sortIndex = torch::Tensor();
     cleanupGPUMemory();
     
-    // Create final mask and extract coefficients
     mask = selectedCoeffUnsortQ != 0;
     
     torch::Tensor coeffIntFlatten = torch::round(
@@ -380,7 +378,7 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     allCoeff = torch::Tensor();
     cleanupGPUMemory();
     
-    // Create prefix mask
+    
     auto prefixResult = indexMaskPrefix(mask);
     torch::Tensor prefixMaskFlatten = prefixResult.first;
     torch::Tensor maskLength = prefixResult.second;
@@ -388,7 +386,7 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     mask = torch::Tensor();
     cleanupGPUMemory();
     
-    // Prepare metadata and main data
+   
     MetaData metaData;
     metaData.pcaBasis = pcaBasis;
     metaData.uniqueVals = uniqueVals;
@@ -402,7 +400,6 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     mainData.maskLength = maskLength;
     mainData.coeffInt = coeffIntFlatten;
     
-    // Compress the data
     auto compressResult = compressLossless(metaData, mainData);
     metaData.dataBytes = compressResult.second;
     
@@ -415,7 +412,6 @@ std::pair<std::unique_ptr<CompressedData>, int64_t> PCACompressor::compressLossl
     
     std::vector<uint8_t> allData;
     
-    // Serialize all tensors and combine
     auto pcaBasisBytes = serializeTensor(metaData.pcaBasis);
     auto uniqueValsBytes = serializeTensor(metaData.uniqueVals);
     auto processMaskBytes = BitUtils::bitsToBytes(mainData.processMask.to(torch::kUInt8).cpu());
@@ -423,16 +419,12 @@ std::pair<std::unique_ptr<CompressedData>, int64_t> PCACompressor::compressLossl
     auto maskLengthBytes = serializeTensor(mainData.maskLength);
     auto coeffIntBytes = serializeTensor(mainData.coeffInt);
     
-    // Combine all bytes (in a real implementation, you might want to add headers/sizes)
     allData.insert(allData.end(), pcaBasisBytes.begin(), pcaBasisBytes.end());
     allData.insert(allData.end(), uniqueValsBytes.begin(), uniqueValsBytes.end());
     allData.insert(allData.end(), processMaskBytes.begin(), processMaskBytes.end());
     allData.insert(allData.end(), prefixMaskBytes.begin(), prefixMaskBytes.end());
     allData.insert(allData.end(), maskLengthBytes.begin(), maskLengthBytes.end());
     allData.insert(allData.end(), coeffIntBytes.begin(), coeffIntBytes.end());
-    
-    // TODO: Apply actual compression algorithm (Zstd, etc.)
-    // For now, just return the raw bytes
     
     auto compressedData = std::make_unique<CompressedData>();
     compressedData->data = std::move(allData);
@@ -461,4 +453,3 @@ void PCACompressor::cleanupGPUMemory() {
        c10::cuda::CUDACachingAllocator::emptyCache();
     }
 }
-
