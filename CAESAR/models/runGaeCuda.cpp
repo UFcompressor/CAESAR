@@ -278,8 +278,20 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData,
     
     if (torch::sum(processMask).item<int64_t>() <= 0) {
         MetaData metaData;
-        metaData.dataBytes = 0;
-        return {metaData, nullptr, 0};
+    metaData.pcaBasis = torch::Tensor();    
+    metaData.uniqueVals = torch::Tensor(); 
+    metaData.quanBin = quanBin_;
+    metaData.nVec = 0;
+    metaData.prefixLength = 0;
+    metaData.dataBytes = 0;
+
+    CompressionResult result;
+    result.metaData = metaData;
+    result.compressedData = nullptr;
+    result.dataBytes = 0;
+
+    return result;
+
     }
     
     residualPca = residualPca.index({processMask});

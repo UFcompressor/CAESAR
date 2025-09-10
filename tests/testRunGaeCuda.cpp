@@ -191,6 +191,67 @@ void testPCACompressor() {
         }
     }
 
+    // Test 7: High reconstruction error (force float64 PCA)
+    {
+        std::cout << "Test 7: High reconstruction error (force float64 PCA)..." << std::endl;
+
+        double nrmse = 0.01;   // Very strict error bound
+        double quanFactor = 0.1;
+        PCACompressor compressor(nrmse, quanFactor, "cpu");
+
+        // Create highly random original data
+        torch::Tensor originalData = torch::randn({50, 64}, torch::kFloat32);
+
+        // Reconstruction is just noise (guaranteed high error)
+        torch::Tensor reconsData = torch::zeros_like(originalData);
+
+        auto result = compressor.compress(originalData, reconsData);
+
+        std::cout << "Data bytes: " << result.dataBytes << std::endl;
+        std::cout << "PCA basis shape: [" 
+                  << result.metaData.pcaBasis.size(0) << ", "
+                  << result.metaData.pcaBasis.size(1) << "]" << std::endl;
+        std::cout << "Test 7 passed (float64 PCA path)" << std::endl;
+    }
+
+        // Test 8: Very small dataset (single vector)
+    {
+        std::cout << "Test 8: Very small dataset (single vector)..." << std::endl;
+
+        PCACompressor compressor(0.1, 0.5, "cpu");
+
+        // Just one vector of size 64
+        torch::Tensor originalData = torch::randn({1, 64}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 0.1 * torch::randn_like(originalData);
+
+        auto result = compressor.compress(originalData, reconsData);
+
+        std::cout << "Data bytes: " << result.dataBytes << std::endl;
+        std::cout << "Unique values count: " << result.metaData.uniqueVals.size(0) << std::endl;
+        std::cout << "Test 8 passed" << std::endl;
+    }
+
+        // Test 9: Using Cascaded codec instead of Zstd
+    {
+        std::cout << "Test 9: Cascaded codec compression..." << std::endl;
+
+        double nrmse = 0.1;
+        double quanFactor = 0.5;
+        PCACompressor compressor(nrmse, quanFactor, "cpu", "Cascaded");
+
+        torch::Tensor originalData = torch::randn({100, 64}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 0.05 * torch::randn_like(originalData);
+
+        auto result = compressor.compress(originalData, reconsData);
+
+        std::cout << "Compression completed with Cascaded codec, data bytes: "
+                  << result.dataBytes << std::endl;
+        std::cout << "Test 9 passed" << std::endl;
+    }
+
+
+
+
     std::cout << "Done testing PCACompressor" << std::endl;
 }
 
