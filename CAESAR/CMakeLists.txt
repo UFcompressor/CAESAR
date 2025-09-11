@@ -1,4 +1,3 @@
-# Build the main caesar library
 add_library(caesar_lib
     compressor.cpp
     normalize.cpp

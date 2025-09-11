@@ -1,4 +1,3 @@
-# Test: Caesar Reader
 add_executable(test_caesar
     testCaesarReader.cpp
 )
@@ -50,12 +49,10 @@ target_link_libraries(test_bcrn
 add_executable(test_utils
     testUtils.cpp
 )
-
-# LINK the utils library AND make sure CAESAR/models is added before tests
 target_link_libraries(test_utils
     PRIVATE
         caesar_lib
-        utils        # link the utils library
+        utils
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
@@ -63,19 +60,18 @@ target_link_libraries(test_utils
 add_executable(test_utils2
     testUtils2.cpp
 )
-
 target_link_libraries(test_utils2
     PRIVATE
         caesar_lib
-        utils        # link the utils library
+        utils
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
+# Test: runGaeCuda
 add_executable(test_runGaeCuda
     testRunGaeCuda.cpp
 )
-
 target_link_libraries(test_runGaeCuda
     PRIVATE
         caesar_lib
@@ -84,6 +80,20 @@ target_link_libraries(test_runGaeCuda
         stdc++fs
 )
 
+# Test: networkComponents
+add_executable(test_networkComponents
+    testNetworkComponents.cpp
+)
+target_link_libraries(test_networkComponents
+    PRIVATE
+        caesar_lib
+        networkComponents
+        "${TORCH_LIBRARIES}"
+        stdc++fs
+)
+
+
+# Collect all targets
 set(TEST_TARGETS
     test_caesar
     test_bsconvu
@@ -92,8 +102,8 @@ set(TEST_TARGETS
     test_utils
     test_utils2
     test_runGaeCuda
+    test_networkComponents
 )
-
 
 if(MSVC)
   file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")

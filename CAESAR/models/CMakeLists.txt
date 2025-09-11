@@ -1,7 +1,8 @@
-# Add subdirectory for BCRN
+
 add_subdirectory(BCRN)
 
-# Add compressModules3dMidSR library
+
+# compressModules3dMidSR library
 add_library(compressModules3dMidSR
     compressModules3dMidSR.cpp
     compressModules3dMidSR.h
@@ -16,7 +17,8 @@ target_link_libraries(compressModules3dMidSR
     PUBLIC caesar_lib
 )
 
-# Add utils library
+
+# utils library
 add_library(utils
     utils.cpp
     utils.h
@@ -31,13 +33,38 @@ target_link_libraries(utils
     PUBLIC caesar_lib
 )
 
-# Set prefix path to your local nvCOMP install
-set(CMAKE_PREFIX_PATH "$ENV{HOME}/local/nvcomp" ${CMAKE_PREFIX_PATH})
 
-# Find nvCOMP
-find_package(nvcomp CONFIG REQUIRED)
+# networkComponents library
+add_library(networkComponents
+    networkComponents.cpp
+    networkComponents.h
+)
+
+target_include_directories(networkComponents
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(networkComponents
+    PUBLIC "${TORCH_LIBRARIES}"
+    PUBLIC caesar_lib
+)
 
 
+# Optional: nvCOMP
+if(DEFINED ENV{NVCOMP_DIR})
+    list(APPEND CMAKE_PREFIX_PATH $ENV{NVCOMP_DIR})
+endif()
+
+find_package(nvcomp CONFIG QUIET)
+
+if(nvcomp_FOUND)
+    message(STATUS "nvCOMP found, enabling GPU compression support")
+else()
+    message(STATUS "nvCOMP not found, building without GPU compression support")
+endif()
+
+
+# runGaeCuda library
 add_library(runGaeCuda
     runGaeCuda.cpp
     runGaeCuda.h
@@ -50,6 +77,10 @@ target_include_directories(runGaeCuda
 target_link_libraries(runGaeCuda
     PUBLIC "${TORCH_LIBRARIES}"
     PUBLIC caesar_lib
-    PUBLIC nvcomp::nvcomp    
 )
+
+# Link nvCOMP only if available
+if(nvcomp_FOUND)
+    target_link_libraries(runGaeCuda PUBLIC nvcomp::nvcomp)
+endif()
 
