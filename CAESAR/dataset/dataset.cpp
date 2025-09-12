@@ -16,13 +16,11 @@ torch::Tensor centerCrop(const torch::Tensor& x, std::pair<int64_t,int64_t> tSha
     int64_t end_w = start_w + target_w;
 
     if (dim == 4) {
-        // [N, C, H, W]
         return x.index({torch::indexing::Slice(),
                         torch::indexing::Slice(),
                         torch::indexing::Slice(start_h, end_h),
                         torch::indexing::Slice(start_w, end_w)});
     } else if (dim == 5) {
-        // [N, C, D, H, W]
         return x.index({torch::indexing::Slice(),
                         torch::indexing::Slice(),
                         torch::indexing::Slice(),
