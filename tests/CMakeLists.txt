@@ -1,97 +1,73 @@
-add_executable(test_caesar
-    testCaesarReader.cpp
-)
+# Test: Caesar Reader
+add_executable(test_caesar testCaesarReader.cpp)
 target_link_libraries(test_caesar
     PRIVATE
         caesar_lib
-        compressModules3dMidSR
-        BCRN
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: BSConvU
-add_executable(test_bsconvu
-    testBsconvu.cpp
-)
+add_executable(test_bsconvu testBsconvu.cpp)
 target_link_libraries(test_bsconvu
     PRIVATE
         caesar_lib
-        BCRN
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: Blocks
-add_executable(test_blocks
-    testBlocks.cpp
-)
+add_executable(test_blocks testBlocks.cpp)
 target_link_libraries(test_blocks
     PRIVATE
         caesar_lib
-        BCRN
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: BCRN Model
-add_executable(test_bcrn
-    testBcrn.cpp
-)
+add_executable(test_bcrn testBcrn.cpp)
 target_link_libraries(test_bcrn
     PRIVATE
-        BCRN
+        caesar_lib
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: Utils
-add_executable(test_utils
-    testUtils.cpp
-)
+add_executable(test_utils testUtils.cpp)
 target_link_libraries(test_utils
     PRIVATE
         caesar_lib
-        utils
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
-add_executable(test_utils2
-    testUtils2.cpp
-)
+add_executable(test_utils2 testUtils2.cpp)
 target_link_libraries(test_utils2
     PRIVATE
         caesar_lib
-        utils
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: runGaeCuda
-add_executable(test_runGaeCuda
-    testRunGaeCuda.cpp
-)
+add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda
     PRIVATE
         caesar_lib
-        runGaeCuda
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
 
 # Test: networkComponents
-add_executable(test_networkComponents
-    testNetworkComponents.cpp
-)
+add_executable(test_networkComponents testNetworkComponents.cpp)
 target_link_libraries(test_networkComponents
     PRIVATE
         caesar_lib
-        networkComponents
         "${TORCH_LIBRARIES}"
         stdc++fs
 )
-
 
 # Collect all targets
 set(TEST_TARGETS

@@ -11,7 +11,10 @@ The goal is to provide a C++ implementation of the CAESAR foundation model.
 
 mkdir build && cd build
 
-cmake -DCMAKE_PREFIX_PATH=/path/to/libtorch ..
+cmake .. \
+  -DCMAKE_PREFIX_PATH="/home/eklasky/Software/libtorch;/home/eklasky/local/nvcomp" \
+  -DCMAKE_CXX_FLAGS="-I/home/eklasky/local/nvcomp/include"
+
 
 make
 
@@ -43,12 +46,6 @@ Set environment variables:
 
 export CMAKE_PREFIX_PATH=$HOME/local/nvcomp:$CMAKE_PREFIX_PATH
 export LD_LIBRARY_PATH=$HOME/local/nvcomp/lib:$LD_LIBRARY_PATH
-
-3. JSON Library
-
-nlohmann/json
-
-Already included in this repository under external/nlohmann.
 
 4. CUDA Toolkit
 
