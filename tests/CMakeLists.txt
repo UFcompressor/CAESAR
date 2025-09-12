@@ -69,6 +69,14 @@ target_link_libraries(test_networkComponents
         stdc++fs
 )
 
+add_executable(test_dataset testDataSet.cpp)
+target_link_libraries(test_dataset
+    PRIVATE
+        caesar_lib
+        "${TORCH_LIBRARIES}"
+        stdc++fs
+)
+
 # Collect all targets
 set(TEST_TARGETS
     test_caesar
@@ -79,6 +87,7 @@ set(TEST_TARGETS
     test_utils2
     test_runGaeCuda
     test_networkComponents
+    test_dataset
 )
 
 if(MSVC)
