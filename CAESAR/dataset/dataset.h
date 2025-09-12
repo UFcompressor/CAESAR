@@ -9,8 +9,14 @@
 #include <string>  
 #include <memory> 
 #include <iostream>     
-
+#include <cmath>
+#include <tuple>
 
 torch::Tensor centerCrop(const torch::Tensor& x, std::pair<int64_t, int64_t> tShape);
 torch::Tensor downSamplingData(const torch::Tensor& data, const std::vector<double>& zoomFactors);
 
+torch::Tensor deblockHW(const torch::Tensor& x, int64_t nH, int64_t nW, 
+        const std::vector<int64_t>& padding);
+std::tuple<torch::Tensor, std::tuple<int64_t, int64_t, std::vector<int64_t>>>
+blockHW(const torch::Tensor& data,
+        std::pair<int64_t, int64_t> block_size = {256, 256});
