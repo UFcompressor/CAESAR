@@ -20,8 +20,6 @@ download_from_gdrive() {
 download_from_gdrive "1sVmxgdg0EdyRK2PhihVamToR2gdRu1nz" "caesar_v.pt"
 
 
-download_from_gdrive "16J4Uv0RPGPAZLHqm2MlpX9SS1dr-gJW2" "caesar_d.pt"
-
 echo " All models downloaded into ${MODEL_DIR}/"
 
 echo "All done rember to convert the files to a readable format for libtorch with extract_tensors.py /"

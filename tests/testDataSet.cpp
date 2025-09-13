@@ -118,7 +118,10 @@ std::cout << "Done with 5D tests" << std::endl;
     std::cout << "Done testing blockHW" << std::endl;
 
     roundTrip();
+    
+
     std::cout << "All dataset tests complete" << std::endl;
+
     return 0;
 }
 

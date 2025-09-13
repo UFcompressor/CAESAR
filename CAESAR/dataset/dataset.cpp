@@ -160,3 +160,49 @@ blockHW(const torch::Tensor& data,
     return {blocked, {nH, nW, padding}};
 }
 
+
+std::pair<std::vector<std::pair<int, float>>, std::vector<int>>
+data_filtering(const torch::Tensor& data, int nFrame) {
+    auto sizes = data.sizes();
+    int V = sizes[0];
+    int S = sizes[1];
+    int T = sizes[2];
+    int H = sizes[3];
+    int W = sizes[4];
+    if (T % nFrame != 0){
+        throw std::runtime_error("T must be divisible by nFrame");
+    }
+    
+    int samples = T / nFrame;
+    std::vector<std::pair<int, float>> filteredBlocks;
+    std::vector<int> filteredLabels;
+
+   for (int v = 0; v < V; v++) {
+        for (int s = 0; s < S; s++) {
+            for (int blk_idx = 0; blk_idx < samples; blk_idx++) {
+                int start = blk_idx * nFrame;
+                int end   = (blk_idx + 1) * nFrame;
+
+                torch::Tensor block = data.index({v, s, torch::indexing::Slice(start, end)});
+
+                torch::Tensor flat = block.reshape({-1});
+                float first_val = flat[0].item<float>();
+
+                if (torch::allclose(flat, torch::full_like(flat, first_val))) {
+                    int label = v * (S * samples) + s * samples + blk_idx;
+                    filteredBlocks.push_back({label, first_val});
+                    filteredLabels.push_back(label);
+                }
+            }
+        }
+    }
+
+   return {filteredBlocks, filteredLabels};
+}
+
+
+
+
+
+
+
