@@ -1,6 +1,214 @@
 #include "../CAESAR/dataset/dataset.h"
 #include <iostream>
 
+
+#include "../CAESAR/dataset/dataset.h"
+#include <iostream>
+
+void test_constructor() {
+    std::cout << "=== Testing BaseDataset::BaseDataset() ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value - we need this for constructor
+    args["n_frame"] = torch::tensor(16);
+    args["train_size"] = torch::tensor(128);
+    args["inst_norm"] = torch::tensor(true);
+    args["train"] = torch::tensor(true);
+    args["n_overlap"] = torch::tensor(4);
+
+    try {
+        BaseDataset dataset(args);
+        std::cout << " Constructor test passed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " Constructor test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_apply_inst_norm() {
+    std::cout << "=== Testing BaseDataset::apply_inst_norm() ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+
+    try {
+        BaseDataset dataset(args);
+
+        // Create test data with known statistics
+        torch::Tensor test_data = torch::randn({3, 64, 64}) * 10 + 5;
+
+        auto normalized = dataset.apply_inst_norm(test_data);
+
+        std::cout << "Original - Mean: " << torch::mean(test_data).item<float>()
+                  << ", Min: " << test_data.min().item<float>()
+                  << ", Max: " << test_data.max().item<float>() << std::endl;
+
+        std::cout << "Normalized - Mean: " << torch::mean(normalized).item<float>()
+                  << ", Min: " << normalized.min().item<float>()
+                  << ", Max: " << normalized.max().item<float>() << std::endl;
+
+        std::cout << " apply_inst_norm test completed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " apply_inst_norm test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_apply_padding_or_crop() {
+    std::cout << "=== Testing BaseDataset::apply_padding_or_crop() ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+    args["train_size"] = torch::tensor(128);
+
+    try {
+        BaseDataset dataset(args);
+
+        // Test padding (input smaller than train_size)
+        torch::Tensor small_data = torch::randn({3, 64, 64});
+        auto padded = dataset.apply_padding_or_crop(small_data);
+
+        std::cout << "Padding test - Original: " << small_data.sizes()
+                  << " -> Padded: " << padded.sizes() << std::endl;
+
+        assert(padded.size(-1) == 128 && padded.size(-2) == 128);
+
+        // Test cropping (input larger than train_size)
+        torch::Tensor large_data = torch::randn({3, 256, 256});
+        auto cropped = dataset.apply_padding_or_crop(large_data);
+
+        std::cout << "Cropping test - Original: " << large_data.sizes()
+                  << " -> Cropped: " << cropped.sizes() << std::endl;
+
+        assert(cropped.size(-1) == 128 && cropped.size(-2) == 128);
+
+        std::cout << " apply_padding_or_crop test passed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " apply_padding_or_crop test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_apply_augments_downsample() {
+    std::cout << "=== Testing BaseDataset::apply_augments() with downsample ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+    args["augment_downsample"] = torch::tensor(2); // Fixed: use augment_downsample key
+
+    try {
+        BaseDataset dataset(args);
+
+        // Create test data [C, H, W] - the apply_downsampling operates on last dimension
+        torch::Tensor test_data = torch::randn({3, 64, 32});
+
+        auto augmented = dataset.apply_augments(test_data);
+
+        std::cout << "Downsample test - Original last dim: " << test_data.size(-1)
+                  << " -> Augmented last dim: " << augmented.size(-1) << std::endl;
+
+        // Should be roughly half the size (32 -> 16)
+        assert(augmented.size(-1) == 16);
+
+        std::cout << " apply_augments downsample test passed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " apply_augments downsample test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_apply_augments_randsample() {
+    std::cout << "=== Testing BaseDataset::apply_augments() with randsample ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+    args["augment_randsample"] = torch::tensor(3); // Fixed: use augment_randsample key
+
+    try {
+        BaseDataset dataset(args);
+
+        torch::Tensor test_data = torch::randn({3, 64, 30});
+
+        auto augmented = dataset.apply_augments(test_data);
+
+        std::cout << "Randsample test - Original last dim: " << test_data.size(-1)
+                  << " -> Augmented last dim: " << augmented.size(-1) << std::endl;
+
+        // Should be smaller due to random downsampling (step 1-3)
+        assert(augmented.size(-1) <= test_data.size(-1));
+
+        std::cout << " apply_augments randsample test passed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " apply_augments randsample test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_apply_downsampling_directly() {
+    std::cout << "=== Testing BaseDataset::apply_downsampling() directly ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+
+    try {
+        BaseDataset dataset(args);
+
+        torch::Tensor test_data = torch::randn({3, 64, 20});
+
+        // Test direct downsampling with step=2
+        // Note: apply_downsampling is private, so we test through apply_augments
+        args["augment_downsample"] = torch::tensor(2); // Fixed: use correct key
+        BaseDataset ds_dataset(args);
+
+        auto downsampled = ds_dataset.apply_augments(test_data);
+
+        std::cout << "Direct downsample test - Original: " << test_data.size(-1)
+                  << " -> Downsampled: " << downsampled.size(-1) << std::endl;
+
+        assert(downsampled.size(-1) == 10); // 20 -> 10 with step=2
+
+        std::cout << " apply_downsampling direct test passed" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << " apply_downsampling direct test failed: " << e.what() << std::endl;
+    }
+}
+
+void test_normalization_with_params() {
+    std::cout << "=== Testing BaseDataset::apply_inst_norm_with_params() ===" << std::endl;
+
+    std::unordered_map<std::string, torch::Tensor> args;
+    args["data_path"] = torch::tensor(0); // Dummy value
+    args["n_frame"] = torch::tensor(16);
+
+    try {
+        BaseDataset dataset(args);
+
+        torch::Tensor test_data = torch::randn({3, 64, 64}) * 5 + 10;
+
+        auto [normalized, offset, scale] = dataset.apply_inst_norm_with_params(test_data);
+
+        std::cout << "Normalization params - Offset: " << offset.item<float>()
+                  << ", Scale: " << scale.item<float>() << std::endl;
+        std::cout << "Normalized mean: " << torch::mean(normalized).item<float>() << std::endl;
+
+        // Verify reconstruction
+        auto reconstructed = normalized * scale + offset;
+        auto diff = torch::mean(torch::abs(reconstructed - test_data));
+
+        std::cout << "Reconstruction error: " << diff.item<float>() << std::endl;
+
+        if (diff.item<float>() < 1e-5) {
+            std::cout << " apply_inst_norm_with_params test passed" << std::endl;
+        } else {
+            std::cout << " apply_inst_norm_with_params test failed - reconstruction error too large" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cout << " apply_inst_norm_with_params test failed: " << e.what() << std::endl;
+    }
+}
+
+
+
 void roundTrip(){
  std::cout << "Starting to test dataset" << std::endl;
 
@@ -48,6 +256,20 @@ void roundTrip(){
     std::cout << "Recovered shape (after deblock): " << rec_sizes << std::endl;
 
     std::cout << "Done round-trip test" << std::endl;
+
+}
+
+void filtered_labels(){
+    int visible_length = 6;
+    std::cout<<"Starting to test build`ReverseIdMap"<<std::endl;
+    std::vector<int> filtered_labels = {1, 3, 5};
+
+    auto reverse_map = buildReverseIdMap(visible_length, filtered_labels);
+
+    for (const auto& [key, val] : reverse_map) {
+        std::cout << key << " -> " << val << "\n";
+    }
+    std::cout<<"Done testing buildReverseIdMap"<<std::endl;
 
 }
 
@@ -119,6 +341,34 @@ std::cout << "Done with 5D tests" << std::endl;
 
     roundTrip();
     
+
+ std::cout << "Running BaseDataset tests..." << std::endl;
+    std::cout << "============================================" << std::endl;
+    
+    test_constructor();
+    std::cout << std::endl;
+    
+    test_apply_inst_norm();
+    std::cout << std::endl;
+    
+    test_apply_padding_or_crop();
+    std::cout << std::endl;
+    
+    test_apply_augments_downsample();
+    std::cout << std::endl;
+    
+    test_apply_augments_randsample();
+    std::cout << std::endl;
+    
+    test_apply_downsampling_directly();
+    std::cout << std::endl;
+    
+    test_normalization_with_params();
+    std::cout << std::endl;
+    
+    std::cout << "============================================" << std::endl;
+    std::cout << "All BaseDataset tests completed!" << std::endl;
+
 
     std::cout << "All dataset tests complete" << std::endl;
 
