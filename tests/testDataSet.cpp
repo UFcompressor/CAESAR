@@ -1,9 +1,53 @@
 #include "../CAESAR/dataset/dataset.h"
 #include <iostream>
 
-
-#include "../CAESAR/dataset/dataset.h"
-#include <iostream>
+void test_scientific_dataset() {
+    try {
+        // Create test arguments
+        std::unordered_map<std::string, torch::Tensor> args;
+        
+        // Required arguments
+        args["data_path"] = torch::zeros({1}); // Dummy, not used in memory version
+        args["n_frame"] = torch::tensor(16);
+        args["train"] = torch::tensor(true);
+        
+        // Optional arguments
+        args["variable_idx"] = torch::tensor(0);
+        args["train_size"] = torch::tensor(32);
+        args["inst_norm"] = torch::tensor(true);
+        args["norm_type"] = torch::zeros({1}); // Will use default "mean_range"
+        args["n_overlap"] = torch::tensor(0);
+        
+        std::cout << "Creating ScientificDataset...\n";
+        ScientificDataset dataset(args);
+        
+        std::cout << "Dataset size: " << dataset.size() << "\n";
+        
+        // Test getting an item
+        std::cout << "Testing get_item(0)...\n";
+        auto data_item = dataset.get_item(0);
+        
+        std::cout << "Input shape: " << data_item["input"].sizes() << "\n";
+        std::cout << "Offset shape: " << data_item["offset"].sizes() << "\n";
+        std::cout << "Scale shape: " << data_item["scale"].sizes() << "\n";
+        std::cout << "Index: " << data_item["index"] << "\n";
+        
+        // Test original data access
+        std::cout << "Testing original_data()...\n";
+        auto orig_data = dataset.original_data();
+        std::cout << "Original data shape: " << orig_data.sizes() << "\n";
+        
+        // Test input data access
+        std::cout << "Testing input_data()...\n";
+        auto input_data = dataset.input_data();
+        std::cout << "Input data shape: " << input_data.sizes() << "\n";
+        
+        std::cout << "All tests passed!\n";
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Test failed with error: " << e.what() << "\n";
+    }
+}
 
 void test_constructor() {
     std::cout << "=== Testing BaseDataset::BaseDataset() ===" << std::endl;
@@ -370,6 +414,7 @@ std::cout << "Done with 5D tests" << std::endl;
     std::cout << "All BaseDataset tests completed!" << std::endl;
 
 
+    test_scientific_dataset();
     std::cout << "All dataset tests complete" << std::endl;
 
     return 0;
