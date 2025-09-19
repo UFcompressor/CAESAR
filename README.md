@@ -57,7 +57,10 @@ Ensure nvcc is in your PATH.
 
 For compression support. Can be installed locally if needed.
 
+link to install  libtorch: https://pytorch.org/
+link to install https://developer.nvidia.com/cuda-12-9-0-download-archive?target_os=Linux
 
+note this will only work on linux and windows
 
 
 
