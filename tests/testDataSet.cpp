@@ -1,422 +1,275 @@
 #include "../CAESAR/dataset/dataset.h"
 #include <iostream>
+#include <filesystem>
+#include <torch/torch.h>
+#include <unordered_map>
+#include <string>
+#include <optional>
 
-void test_scientific_dataset() {
-    try {
-        // Create test arguments
-        std::unordered_map<std::string, torch::Tensor> args;
-        
-        // Required arguments
-        args["data_path"] = torch::zeros({1}); // Dummy, not used in memory version
-        args["n_frame"] = torch::tensor(16);
-        args["train"] = torch::tensor(true);
-        
-        // Optional arguments
-        args["variable_idx"] = torch::tensor(0);
-        args["train_size"] = torch::tensor(32);
-        args["inst_norm"] = torch::tensor(true);
-        args["norm_type"] = torch::zeros({1}); // Will use default "mean_range"
-        args["n_overlap"] = torch::tensor(0);
-        
-        std::cout << "Creating ScientificDataset...\n";
-        ScientificDataset dataset(args);
-        
-        std::cout << "Dataset size: " << dataset.size() << "\n";
-        
-        // Test getting an item
-        std::cout << "Testing get_item(0)...\n";
-        auto data_item = dataset.get_item(0);
-        
-        std::cout << "Input shape: " << data_item["input"].sizes() << "\n";
-        std::cout << "Offset shape: " << data_item["offset"].sizes() << "\n";
-        std::cout << "Scale shape: " << data_item["scale"].sizes() << "\n";
-        std::cout << "Index: " << data_item["index"] << "\n";
-        
-        // Test original data access
-        std::cout << "Testing original_data()...\n";
-        auto orig_data = dataset.original_data();
-        std::cout << "Original data shape: " << orig_data.sizes() << "\n";
-        
-        // Test input data access
-        std::cout << "Testing input_data()...\n";
-        auto input_data = dataset.input_data();
-        std::cout << "Input data shape: " << input_data.sizes() << "\n";
-        
-        std::cout << "All tests passed!\n";
-        
-    } catch (const std::exception& e) {
-        std::cerr << "Test failed with error: " << e.what() << "\n";
-    }
-}
+class TestScientificDataset {
+public:
+    // Test constructor
+    TestScientificDataset() = default;
 
-void test_constructor() {
-    std::cout << "=== Testing BaseDataset::BaseDataset() ===" << std::endl;
+    // Method to create test data
+    torch::Tensor create_test_data() {
+        // Create a 5D tensor [Variables=2, Sections=3, Time=10, Height=64, Width=64]
+        torch::Tensor data = torch::randn({2, 3, 10, 64, 64}, torch::kFloat32);
 
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value - we need this for constructor
-    args["n_frame"] = torch::tensor(16);
-    args["train_size"] = torch::tensor(128);
-    args["inst_norm"] = torch::tensor(true);
-    args["train"] = torch::tensor(true);
-    args["n_overlap"] = torch::tensor(4);
-
-    try {
-        BaseDataset dataset(args);
-        std::cout << " Constructor test passed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " Constructor test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_apply_inst_norm() {
-    std::cout << "=== Testing BaseDataset::apply_inst_norm() ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-
-    try {
-        BaseDataset dataset(args);
-
-        // Create test data with known statistics
-        torch::Tensor test_data = torch::randn({3, 64, 64}) * 10 + 5;
-
-        auto normalized = dataset.apply_inst_norm(test_data);
-
-        std::cout << "Original - Mean: " << torch::mean(test_data).item<float>()
-                  << ", Min: " << test_data.min().item<float>()
-                  << ", Max: " << test_data.max().item<float>() << std::endl;
-
-        std::cout << "Normalized - Mean: " << torch::mean(normalized).item<float>()
-                  << ", Min: " << normalized.min().item<float>()
-                  << ", Max: " << normalized.max().item<float>() << std::endl;
-
-        std::cout << " apply_inst_norm test completed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " apply_inst_norm test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_apply_padding_or_crop() {
-    std::cout << "=== Testing BaseDataset::apply_padding_or_crop() ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-    args["train_size"] = torch::tensor(128);
-
-    try {
-        BaseDataset dataset(args);
-
-        // Test padding (input smaller than train_size)
-        torch::Tensor small_data = torch::randn({3, 64, 64});
-        auto padded = dataset.apply_padding_or_crop(small_data);
-
-        std::cout << "Padding test - Original: " << small_data.sizes()
-                  << " -> Padded: " << padded.sizes() << std::endl;
-
-        assert(padded.size(-1) == 128 && padded.size(-2) == 128);
-
-        // Test cropping (input larger than train_size)
-        torch::Tensor large_data = torch::randn({3, 256, 256});
-        auto cropped = dataset.apply_padding_or_crop(large_data);
-
-        std::cout << "Cropping test - Original: " << large_data.sizes()
-                  << " -> Cropped: " << cropped.sizes() << std::endl;
-
-        assert(cropped.size(-1) == 128 && cropped.size(-2) == 128);
-
-        std::cout << " apply_padding_or_crop test passed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " apply_padding_or_crop test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_apply_augments_downsample() {
-    std::cout << "=== Testing BaseDataset::apply_augments() with downsample ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-    args["augment_downsample"] = torch::tensor(2); // Fixed: use augment_downsample key
-
-    try {
-        BaseDataset dataset(args);
-
-        // Create test data [C, H, W] - the apply_downsampling operates on last dimension
-        torch::Tensor test_data = torch::randn({3, 64, 32});
-
-        auto augmented = dataset.apply_augments(test_data);
-
-        std::cout << "Downsample test - Original last dim: " << test_data.size(-1)
-                  << " -> Augmented last dim: " << augmented.size(-1) << std::endl;
-
-        // Should be roughly half the size (32 -> 16)
-        assert(augmented.size(-1) == 16);
-
-        std::cout << " apply_augments downsample test passed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " apply_augments downsample test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_apply_augments_randsample() {
-    std::cout << "=== Testing BaseDataset::apply_augments() with randsample ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-    args["augment_randsample"] = torch::tensor(3); // Fixed: use augment_randsample key
-
-    try {
-        BaseDataset dataset(args);
-
-        torch::Tensor test_data = torch::randn({3, 64, 30});
-
-        auto augmented = dataset.apply_augments(test_data);
-
-        std::cout << "Randsample test - Original last dim: " << test_data.size(-1)
-                  << " -> Augmented last dim: " << augmented.size(-1) << std::endl;
-
-        // Should be smaller due to random downsampling (step 1-3)
-        assert(augmented.size(-1) <= test_data.size(-1));
-
-        std::cout << " apply_augments randsample test passed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " apply_augments randsample test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_apply_downsampling_directly() {
-    std::cout << "=== Testing BaseDataset::apply_downsampling() directly ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-
-    try {
-        BaseDataset dataset(args);
-
-        torch::Tensor test_data = torch::randn({3, 64, 20});
-
-        // Test direct downsampling with step=2
-        // Note: apply_downsampling is private, so we test through apply_augments
-        args["augment_downsample"] = torch::tensor(2); // Fixed: use correct key
-        BaseDataset ds_dataset(args);
-
-        auto downsampled = ds_dataset.apply_augments(test_data);
-
-        std::cout << "Direct downsample test - Original: " << test_data.size(-1)
-                  << " -> Downsampled: " << downsampled.size(-1) << std::endl;
-
-        assert(downsampled.size(-1) == 10); // 20 -> 10 with step=2
-
-        std::cout << " apply_downsampling direct test passed" << std::endl;
-    } catch (const std::exception& e) {
-        std::cout << " apply_downsampling direct test failed: " << e.what() << std::endl;
-    }
-}
-
-void test_normalization_with_params() {
-    std::cout << "=== Testing BaseDataset::apply_inst_norm_with_params() ===" << std::endl;
-
-    std::unordered_map<std::string, torch::Tensor> args;
-    args["data_path"] = torch::tensor(0); // Dummy value
-    args["n_frame"] = torch::tensor(16);
-
-    try {
-        BaseDataset dataset(args);
-
-        torch::Tensor test_data = torch::randn({3, 64, 64}) * 5 + 10;
-
-        auto [normalized, offset, scale] = dataset.apply_inst_norm_with_params(test_data);
-
-        std::cout << "Normalization params - Offset: " << offset.item<float>()
-                  << ", Scale: " << scale.item<float>() << std::endl;
-        std::cout << "Normalized mean: " << torch::mean(normalized).item<float>() << std::endl;
-
-        // Verify reconstruction
-        auto reconstructed = normalized * scale + offset;
-        auto diff = torch::mean(torch::abs(reconstructed - test_data));
-
-        std::cout << "Reconstruction error: " << diff.item<float>() << std::endl;
-
-        if (diff.item<float>() < 1e-5) {
-            std::cout << " apply_inst_norm_with_params test passed" << std::endl;
-        } else {
-            std::cout << " apply_inst_norm_with_params test failed - reconstruction error too large" << std::endl;
+        // Add some specific patterns to make verification easier
+        for (int v = 0; v < 2; v++) {
+            for (int s = 0; s < 3; s++) {
+                // Set a unique value pattern for each variable-section combination
+                float base_value = v * 10.0f + s;
+                data.index({v, s}) = data.index({v, s}) + base_value;
+            }
         }
-    } catch (const std::exception& e) {
-        std::cout << " apply_inst_norm_with_params test failed: " << e.what() << std::endl;
+
+        return data;
     }
-}
 
+    // Write binary file method (simplified version from your code)
+    void write_binary_file(const torch::Tensor& tensor, const std::string& file_path) {
+        if (tensor.dim() != 5) {
+            throw std::runtime_error("Expected 5D tensor for binary file writing");
+        }
 
+        // Create directory if it doesn't exist
+        std::filesystem::path file_dir = std::filesystem::path(file_path).parent_path();
+        if (!file_dir.empty() && !std::filesystem::exists(file_dir)) {
+            std::filesystem::create_directories(file_dir);
+        }
 
-void roundTrip(){
- std::cout << "Starting to test dataset" << std::endl;
+        std::ofstream file(file_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot create binary file: " + file_path);
+        }
 
-    // ==== 5D Input Tensor ====
-    auto x5d = torch::rand({1, 1, 8, 32, 32});
-    std::cout << "5D Center crop shape: " << centerCrop(x5d, {32, 32}).sizes() << std::endl;
-    std::cout << "5D Downsampled shape: " << downSamplingData(x5d, {1.0, 1.0, 0.5, 1.0, 1.0}).sizes() << std::endl;
-    std::cout << "Done with 5D tests" << std::endl;
+        // Write header: shape (5 int64_t values)
+        auto sizes = tensor.sizes();
+        std::vector<int64_t> shape(sizes.begin(), sizes.end());
+        file.write(reinterpret_cast<const char*>(shape.data()), 5 * sizeof(int64_t));
 
-    // ==== deblockHW test ====
-    auto dblock_in = torch::rand({1, 4, 2, 4, 4}); // small dummy
-    auto deblocked = deblockHW(dblock_in, 2, 2, {0,0,0,0});
-    std::cout << "Deblocked shape: " << deblocked.sizes() << std::endl;
-    std::cout << "Done deblockHW test" << std::endl;
+        // Write data type
+        int32_t dtype_int = static_cast<int32_t>(tensor.scalar_type());
+        file.write(reinterpret_cast<const char*>(&dtype_int), sizeof(int32_t));
 
-    // ==== blockHW test ====
-    std::cout << "Starting to test blockHW" << std::endl;
-    auto x = torch::rand({1, 2, 3, 50, 70}); // [V, S, T, H, W]
-    auto block_result = blockHW(x, {16, 16});
-    auto blocked = std::get<0>(block_result);
-    auto meta = std::get<1>(block_result);
+        // Write tensor data
+        auto contiguous_tensor = tensor.contiguous();
+        size_t data_size = contiguous_tensor.numel() * contiguous_tensor.element_size();
+        file.write(reinterpret_cast<const char*>(contiguous_tensor.data_ptr()), data_size);
 
-    int64_t nH = std::get<0>(meta);
-    int64_t nW = std::get<1>(meta);
-    auto padding = std::get<2>(meta);
+        if (!file.good()) {
+            throw std::runtime_error("Error writing to binary file: " + file_path);
+        }
 
-    std::cout << "Blocked tensor shape: " << blocked.sizes() << std::endl;
-    std::cout << "nH: " << nH << ", nW: " << nW << std::endl;
-    std::cout << "Padding: top=" << padding[0]
-              << ", down=" << padding[1]
-              << ", left=" << padding[2]
-              << ", right=" << padding[3] << std::endl;
-    std::cout << "Done testing blockHW" << std::endl;
-
-    // ==== Round-trip test: blockHW -> deblockHW ====
-    std::cout << "Starting blockHW -> deblockHW round-trip test" << std::endl;
-
-    auto recovered = deblockHW(blocked, nH, nW, padding);
-    std::cout << "Recovered tensor shape: " << recovered.sizes() << std::endl;
-
-    // Compare original H, W vs recovered
-    auto orig_sizes = x.sizes();
-    auto rec_sizes = recovered.sizes();
-    std::cout << "Original shape (before block): " << orig_sizes << std::endl;
-    std::cout << "Recovered shape (after deblock): " << rec_sizes << std::endl;
-
-    std::cout << "Done round-trip test" << std::endl;
-
-}
-
-void filtered_labels(){
-    int visible_length = 6;
-    std::cout<<"Starting to test build`ReverseIdMap"<<std::endl;
-    std::vector<int> filtered_labels = {1, 3, 5};
-
-    auto reverse_map = buildReverseIdMap(visible_length, filtered_labels);
-
-    for (const auto& [key, val] : reverse_map) {
-        std::cout << key << " -> " << val << "\n";
+        file.close();
+        std::cout << "✓ Written binary file: " << file_path << " with shape: " << tensor.sizes() << std::endl;
     }
-    std::cout<<"Done testing buildReverseIdMap"<<std::endl;
 
-}
+    // Read binary file method (simplified version from your code)
+    torch::Tensor read_binary_file(const std::string& file_path) {
+        std::cout << "Reading data from binary file: " << file_path << std::endl;
+
+        // Check if file exists
+        if (!std::filesystem::exists(file_path)) {
+            throw std::runtime_error("Binary file does not exist: " + file_path);
+        }
+
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open binary file: " + file_path);
+        }
+
+        // Read header: shape (5 int64_t values) + dtype info
+        std::vector<int64_t> shape(5);
+        file.read(reinterpret_cast<char*>(shape.data()), 5 * sizeof(int64_t));
+
+        // Read data type (stored as int32_t representing torch::ScalarType)
+        int32_t dtype_int;
+        file.read(reinterpret_cast<char*>(&dtype_int), sizeof(int32_t));
+        torch::ScalarType file_dtype = static_cast<torch::ScalarType>(dtype_int);
+
+        if (!file.good()) {
+            throw std::runtime_error("Error reading header from binary file: " + file_path);
+        }
+
+        // Validate shape
+        for (int64_t dim : shape) {
+            if (dim <= 0) {
+                throw std::runtime_error("Invalid shape in binary file header");
+            }
+        }
+
+        // Calculate total elements
+        int64_t total_elements = 1;
+        for (int64_t dim : shape) {
+            total_elements *= dim;
+        }
+
+        // Read binary data
+        size_t dtype_size = torch::elementSize(file_dtype);
+        std::vector<uint8_t> buffer(total_elements * dtype_size);
+        file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+
+        if (!file.good() || file.gcount() != static_cast<std::streamsize>(buffer.size())) {
+            throw std::runtime_error("Error reading data from binary file: " + file_path);
+        }
+
+        file.close();
+
+        // Create tensor from binary data
+        torch::Tensor data = torch::from_blob(buffer.data(), shape, file_dtype).clone();
+
+        std::cout << "✓ Loaded tensor with shape: " << data.sizes() << " and dtype: " << data.scalar_type() << std::endl;
+        return data;
+    }
+
+    // Test method to verify data integrity
+    bool verify_data_integrity(const torch::Tensor& original, const torch::Tensor& loaded) {
+        if (!original.sizes().equals(loaded.sizes())) {
+            std::cout << "✗ Shape mismatch: original " << original.sizes()
+                      << " vs loaded " << loaded.sizes() << std::endl;
+            return false;
+        }
+
+        if (original.scalar_type() != loaded.scalar_type()) {
+            std::cout << "✗ Data type mismatch: original " << original.scalar_type()
+                      << " vs loaded " << loaded.scalar_type() << std::endl;
+            return false;
+        }
+
+        // Check if tensors are close (allowing for floating point precision)
+        if (torch::allclose(original, loaded, 1e-6)) {
+            std::cout << "✓ Data integrity verified: tensors are identical" << std::endl;
+            return true;
+        } else {
+            auto diff = torch::abs(original - loaded);
+            auto max_diff = torch::max(diff).item<float>();
+            std::cout << "✗ Data mismatch: maximum difference = " << max_diff << std::endl;
+            return false;
+        }
+    }
+
+    // Print tensor statistics for verification
+    void print_tensor_stats(const torch::Tensor& tensor, const std::string& name) {
+        std::cout << name << " statistics:" << std::endl;
+        std::cout << "  Shape: " << tensor.sizes() << std::endl;
+        std::cout << "  Data type: " << tensor.scalar_type() << std::endl;
+        std::cout << "  Min value: " << torch::min(tensor).item<float>() << std::endl;
+        std::cout << "  Max value: " << torch::max(tensor).item<float>() << std::endl;
+        std::cout << "  Mean value: " << torch::mean(tensor).item<float>() << std::endl;
+
+        // Print a few sample values from different sections
+        std::cout << "  Sample values:" << std::endl;
+        for (int v = 0; v < std::min(2, static_cast<int>(tensor.size(0))); v++) {
+            for (int s = 0; s < std::min(2, static_cast<int>(tensor.size(1))); s++) {
+                float sample_val = tensor.index({v, s, 0, 0, 0}).item<float>();
+                std::cout << "    tensor[" << v << "," << s << ",0,0,0] = " << sample_val << std::endl;
+            }
+        }
+        std::cout << std::endl;
+    }
+};
 
 int main() {
-    std::cout << "Starting to test dataset" << std::endl;
+    std::cout << "=== Binary File I/O Test ===" << std::endl << std::endl;
 
-    // Create a 4D tensor [N, C, H, W]
-    auto x = torch::rand({1, 1, 64, 64});
+    try {
+        // Create test instance
+        TestScientificDataset test_dataset;
 
-    // ---- Test center_crop ----
-    std::cout << "Starting to test center_crop" << std::endl;
-    auto cropped = centerCrop(x, {32, 32});
-    std::cout << "Center crop shape: " << cropped.sizes() << std::endl;
-    std::cout << "Done testing center_crop" << std::endl;
+        // Step 1: Create test data
+        std::cout << "1. Creating test data..." << std::endl;
+        torch::Tensor original_data = test_dataset.create_test_data();
+        test_dataset.print_tensor_stats(original_data, "Original data");
 
-    // ---- Test downsampling_data ----
-    std::cout << "Starting to test downsampling_data" << std::endl;
-    auto down = downSamplingData(x, {1.0, 1.0, 0.5, 0.5});
-    std::cout << "Downsampled shape: " << down.sizes() << std::endl;
-    std::cout << "Done testing downsampling_data" << std::endl;
+        // Step 2: Write to binary file
+        std::string test_file_path = "./test_data/scientific_data_test.bin";
+        std::cout << "2. Writing data to binary file..." << std::endl;
+        test_dataset.write_binary_file(original_data, test_file_path);
 
-// ---- Test with 5D tensor ----
-std::cout << "Starting 5D tensor tests" << std::endl;
-auto x5d = torch::rand({1, 1, 8, 64, 64});  // [N, C, D, H, W]
+        // Check file size
+        if (std::filesystem::exists(test_file_path)) {
+            auto file_size = std::filesystem::file_size(test_file_path);
+            std::cout << "✓ File created successfully. Size: " << file_size << " bytes" << std::endl << std::endl;
+        }
 
-// Center crop in 5D
-auto cropped5d = centerCrop(x5d, {32, 32});
-std::cout << "5D Center crop shape: " << cropped5d.sizes() << std::endl;
+        // Step 3: Read from binary file
+        std::cout << "3. Reading data from binary file..." << std::endl;
+        torch::Tensor loaded_data = test_dataset.read_binary_file(test_file_path);
+        test_dataset.print_tensor_stats(loaded_data, "Loaded data");
 
-// Downsampling in 5D
-auto down5d = downSamplingData(x5d, {1.0, 1.0, 0.5, 0.5, 0.5});
-std::cout << "5D Downsampled shape: " << down5d.sizes() << std::endl;
+        // Step 4: Verify data integrity
+        std::cout << "4. Verifying data integrity..." << std::endl;
+        bool integrity_check = test_dataset.verify_data_integrity(original_data, loaded_data);
 
-std::cout << "Done with 5D tests" << std::endl;
-    std::cout << "Starting deblock_hw test" << std::endl;
+        if (integrity_check) {
+            std::cout << "✓ All tests passed! Binary I/O working correctly." << std::endl;
+        } else {
+            std::cout << "✗ Test failed! Data integrity check failed." << std::endl;
+            return 1;
+        }
 
-    // Example: (V=1, S_blk=4, T=1, h_block=2, w_block=2)
-    auto data = torch::rand({1, 4, 1, 2, 2});
-    int64_t n_h = 2, n_w = 2;
-    std::vector<int64_t> padding = {0, 0, 0, 0};
+        // Step 5: Test with different data types
+        std::cout << std::endl << "5. Testing with different data types..." << std::endl;
 
-    auto deblocked = deblockHW(data, n_h, n_w, padding);
-    std::cout << "Deblocked shape: " << deblocked.sizes() << std::endl;
+        // Test with double precision
+        torch::Tensor double_data = original_data.to(torch::kDouble);
+        std::string double_file_path = "./test_data/scientific_data_double.bin";
+        test_dataset.write_binary_file(double_data, double_file_path);
+        torch::Tensor loaded_double_data = test_dataset.read_binary_file(double_file_path);
+        bool double_check = test_dataset.verify_data_integrity(double_data, loaded_double_data);
 
-    std::cout << "Done deblock_hw test" << std::endl;
+        // Test with int32
+        torch::Tensor int_data = (original_data * 100).to(torch::kInt32);
+        std::string int_file_path = "./test_data/scientific_data_int32.bin";
+        test_dataset.write_binary_file(int_data, int_file_path);
+        torch::Tensor loaded_int_data = test_dataset.read_binary_file(int_file_path);
+        bool int_check = test_dataset.verify_data_integrity(int_data, loaded_int_data);
 
-    std::cout << "Starting to test blockHW" << std::endl;
+        if (double_check && int_check) {
+            std::cout << "✓ Multiple data type tests passed!" << std::endl;
+        } else {
+            std::cout << "✗ Some data type tests failed!" << std::endl;
+        }
 
-    // Create a small dummy tensor
-    auto S = torch::rand({1, 2, 3, 50, 70}); // [V, S, T, H, W]
+        // Step 6: Performance test with larger data
+        std::cout << std::endl << "6. Performance test with larger data..." << std::endl;
+        torch::Tensor large_data = torch::randn({5, 10, 50, 128, 128}, torch::kFloat32);
+        std::string large_file_path = "./test_data/scientific_data_large.bin";
 
-    // Call blockHW
-    auto result = blockHW(S, {16, 16});
-    auto blocked = std::get<0>(result);
-    auto meta = std::get<1>(result);
+        auto start_time = std::chrono::high_resolution_clock::now();
+        test_dataset.write_binary_file(large_data, large_file_path);
+        auto write_time = std::chrono::high_resolution_clock::now();
 
-    int64_t nH = std::get<0>(meta);
-    int64_t nW = std::get<1>(meta);
-    auto pad = std::get<2>(meta);
+        torch::Tensor loaded_large_data = test_dataset.read_binary_file(large_file_path);
+        auto read_time = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Blocked tensor shape: " << blocked.sizes() << std::endl;
-    std::cout << "nH: " << nH << ", nW: " << nW << std::endl;
-    std::cout << "Padding: top=" << pad[0]
-              << ", down=" << pad[1]
-              << ", left=" << pad[2]
-              << ", right=" << pad[3] << std::endl;
+        auto write_duration = std::chrono::duration_cast<std::chrono::milliseconds>(write_time - start_time);
+        auto read_duration = std::chrono::duration_cast<std::chrono::milliseconds>(read_time - write_time);
 
-    std::cout << "Done testing blockHW" << std::endl;
+        std::cout << "Large data performance:" << std::endl;
+        std::cout << "  Data shape: " << large_data.sizes() << std::endl;
+        std::cout << "  Write time: " << write_duration.count() << " ms" << std::endl;
+        std::cout << "  Read time: " << read_duration.count() << " ms" << std::endl;
 
-    roundTrip();
-    
+        bool large_check = test_dataset.verify_data_integrity(large_data, loaded_large_data);
+        if (large_check) {
+            std::cout << "✓ Large data test passed!" << std::endl;
+        }
 
- std::cout << "Running BaseDataset tests..." << std::endl;
-    std::cout << "============================================" << std::endl;
-    
-    test_constructor();
-    std::cout << std::endl;
-    
-    test_apply_inst_norm();
-    std::cout << std::endl;
-    
-    test_apply_padding_or_crop();
-    std::cout << std::endl;
-    
-    test_apply_augments_downsample();
-    std::cout << std::endl;
-    
-    test_apply_augments_randsample();
-    std::cout << std::endl;
-    
-    test_apply_downsampling_directly();
-    std::cout << std::endl;
-    
-    test_normalization_with_params();
-    std::cout << std::endl;
-    
-    std::cout << "============================================" << std::endl;
-    std::cout << "All BaseDataset tests completed!" << std::endl;
+        std::cout << std::endl << "=== All tests completed successfully! ===" << std::endl;
 
+        // Cleanup
+        std::cout << std::endl << "Cleaning up test files..." << std::endl;
+        std::filesystem::remove_all("./test_data");
+        std::cout << "✓ Cleanup completed." << std::endl;
 
-    test_scientific_dataset();
-    std::cout << "All dataset tests complete" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "✗ Test failed with exception: " << e.what() << std::endl;
+        return 1;
+    }
 
     return 0;
 }
-
