@@ -1,5 +1,9 @@
 #include "dataset.h"
 
+// ========================================================================================
+// UTILITY FUNCTIONS
+// ========================================================================================
+
 torch::Tensor centerCrop(const torch::Tensor& x, std::pair<int64_t,int64_t> tShape) {
     auto sizes = x.sizes();
     int64_t dim = sizes.size();
@@ -107,8 +111,7 @@ torch::Tensor deblockHW(const torch::Tensor& data,
 }
 
 std::tuple<torch::Tensor, std::tuple<int64_t, int64_t, std::vector<int64_t>>>
-blockHW(const torch::Tensor& data,
-        std::pair<int64_t, int64_t> block_size){
+blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size){
 
     int64_t hBlock = block_size.first;
     int64_t wBlock = block_size.second;
@@ -161,6 +164,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
     int T = sizes[2];
     int H = sizes[3];
     int W = sizes[4];
+    
     if (T % nFrame != 0){
         throw std::runtime_error("T must be divisible by nFrame");
     }
@@ -169,7 +173,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
     std::vector<std::pair<int, float>> filteredBlocks;
     std::vector<int> filteredLabels;
 
-   for (int v = 0; v < V; v++) {
+    for (int v = 0; v < V; v++) {
         for (int s = 0; s < S; s++) {
             for (int blk_idx = 0; blk_idx < samples; blk_idx++) {
                 int start = blk_idx * nFrame;
@@ -189,7 +193,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
         }
     }
 
-   return {filteredBlocks, filteredLabels};
+    return {filteredBlocks, filteredLabels};
 }
 
 std::unordered_map<int, int> buildReverseIdMap(
@@ -197,29 +201,28 @@ std::unordered_map<int, int> buildReverseIdMap(
     const std::vector<int>& filteredLabels) {
 
     std::unordered_set<int> filteredSet(filteredLabels.begin(), filteredLabels.end());
-
     std::vector<int> validIds;
     validIds.reserve(visibleLength);
 
-    for (int i =0; i < visibleLength; ++i){
+    for (int i = 0; i < visibleLength; ++i){
         if (filteredSet.find(i) == filteredSet.end()){
             validIds.push_back(i);
         }
     }
+    
     std::unordered_map<int, int> reverseMap;
-
     for(size_t i = 0; i < validIds.size(); ++i){
-        reverseMap[static_cast<int>(i)]  = validIds[i];
+        reverseMap[static_cast<int>(i)] = validIds[i];
     }
 
     return reverseMap;
 }
 
-
+// Helper functions for argument parsing
 std::optional<std::pair<int, int>> get_optional_pair_arg(
     const std::unordered_map<std::string, torch::Tensor>& args,
     const std::string& key) {
-    
+
     auto it = args.find(key);
     if (it != args.end()) {
         auto tensor = it->second;
@@ -241,22 +244,25 @@ bool get_bool_arg(const std::unordered_map<std::string, torch::Tensor>& args,
 
 std::unordered_map<std::string, int> get_augment_type_arg(
     const std::unordered_map<std::string, torch::Tensor>& args) {
-    
+
     std::unordered_map<std::string, int> result;
-    
+
     auto downsample_it = args.find("augment_downsample");
     if (downsample_it != args.end()) {
         result["downsample"] = downsample_it->second.item<int>();
     }
-    
+
     auto randsample_it = args.find("augment_randsample");
     if (randsample_it != args.end()) {
         result["randsample"] = randsample_it->second.item<int>();
     }
-    
+
     return result;
 }
 
+// ========================================================================================
+// BASE DATASET CLASS IMPLEMENTATION
+// ========================================================================================
 
 BaseDataset::BaseDataset(const std::unordered_map<std::string, torch::Tensor>& args) : rng_(std::random_device{}()) {
     if (args.find("data_path") == args.end()) {
@@ -305,10 +311,8 @@ torch::Tensor BaseDataset::apply_augments(torch::Tensor data) {
     if (augment_type.find("downsample") != augment_type.end() && enable_ds) {
         data = apply_downsampling(data, augment_type["downsample"]);
     } else if (augment_type.find("randsample") != augment_type.end() && enable_ds) {
-        std::random_device rd;
-        std::mt19937 gen(rd());
         std::uniform_int_distribution<> dis(1, augment_type["randsample"]);
-        int step = dis(gen);
+        int step = dis(rng_);
         data = apply_downsampling(data, step);
     }
     return data;
@@ -328,7 +332,7 @@ torch::Tensor BaseDataset::apply_padding_or_crop(torch::Tensor data) {
     } else if (train_size < cur_size) {
         int start_h = std::uniform_int_distribution<>(0, data.size(-2) - train_size)(rng_);
         int start_w = std::uniform_int_distribution<>(0, data.size(-1) - train_size)(rng_);
-        
+
         data = data.index({
             torch::indexing::Slice(),
             torch::indexing::Slice(start_h, start_h + train_size),
@@ -432,9 +436,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> BaseDataset::apply_inst_
     return std::make_tuple(data, offset, scale);
 }
 
-// Note: this is not defined in the  code so i think there was a bug becasue it is used my impl of it
-// 
 torch::Tensor BaseDataset::apply_downsampling(torch::Tensor data, int step) {
+    if (step <= 0) {
+        throw std::invalid_argument("Downsampling step must be positive");
+    }
+    
+    // Apply downsampling to the last dimension
     auto indices = torch::arange(0, data.size(-1), step, data.device());
     return data.index_select(-1, indices);
 }
@@ -451,16 +458,22 @@ T BaseDataset::get_arg(const std::unordered_map<std::string, torch::Tensor>& arg
 
 std::string BaseDataset::get_string_arg(const std::unordered_map<std::string, torch::Tensor>& args,
                                        const std::string& key, const std::string& default_value) {
+    // Note: In a real implementation, you'd need a way to store and retrieve strings
+    // This is a placeholder implementation
     return default_value;
 }
 
+// Explicit template instantiations
 template int BaseDataset::get_arg<int>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const int&);
 template float BaseDataset::get_arg<float>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const float&);
 template bool BaseDataset::get_arg<bool>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const bool&);
 
+// ========================================================================================
+// SCIENTIFIC DATASET CLASS IMPLEMENTATION
+// ========================================================================================
 
 ScientificDataset::ScientificDataset(const std::unordered_map<std::string, torch::Tensor>& args)
-    : BaseDataset(args) {
+    : BaseDataset(args), dataset_length(0), visible_length(0) {
 
     std::cout << "*************** Loading " << dataset_name << " ***************\n";
 
@@ -534,46 +547,245 @@ ScientificDataset::ScientificDataset(const std::unordered_map<std::string, torch
     reverse_id_map = buildReverseIdMap(visible_length, filtered_labels);
 }
 
-// thi is the io part i have question before i do this --------------------------------------------------------------------------------------------------------------------------
-torch::Tensor ScientificDataset::load_dataset(const std::string& data_path,
+// ========================================================================================
+// CORE UNIFIED LOAD_DATASET METHOD
+// ========================================================================================
+
+torch::Tensor ScientificDataset::load_dataset(const std::variant<std::string, torch::Tensor>& input,
                                              std::optional<int> variable_idx,
                                              std::optional<std::pair<int, int>> section_range,
-                                             std::optional<std::pair<int, int>> frame_range) {
-
-    // Create dummy data for testing - replace with your actual in-memory data
-    // Expected shape: [Variables, Sections, Time, Height, Width]
-    std::cout<<"load dataset is still in progress laoding fake data"<<std::endl;
-    torch::Tensor data = torch::randn({2, 4, 100, 64, 64}, torch::kFloat32);
+                                             std::optional<std::pair<int, int>> frame_range,
+                                             std::optional<std::string> mpi_mode) {
     
-    if (variable_idx.has_value()) {
-        data = data.index({variable_idx.value()});
-        data = data.unsqueeze(0); 
+    // Check if MPI mode is requested
+    if (mpi_mode.has_value() && mpi_mode.value() == "mpi") {
+        // MPI mode - only works with file paths
+        if (std::holds_alternative<std::string>(input)) {
+            const std::string& file_path = std::get<std::string>(input);
+            return load_from_binary_file_mpi(file_path, variable_idx, section_range, frame_range);
+        } else {
+            throw std::runtime_error("MPI mode only supports file path input, not tensor input");
+        }
     }
     
+    // Regular (non-MPI) mode
+    if (std::holds_alternative<std::string>(input)) {
+        // Input is a file path - load from binary file
+        const std::string& file_path = std::get<std::string>(input);
+        return load_from_binary_file(file_path, variable_idx, section_range, frame_range);
+    } 
+    else if (std::holds_alternative<torch::Tensor>(input)) {
+        // Input is a tensor - load from memory
+        const torch::Tensor& data = std::get<torch::Tensor>(input);
+        return load_from_memory(data, variable_idx, section_range, frame_range);
+    }
+    else {
+        throw std::runtime_error("Invalid input type for load_dataset");
+    }
+}
+
+// ========================================================================================
+// PRIVATE HELPER METHODS
+// ========================================================================================
+
+torch::Tensor ScientificDataset::load_from_memory(const torch::Tensor& data,
+                                                 std::optional<int> variable_idx,
+                                                 std::optional<std::pair<int, int>> section_range,
+                                                 std::optional<std::pair<int, int>> frame_range) {
+    
+    torch::Tensor processed_data = data.clone();
+    
+    // Validate input is 5D
+    if (processed_data.dim() != 5) {
+        throw std::runtime_error("Expected 5D tensor with shape [Variables, Sections, Time, Height, Width], got " + 
+                               std::to_string(processed_data.dim()) + "D tensor");
+    }
+    
+    std::cout << "Loading data from memory tensor with shape: " << processed_data.sizes() << std::endl;
+    
+    // Apply variable selection
+    if (variable_idx.has_value()) {
+        int var_idx = variable_idx.value();
+        if (var_idx < 0 || var_idx >= processed_data.size(0)) {
+            throw std::out_of_range("Variable index out of range");
+        }
+        processed_data = processed_data.index({var_idx});
+        processed_data = processed_data.unsqueeze(0);
+    }
+    
+    // Apply section range
     if (section_range.has_value()) {
         auto range = section_range.value();
-        data = data.index({torch::indexing::Slice(), 
-                          torch::indexing::Slice(range.first, range.second)});
+        if (range.first < 0 || range.second > processed_data.size(1) || range.first >= range.second) {
+            throw std::out_of_range("Invalid section range");
+        }
+        processed_data = processed_data.index({torch::indexing::Slice(), 
+                                             torch::indexing::Slice(range.first, range.second)});
     }
     
+    // Apply frame range
     if (frame_range.has_value()) {
         auto range = frame_range.value();
-        data = data.index({torch::indexing::Slice(), 
-                          torch::indexing::Slice(),
-                          torch::indexing::Slice(range.first, range.second)});
+        if (range.first < 0 || range.second > processed_data.size(2) || range.first >= range.second) {
+            throw std::out_of_range("Invalid frame range");
+        }
+        processed_data = processed_data.index({torch::indexing::Slice(), 
+                                             torch::indexing::Slice(),
+                                             torch::indexing::Slice(range.first, range.second)});
     }
     
+    // Apply resolution cropping
     if (resolution.has_value()) {
-        data = centerCrop(data, resolution.value());
+        auto res = resolution.value();
+        if (res.first > processed_data.size(3) || res.second > processed_data.size(4)) {
+            throw std::invalid_argument("Resolution larger than data dimensions");
+        }
+        processed_data = centerCrop(processed_data, resolution.value());
     }
     
-    dtype = data.scalar_type();
-    data = data.to(torch::kFloat);
+    dtype = processed_data.scalar_type();
+    processed_data = processed_data.to(torch::kFloat);
     
-    return data;
-
+    return processed_data;
 }
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+torch::Tensor ScientificDataset::load_from_binary_file(const std::string& file_path,
+                                                      std::optional<int> variable_idx,
+                                                      std::optional<std::pair<int, int>> section_range,
+                                                      std::optional<std::pair<int, int>> frame_range) {
+    
+    std::cout << "Loading data from binary file: " << file_path << std::endl;
+    
+    // Check if file exists
+    if (!std::filesystem::exists(file_path)) {
+        throw std::runtime_error("Binary file does not exist: " + file_path);
+    }
+    
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open binary file: " + file_path);
+    }
+    
+    // Read header: shape (5 int64_t values) + dtype info
+    std::vector<int64_t> shape(5);
+    file.read(reinterpret_cast<char*>(shape.data()), 5 * sizeof(int64_t));
+    
+    // Read data type (stored as int32_t representing torch::ScalarType)
+    int32_t dtype_int;
+    file.read(reinterpret_cast<char*>(&dtype_int), sizeof(int32_t));
+    torch::ScalarType file_dtype = static_cast<torch::ScalarType>(dtype_int);
+    
+    if (!file.good()) {
+        throw std::runtime_error("Error reading header from binary file: " + file_path);
+    }
+    
+    // Validate shape
+    for (int64_t dim : shape) {
+        if (dim <= 0) {
+            throw std::runtime_error("Invalid shape in binary file header");
+        }
+    }
+    
+    // Calculate total elements
+    int64_t total_elements = 1;
+    for (int64_t dim : shape) {
+        total_elements *= dim;
+    }
+    
+    if (total_elements > INT64_MAX / 16) { // Safety check for memory allocation
+        throw std::runtime_error("File too large to load into memory");
+    }
+    
+    // Read binary data
+    size_t dtype_size = torch::elementSize(file_dtype);
+    std::vector<uint8_t> buffer(total_elements * dtype_size);
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+    
+    if (!file.good() || file.gcount() != static_cast<std::streamsize>(buffer.size())) {
+        throw std::runtime_error("Error reading data from binary file: " + file_path);
+    }
+    
+    file.close();
+    
+    // Create tensor from binary data
+    torch::Tensor data = torch::from_blob(buffer.data(), shape, file_dtype).clone();
+    
+    std::cout << "Loaded tensor with shape: " << data.sizes() << " and dtype: " << data.scalar_type() << std::endl;
+    
+    // Apply the same processing as memory method
+    return load_from_memory(data, variable_idx, section_range, frame_range);
+}
+
+// ========================================================================================
+// BINARY FILE WRITING METHODS
+// ========================================================================================
+
+void ScientificDataset::write_binary_file(const torch::Tensor& tensor, 
+                                         const std::string& file_path,
+                                         std::optional<std::string> mpi_mode,
+                                         std::optional<std::vector<int64_t>> global_shape) {
+    
+    // Check if MPI mode is requested
+    if (mpi_mode.has_value() && mpi_mode.value() == "mpi") {
+        // MPI mode
+        if (!global_shape.has_value()) {
+            // Calculate global shape automatically
+            auto calculated_global_shape = calculate_global_shape_mpi(tensor);
+            write_binary_file_mpi(tensor, file_path, calculated_global_shape);
+        } else {
+            // Use provided global shape
+            write_binary_file_mpi(tensor, file_path, global_shape.value());
+        }
+        return;
+    }
+    
+    // Regular (non-MPI) mode
+    if (tensor.dim() != 5) {
+        throw std::runtime_error("Expected 5D tensor for binary file writing");
+    }
+    
+    // Create directory if it doesn't exist
+    std::filesystem::path file_dir = std::filesystem::path(file_path).parent_path();
+    if (!file_dir.empty() && !std::filesystem::exists(file_dir)) {
+        std::filesystem::create_directories(file_dir);
+    }
+    
+    std::ofstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot create binary file: " + file_path);
+    }
+    
+    // Write header: shape (5 int64_t values)
+    auto sizes = tensor.sizes();
+    std::vector<int64_t> shape(sizes.begin(), sizes.end());
+    file.write(reinterpret_cast<const char*>(shape.data()), 5 * sizeof(int64_t));
+    
+    // Write data type
+    int32_t dtype_int = static_cast<int32_t>(tensor.scalar_type());
+    file.write(reinterpret_cast<const char*>(&dtype_int), sizeof(int32_t));
+    
+    // Write tensor data
+    auto contiguous_tensor = tensor.contiguous();
+    size_t data_size = contiguous_tensor.numel() * contiguous_tensor.element_size();
+    file.write(reinterpret_cast<const char*>(contiguous_tensor.data_ptr()), data_size);
+    
+    if (!file.good()) {
+        throw std::runtime_error("Error writing to binary file: " + file_path);
+    }
+    
+    file.close();
+    std::cout << "Written binary file: " << file_path << " with shape: " << tensor.sizes() << std::endl;
+}
+
+// Backward compatibility: keep the old signature
+void ScientificDataset::write_binary_file(const torch::Tensor& tensor, const std::string& file_path) {
+    write_binary_file(tensor, file_path, std::nullopt, std::nullopt);
+}
+
+// ========================================================================================
+// DATASET INTERFACE METHODS
+// ========================================================================================
+
 int64_t ScientificDataset::update_length() {
     dataset_length = shape[0] * shape[1] * t_samples;
     return dataset_length;
@@ -614,8 +826,11 @@ torch::Tensor ScientificDataset::recons_data(const torch::Tensor& recons_data) c
 }
 
 torch::Tensor ScientificDataset::deblocking_hw(const torch::Tensor& data) const {
-    return deblockHW(data, std::get<0>(block_info),
-                    std::get<1>(block_info), std::get<2>(block_info));
+    if (!train_mode) {
+        return deblockHW(data, std::get<0>(block_info),
+                        std::get<1>(block_info), std::get<2>(block_info));
+    }
+    return data; // In training mode, no deblocking needed
 }
 
 std::unordered_map<std::string, torch::Tensor> ScientificDataset::post_processing(
@@ -636,6 +851,9 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::post_processin
         offset = std::get<1>(norm_result);
         scale = std::get<2>(norm_result);
     } else {
+        if (var_idx >= var_offset.size(0)) {
+            throw std::out_of_range("Variable index out of range for normalization parameters");
+        }
         offset = var_offset.index({var_idx}).view({1, 1, 1});
         scale = var_scale.index({var_idx}).view({1, 1, 1});
     }
@@ -647,6 +865,292 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::post_processin
 
     return data_dict;
 }
+
+// ========================================================================================
+// MPI METHODS (conditional compilation)
+// ========================================================================================
+
+#ifdef MPI_VERSION
+
+torch::Tensor ScientificDataset::load_from_binary_file_mpi(const std::string& file_path,
+                                                           std::optional<int> variable_idx,
+                                                           std::optional<std::pair<int, int>> section_range,
+                                                           std::optional<std::pair<int, int>> frame_range) {
+    
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    std::vector<int64_t> global_shape(5);
+    torch::ScalarType file_dtype;
+    
+    // Rank 0 reads header and broadcasts to all processes
+    if (rank == 0) {
+        std::cout << "Rank 0: Reading header from binary file: " << file_path << std::endl;
+        
+        if (!std::filesystem::exists(file_path)) {
+            throw std::runtime_error("MPI: Binary file does not exist: " + file_path);
+        }
+        
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open binary file: " + file_path);
+        }
+        
+        // Read header
+        file.read(reinterpret_cast<char*>(global_shape.data()), 5 * sizeof(int64_t));
+        
+        int32_t dtype_int;
+        file.read(reinterpret_cast<char*>(&dtype_int), sizeof(int32_t));
+        file_dtype = static_cast<torch::ScalarType>(dtype_int);
+        
+        file.close();
+        
+        if (!file.good()) {
+            throw std::runtime_error("Error reading header from binary file: " + file_path);
+        }
+        
+        // Validate shape
+        for (int64_t dim : global_shape) {
+            if (dim <= 0) {
+                throw std::runtime_error("Invalid shape in MPI binary file header");
+            }
+        }
+        
+        std::cout << "Global tensor shape: [" << global_shape[0] << ", " << global_shape[1] 
+                  << ", " << global_shape[2] << ", " << global_shape[3] << ", " << global_shape[4] << "]" << std::endl;
+    }
+    
+    // Broadcast shape and dtype to all processes
+    MPI_Bcast(global_shape.data(), 5, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
+    int32_t dtype_int = static_cast<int32_t>(file_dtype);
+    MPI_Bcast(&dtype_int, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    file_dtype = static_cast<torch::ScalarType>(dtype_int);
+    
+    // Calculate 1D domain decomposition along the second dimension (sections)
+    int64_t sections_total = global_shape[1];  // Total sections
+    int64_t sections_per_rank = sections_total / size;
+    int64_t remainder = sections_total % size;
+    
+    // Calculate this rank's section range
+    int64_t section_start = rank * sections_per_rank + std::min(static_cast<int64_t>(rank), remainder);
+    int64_t section_count = sections_per_rank + (rank < remainder ? 1 : 0);
+    int64_t section_end = section_start + section_count;
+    
+    std::cout << "Rank " << rank << ": Loading sections [" << section_start 
+              << ", " << section_end << ") out of " << sections_total << std::endl;
+    
+    // Calculate local tensor shape
+    std::vector<int64_t> local_shape = {global_shape[0], section_count, global_shape[2], 
+                                       global_shape[3], global_shape[4]};
+    
+    // Calculate file offsets
+    size_t header_size = 5 * sizeof(int64_t) + sizeof(int32_t);
+    size_t dtype_size = torch::elementSize(file_dtype);
+    
+    // Elements per section (Variables * Time * Height * Width)
+    int64_t elements_per_section = global_shape[0] * global_shape[2] * global_shape[3] * global_shape[4];
+    size_t bytes_per_section = elements_per_section * dtype_size;
+    
+    // File offset for this rank's data
+    size_t file_offset = header_size + section_start * bytes_per_section;
+    size_t read_size = section_count * bytes_per_section;
+    
+    // Use MPI-IO for parallel reading
+    MPI_File mpi_file;
+    MPI_Status status;
+    
+    int result = MPI_File_open(MPI_COMM_WORLD, file_path.c_str(), 
+                              MPI_MODE_RDONLY, MPI_INFO_NULL, &mpi_file);
+    if (result != MPI_SUCCESS) {
+        throw std::runtime_error("Failed to open file with MPI-IO: " + file_path);
+    }
+    
+    // Allocate buffer for local data
+    std::vector<uint8_t> buffer(read_size);
+    
+    // Read this rank's portion
+    result = MPI_File_read_at(mpi_file, file_offset, buffer.data(), read_size, 
+                             MPI_BYTE, &status);
+    if (result != MPI_SUCCESS) {
+        MPI_File_close(&mpi_file);
+        throw std::runtime_error("Failed to read data with MPI-IO");
+    }
+    
+    MPI_File_close(&mpi_file);
+    
+    // Create local tensor
+    torch::Tensor local_data = torch::from_blob(buffer.data(), local_shape, file_dtype).clone();
+    
+    std::cout << "Rank " << rank << ": Loaded local tensor with shape: " << local_data.sizes() << std::endl;
+    
+    // Apply processing (variable selection, frame range, etc.) to local data
+    // Note: section_range is ignored in MPI mode as it's handled by domain decomposition
+    return load_from_memory(local_data, variable_idx, std::nullopt, frame_range);
+}
+
+void ScientificDataset::write_binary_file_mpi(const torch::Tensor& local_tensor, 
+                                             const std::string& file_path,
+                                             const std::vector<int64_t>& global_shape) {
+    
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    if (local_tensor.dim() != 5) {
+        throw std::runtime_error("Expected 5D local tensor for MPI binary file writing");
+    }
+    
+    if (global_shape.size() != 5) {
+        throw std::runtime_error("Global shape must have 5 dimensions");
+    }
+    
+    // Validate global shape
+    for (int64_t dim : global_shape) {
+        if (dim <= 0) {
+            throw std::runtime_error("Invalid global shape for MPI write");
+        }
+    }
+    
+    // Rank 0 writes the header
+    if (rank == 0) {
+        std::cout << "Rank 0: Writing header to binary file: " << file_path << std::endl;
+        
+        // Create directory if it doesn't exist
+        std::filesystem::path file_dir = std::filesystem::path(file_path).parent_path();
+        if (!file_dir.empty() && !std::filesystem::exists(file_dir)) {
+            std::filesystem::create_directories(file_dir);
+        }
+        
+        std::ofstream file(file_path, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot create binary file: " + file_path);
+        }
+        
+        // Write global shape
+        file.write(reinterpret_cast<const char*>(global_shape.data()), 5 * sizeof(int64_t));
+        
+        // Write data type
+        int32_t dtype_int = static_cast<int32_t>(local_tensor.scalar_type());
+        file.write(reinterpret_cast<const char*>(&dtype_int), sizeof(int32_t));
+        
+        if (!file.good()) {
+            throw std::runtime_error("Error writing header to MPI binary file");
+        }
+        
+        file.close();
+        
+        std::cout << "Global tensor shape: [" << global_shape[0] << ", " << global_shape[1] 
+                  << ", " << global_shape[2] << ", " << global_shape[3] << ", " << global_shape[4] << "]" << std::endl;
+    }
+    
+    // Wait for rank 0 to finish writing header
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Calculate file offset for this rank's data
+    size_t header_size = 5 * sizeof(int64_t) + sizeof(int32_t);
+    size_t dtype_size = local_tensor.element_size();
+    
+    // Calculate this rank's section start (assume 1D decomposition along dim 1)
+    int64_t sections_total = global_shape[1];
+    int64_t sections_per_rank = sections_total / size;
+    int64_t remainder = sections_total % size;
+    int64_t section_start = rank * sections_per_rank + std::min(static_cast<int64_t>(rank), remainder);
+    
+    // Elements per section
+    int64_t elements_per_section = global_shape[0] * global_shape[2] * global_shape[3] * global_shape[4];
+    size_t bytes_per_section = elements_per_section * dtype_size;
+    size_t file_offset = header_size + section_start * bytes_per_section;
+    
+    // Use MPI-IO for parallel writing
+    MPI_File mpi_file;
+    int result = MPI_File_open(MPI_COMM_WORLD, file_path.c_str(), 
+                              MPI_MODE_WRONLY, MPI_INFO_NULL, &mpi_file);
+    if (result != MPI_SUCCESS) {
+        throw std::runtime_error("Failed to open file for writing with MPI-IO: " + file_path);
+    }
+    
+    // Write this rank's data
+    auto contiguous_tensor = local_tensor.contiguous();
+    size_t write_size = contiguous_tensor.numel() * dtype_size;
+    
+    MPI_Status status;
+    result = MPI_File_write_at(mpi_file, file_offset, contiguous_tensor.data_ptr(), 
+                              write_size, MPI_BYTE, &status);
+    if (result != MPI_SUCCESS) {
+        MPI_File_close(&mpi_file);
+        throw std::runtime_error("Failed to write data with MPI-IO");
+    }
+    
+    MPI_File_close(&mpi_file);
+    
+    std::cout << "Rank " << rank << ": Written local tensor with shape: " << local_tensor.sizes() 
+              << " at offset: " << file_offset << std::endl;
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        std::cout << "MPI binary file write completed: " << file_path << std::endl;
+    }
+}
+
+std::vector<int64_t> ScientificDataset::calculate_global_shape_mpi(const torch::Tensor& local_tensor) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    if (local_tensor.dim() != 5) {
+        throw std::runtime_error("Expected 5D local tensor");
+    }
+    
+    auto local_shape = local_tensor.sizes();
+    
+    // Gather section counts from all ranks
+    std::vector<int64_t> section_counts(size);
+    int64_t local_sections = local_shape[1];
+    
+    MPI_Allgather(&local_sections, 1, MPI_LONG_LONG, 
+                  section_counts.data(), 1, MPI_LONG_LONG, MPI_COMM_WORLD);
+    
+    // Calculate total sections
+    int64_t total_sections = 0;
+    for (int64_t count : section_counts) {
+        total_sections += count;
+    }
+    
+    // Global shape: same as local except for sections dimension
+    std::vector<int64_t> global_shape = {local_shape[0], total_sections, local_shape[2], 
+                                        local_shape[3], local_shape[4]};
+    
+    if (rank == 0) {
+        std::cout << "Calculated global shape: [" << global_shape[0] << ", " << global_shape[1] 
+                  << ", " << global_shape[2] << ", " << global_shape[3] << ", " << global_shape[4] << "]" << std::endl;
+    }
+    
+    return global_shape;
+}
+
+#else
+// Non-MPI versions - throw errors
+torch::Tensor ScientificDataset::load_from_binary_file_mpi(const std::string& file_path,
+                                                           std::optional<int> variable_idx,
+                                                           std::optional<std::pair<int, int>> section_range,
+                                                           std::optional<std::pair<int, int>> frame_range) {
+    throw std::runtime_error("MPI support not compiled. Please compile with MPI to use MPI methods.");
+}
+
+void ScientificDataset::write_binary_file_mpi(const torch::Tensor& local_tensor, 
+                                             const std::string& file_path,
+                                             const std::vector<int64_t>& global_shape) {
+    throw std::runtime_error("MPI support not compiled. Please compile with MPI to use MPI methods.");
+}
+
+std::vector<int64_t> ScientificDataset::calculate_global_shape_mpi(const torch::Tensor& local_tensor) {
+    throw std::runtime_error("MPI support not compiled. Please compile with MPI to use MPI methods.");
+}
+
+#endif
+
 
 std::unordered_map<std::string, torch::Tensor> ScientificDataset::get_item(size_t idx) {
     idx = idx % dataset_length;
@@ -663,7 +1167,7 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::get_item(size_
     int64_t idx2 = idx % t_samples;
 
     int64_t start_t = idx2 * delta_t;
-    int64_t end_t = start_t + n_frame;
+    int64_t end_t   = start_t + n_frame;
 
     torch::Tensor data = data_input.index({
         static_cast<int64_t>(idx0),

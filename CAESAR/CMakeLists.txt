@@ -1,3 +1,6 @@
+# Try to find MPI, but don’t require it
+find_package(MPI)
+
 add_library(caesar_lib
     compressor.cpp
     normalize.cpp
@@ -29,6 +32,14 @@ target_include_directories(caesar_lib
 )
 
 target_link_libraries(caesar_lib
-    PUBLIC "${TORCH_LIBRARIES}"
+    PUBLIC
+        "${TORCH_LIBRARIES}"
 )
+
+# If MPI was found, add its includes, link libs, and a flag
+if(MPI_FOUND)
+    target_include_directories(caesar_lib PUBLIC ${MPI_INCLUDE_PATH})
+    target_link_libraries(caesar_lib PUBLIC MPI::MPI_CXX)
+    target_compile_definitions(caesar_lib PUBLIC USE_MPI)
+endif()
 
