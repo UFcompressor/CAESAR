@@ -215,7 +215,6 @@ std::unordered_map<int, int> buildReverseIdMap(
     return reverseMap;
 }
 
-
 std::optional<std::pair<int, int>> get_optional_pair_arg(
     const std::unordered_map<std::string, torch::Tensor>& args,
     const std::string& key) {
@@ -257,38 +256,21 @@ std::unordered_map<std::string, int> get_augment_type_arg(
     return result;
 }
 
-
-BaseDataset::BaseDataset(const std::unordered_map<std::string, torch::Tensor>& args) : rng_(std::random_device{}()) {
-    if (args.find("data_path") == args.end()) {
-        throw std::invalid_argument("data_path is required");
-    }
-    data_path = get_string_arg(args, "data_path", "");
-
-    dataset_name = get_string_arg(args, "name", "Customized Dataset");
-
-    if (args.find("variable_idx") != args.end()) {
-        variable_idx = args.at("variable_idx").item<int>();
-    }
-
-    section_range = get_optional_pair_arg(args, "section_range");
-    frame_range = get_optional_pair_arg(args, "frame_range");
-
-    if (args.find("n_frame") == args.end()) {
-        throw std::invalid_argument("n_frame is required");
-    }
-    n_frame = args.at("n_frame").item<int>();
-
-    resolution = get_optional_pair_arg(args, "resolution");
-
-    train_size = get_arg<int>(args, "train_size", 256);
-    inst_norm = get_bool_arg(args, "inst_norm", true);
-    augment_type = get_augment_type_arg(args);
-    norm_type = get_string_arg(args, "norm_type", "mean_range");
-    train_mode = get_bool_arg(args, "train", false);
-
-    test_size = {get_arg<int>(args, "test_size_h", 256), get_arg<int>(args, "test_size_w", 256)};
-    n_overlap = get_arg<int>(args, "n_overlap", 0);
-    downsampling = get_arg<int>(args, "downsampling", 1);
+BaseDataset::BaseDataset(const DatasetConfig& config) : rng_(std::random_device{}()) {
+    dataset_name = config.dataset_name;
+    variable_idx = config.variable_idx;
+    section_range = config.section_range;
+    frame_range = config.frame_range;
+    n_frame = config.n_frame;
+    resolution = config.resolution;
+    train_size = config.train_size;
+    inst_norm = config.inst_norm;
+    augment_type = config.augment_type;
+    norm_type = config.norm_type;
+    train_mode = config.train_mode;
+    test_size = config.test_size;
+    n_overlap = config.n_overlap;
+    downsampling = config.downsampling;
 
     if (augment_type.find("downsample") != augment_type.end()) {
         max_downsample = augment_type["downsample"];
@@ -432,66 +414,35 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> BaseDataset::apply_inst_
     return std::make_tuple(data, offset, scale);
 }
 
-// Note: this is not defined in the  code so i think there was a bug becasue it is used my impl of it
-// 
 torch::Tensor BaseDataset::apply_downsampling(torch::Tensor data, int step) {
     auto indices = torch::arange(0, data.size(-1), step, data.device());
     return data.index_select(-1, indices);
 }
 
-template<typename T>
-T BaseDataset::get_arg(const std::unordered_map<std::string, torch::Tensor>& args,
-                      const std::string& key, const T& default_value) {
-    auto it = args.find(key);
-    if (it != args.end()) {
-        return it->second.item<T>();
-    }
-    return default_value;
-}
-
-std::string BaseDataset::get_string_arg(const std::unordered_map<std::string, torch::Tensor>& args,
-                                       const std::string& key, const std::string& default_value) {
-    return default_value;
-}
-
-template int BaseDataset::get_arg<int>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const int&);
-template float BaseDataset::get_arg<float>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const float&);
-template bool BaseDataset::get_arg<bool>(const std::unordered_map<std::string, torch::Tensor>&, const std::string&, const bool&);
-
-
-ScientificDataset::ScientificDataset(const std::unordered_map<std::string, torch::Tensor>& args)
-    : BaseDataset(args) 
+ScientificDataset::ScientificDataset(const DatasetConfig& config)
+    : BaseDataset(config) 
 {
     std::cout << "*************** Loading dataset ***************\n";
 
     torch::Tensor data;
 
     // Decide where to load data from
-    if (args.find("memory_data") != args.end()) {
+    if (config.memory_data.has_value()) {
         data = loadDatasetInMemory(
-            args.at("memory_data"),
-            args.find("variable_idx") != args.end() ? std::optional<int>(args.at("variable_idx").item<int>()) : std::nullopt,
-            (args.find("section_start") != args.end() && args.find("section_end") != args.end())
-                ? std::optional<std::pair<int,int>>(std::make_pair(args.at("section_start").item<int>(), args.at("section_end").item<int>()))
-                : std::nullopt,
-            (args.find("frame_start") != args.end() && args.find("frame_end") != args.end())
-                ? std::optional<std::pair<int,int>>(std::make_pair(args.at("frame_start").item<int>(), args.at("frame_end").item<int>()))
-                : std::nullopt
+            config.memory_data.value(),
+            config.variable_idx,
+            config.section_range,
+            config.frame_range
         );
-    } else if (args.find("binary_data") != args.end()) {
-        // Treat binary_data as a pre-loaded tensor (no strings)
-        data = loadDatasetInMemory(
-            args.at("binary_data"),
-            args.find("variable_idx") != args.end() ? std::optional<int>(args.at("variable_idx").item<int>()) : std::nullopt,
-            (args.find("section_start") != args.end() && args.find("section_end") != args.end())
-                ? std::optional<std::pair<int,int>>(std::make_pair(args.at("section_start").item<int>(), args.at("section_end").item<int>()))
-                : std::nullopt,
-            (args.find("frame_start") != args.end() && args.find("frame_end") != args.end())
-                ? std::optional<std::pair<int,int>>(std::make_pair(args.at("frame_start").item<int>(), args.at("frame_end").item<int>()))
-                : std::nullopt
+    } else if (config.binary_path.has_value()) {
+        data = loadDatasetFromBinary(
+            config.binary_path.value(),
+            config.variable_idx,
+            config.section_range,
+            config.frame_range
         );
     } else {
-        throw std::runtime_error("No numeric data provided (memory_data or binary_data required).");
+        throw std::runtime_error("No data source provided (memory_data or binary_path required).");
     }
 
     // --- rest of constructor logic ---
@@ -559,7 +510,6 @@ ScientificDataset::ScientificDataset(const std::unordered_map<std::string, torch
     reverse_id_map = buildReverseIdMap(visible_length, filtered_labels);
 }
 
-
 // ------------------- Load from memory -------------------
 torch::Tensor ScientificDataset::loadDatasetInMemory(
     const torch::Tensor& memory_data,
@@ -626,7 +576,6 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
 
     return data.to(torch::kFloat);
 }
-
 
 int64_t ScientificDataset::update_length() {
     dataset_length = shape[0] * shape[1] * t_samples;

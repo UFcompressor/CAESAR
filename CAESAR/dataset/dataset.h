@@ -38,11 +38,50 @@ dataFiltering(const torch::Tensor& data, int nFrame);
 
 std::unordered_map<int, int> buildReverseIdMap(int visableLen, const std::vector<int>& filteredLables);
 
+// Helper functions for extracting arguments
+std::optional<std::pair<int, int>> get_optional_pair_arg(
+    const std::unordered_map<std::string, torch::Tensor>& args,
+    const std::string& key);
+
+bool get_bool_arg(const std::unordered_map<std::string, torch::Tensor>& args,
+                  const std::string& key, bool default_value);
+
+std::unordered_map<std::string, int> get_augment_type_arg(
+    const std::unordered_map<std::string, torch::Tensor>& args);
+
+// Configuration struct to hold all dataset parameters
+struct DatasetConfig {
+    // Data source - only one should be provided
+    std::optional<std::string> binary_path;      // Path to binary file
+    std::optional<torch::Tensor> memory_data;    // Pre-loaded tensor data
+    
+    // Required parameters
+    std::string dataset_name = "Customized Dataset";
+    int n_frame;
+    
+    // Data selection parameters
+    std::optional<int> variable_idx;
+    std::optional<std::pair<int, int>> section_range;
+    std::optional<std::pair<int, int>> frame_range;
+    std::optional<std::pair<int, int>> resolution;
+    
+    // Training parameters
+    int train_size = 256;
+    bool inst_norm = true;
+    std::unordered_map<std::string, int> augment_type;
+    std::string norm_type = "mean_range";
+    bool train_mode = false;
+    
+    // Test parameters
+    std::pair<int, int> test_size = {256, 256};
+    int n_overlap = 0;
+    int downsampling = 1;
+};
 
 // I am doing my python sytax bc it is nicer for the user and for myself
 class BaseDataset {
 public:
-    explicit BaseDataset(const std::unordered_map<std::string, torch::Tensor>& args);
+    explicit BaseDataset(const DatasetConfig& config);
     virtual ~BaseDataset() = default;
 
     torch::Tensor apply_augments(torch::Tensor data);
@@ -51,7 +90,6 @@ public:
     std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> apply_inst_norm_with_params(torch::Tensor data);
 
 protected:
-    std::string data_path;
     std::string dataset_name;
     std::optional<int> variable_idx;
     std::optional<std::pair<int, int>> section_range;
@@ -73,19 +111,12 @@ private:
     mutable std::mt19937 rng_;
     
     torch::Tensor apply_downsampling(torch::Tensor data, int step);
- template<typename T>
-    T get_arg(const std::unordered_map<std::string, torch::Tensor>& args, 
-              const std::string& key, const T& default_value);
-    
-    std::string get_string_arg(const std::unordered_map<std::string, torch::Tensor>& args,
-                              const std::string& key, const std::string& default_value);
-
 };
 
 
 class ScientificDataset : public BaseDataset {
 public:
-    explicit ScientificDataset(const std::unordered_map<std::string, torch::Tensor>& args);
+    explicit ScientificDataset(const DatasetConfig& config);
 
     size_t size() const;
     std::unordered_map<std::string, torch::Tensor> get_item(size_t idx);
@@ -115,22 +146,22 @@ private:
 
     torch::Tensor var_offset;
     torch::Tensor var_scale;
-torch::Tensor loadDatasetInMemory(
+
+    // Load from memory (pre-loaded tensor)
+    torch::Tensor loadDatasetInMemory(
         const torch::Tensor& memory_data,
         std::optional<int> variable_idx = std::nullopt,
         std::optional<std::pair<int,int>> section_range = std::nullopt,
         std::optional<std::pair<int,int>> frame_range = std::nullopt
     );
 
-    // Load from binary
+    // Load from binary file
     torch::Tensor loadDatasetFromBinary(
         const std::string& bin_path,
         std::optional<int> variable_idx = std::nullopt,
         std::optional<std::pair<int,int>> section_range = std::nullopt,
         std::optional<std::pair<int,int>> frame_range = std::nullopt
     );
-
-
 
     int64_t update_length();
 
