@@ -296,6 +296,7 @@ torch::Tensor BaseDataset::apply_augments(torch::Tensor data) {
     return data;
 }
 
+// BUG HERE ______________________________________________________________________________________
 torch::Tensor BaseDataset::apply_padding_or_crop(torch::Tensor data) {
     int cur_size = data.size(-1);
 
@@ -320,6 +321,7 @@ torch::Tensor BaseDataset::apply_padding_or_crop(torch::Tensor data) {
 
     return data;
 }
+// ______________________________________________________________________________________________
 
 torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data, bool return_norm) {
     if (return_norm) {
@@ -445,7 +447,6 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         throw std::runtime_error("No data source provided (memory_data or binary_path required).");
     }
 
-    // --- rest of constructor logic ---
 
     auto sizes = data.sizes();
     shape_org = std::vector<int64_t>(sizes.begin(), sizes.end());
@@ -465,7 +466,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         data = torch::cat({data, tail_frames}, 2);
     }
 
-    // Normalization
+    // Normalization comment it out ????????
     if (!inst_norm) {
         if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
 
@@ -547,7 +548,6 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
     std::ifstream file(bin_path, std::ios::binary);
     if (!file.is_open()) throw std::runtime_error("Cannot open binary file: " + bin_path);
 
-    // Read 5D shape
     int64_t shape[5];
     file.read(reinterpret_cast<char*>(shape), 5 * sizeof(int64_t));
 
@@ -589,13 +589,13 @@ size_t ScientificDataset::size() const {
 torch::Tensor ScientificDataset::original_data() const {
     torch::Tensor data = data_input.clone();
 
-    // Apply deblocking if in test mode
+ 
     if (!train_mode) {
         data = deblockHW(data, std::get<0>(block_info),
                         std::get<1>(block_info), std::get<2>(block_info));
     }
 
-    // Apply inverse normalization if inst_norm is false
+
     if (!inst_norm) {
         data = data * var_scale + var_offset;
     }
@@ -605,7 +605,6 @@ torch::Tensor ScientificDataset::original_data() const {
 
 torch::Tensor ScientificDataset::input_data() const {
     auto data = original_data();
-    // Remove padding from temporal dimension
     data = data.index({torch::indexing::Slice(),
                       torch::indexing::Slice(),
                       torch::indexing::Slice(0, shape[2] - pad_T)});
@@ -613,7 +612,6 @@ torch::Tensor ScientificDataset::input_data() const {
 }
 
 torch::Tensor ScientificDataset::recons_data(const torch::Tensor& recons_data) const {
-    // Remove padding from temporal dimension
     return recons_data.index({torch::indexing::Slice(),
                              torch::indexing::Slice(),
                              torch::indexing::Slice(0, shape[2] - pad_T)});
@@ -629,7 +627,6 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::post_processin
 
     torch::Tensor processed_data = data.clone();
 
-    // Apply augmentations during training
     if (is_training) {
         processed_data = apply_augments(processed_data);
         processed_data = apply_padding_or_crop(processed_data);
@@ -656,7 +653,6 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::post_processin
 }
 
 std::unordered_map<std::string, torch::Tensor> ScientificDataset::get_item(size_t idx) {
-    // Handle index wrapping and filtering
     idx = idx % dataset_length;
 
     if (!filtered_labels.empty()) {
@@ -666,7 +662,6 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::get_item(size_
         }
     }
 
-    // Calculate 3D indices
     int64_t idx0 = idx / (shape[1] * t_samples);
     int64_t idx1 = (idx / t_samples) % shape[1];
     int64_t idx2 = idx % t_samples;
@@ -674,14 +669,12 @@ std::unordered_map<std::string, torch::Tensor> ScientificDataset::get_item(size_
     int64_t start_t = idx2 * delta_t;
     int64_t end_t = start_t + n_frame;
 
-    // Extract data slice
     torch::Tensor data = data_input.index({
         static_cast<int64_t>(idx0),
         static_cast<int64_t>(idx1),
         torch::indexing::Slice(start_t, end_t)
     });
 
-    // Apply post-processing
     auto data_dict = post_processing(data, static_cast<int>(idx0), train_mode);
 
     torch::Tensor index_tensor = torch::tensor({idx0, idx1, start_t, end_t}, torch::kLong);
