@@ -2,7 +2,7 @@
 set -e
 
 
-MODEL_DIR="pretrained"
+MODEL_DIR="pretrained_models"
 mkdir -p "$MODEL_DIR"
 
 download_from_gdrive() {

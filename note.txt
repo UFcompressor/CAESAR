@@ -19,3 +19,6 @@ idk
 
 
 5. make a test build and a realse build
+
+
+clean up the repo
