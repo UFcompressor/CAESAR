@@ -6,7 +6,6 @@
 #include <cmath>
 #include <ctime>
 #include <chrono>
-#include <filesystem>
 #include <memory>
 #include <cstdlib>
 #include <map>
@@ -19,13 +18,16 @@
 #include <torch/script.h>
 #include <unordered_map>
 #include <algorithm>
+ // put clags #ifdef(cuda) this same with amd/apple gpu and other othe
+// --------------------------------------------------------
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <zstd.h> 
 #include <nvcomp/lz4.h>
 #include <nvcomp/cascaded.h>
+// ------------------------------------------------------
 
+#include <zstd.h> 
 class PCA {
 public:
     PCA(int numComponents = -1, const std::string& device = "cuda");

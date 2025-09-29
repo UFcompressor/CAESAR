@@ -5,7 +5,7 @@
  *
  */
 
-#include "compressor.h"
+#include "CAESAR.h"
 #include <iostream>
 
 

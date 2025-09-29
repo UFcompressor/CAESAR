@@ -11,23 +11,21 @@ The goal is to provide a C++ implementation of the CAESAR foundation model.
 
 mkdir build && cd build
 
-cmake .. \
-  -DCMAKE_PREFIX_PATH="/home/eklasky/Software/libtorch;/home/eklasky/local/nvcomp" \
-  -DCMAKE_CXX_FLAGS="-I/home/eklasky/local/nvcomp/include"
+  cmake   -DCMAKE_PREFIX_PATH="/blue/ranka/eklasky/caesar_venv/lib/python3.11/site-packages/torch/share/cmake"   -DCMAKE_CXX_FLAGS="-I/home/eklasky/local/nvcomp/include"   -DCMAKE_EXE_LINKER_FLAGS="-L/home/eklasky/local/nvcomp/lib"   ..
 
-
-make
+cmake --build . --config Release -- -j$(nproc)
 
 ../download_models.sh
 
 
 ---
 Required Dependencies
-1. LibTorch (PyTorch C++ API)
+1. PyTorch
 
 PyTorch official website
 
-Choose the LibTorch version that matches your CUDA version (e.g., CUDA 12.0).
+Use pytorch 2.8+
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
 2. nvCOMP (NVIDIA Compression Library)
 
@@ -57,7 +55,6 @@ Ensure nvcc is in your PATH.
 
 For compression support. Can be installed locally if needed.
 
-link to install  libtorch: https://pytorch.org/
 link to install https://developer.nvidia.com/cuda-12-9-0-download-archive?target_os=Linux
 
 

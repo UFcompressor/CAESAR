@@ -1,6 +1,4 @@
-#ifndef COMPRESSOR_H
-#define COMPRESSOR_H
-
+#pragma once
 #include <string>
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -92,5 +90,5 @@ private:
 
 };
 
-#endif 
+
 

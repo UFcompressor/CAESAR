@@ -466,7 +466,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         data = torch::cat({data, tail_frames}, 2);
     }
 
-    // Normalization comment it out ????????
+    // Normalization comment it out ???????? ======================================================================
     if (!inst_norm) {
         if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
 
@@ -490,6 +490,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         var_offset = offset.to(torch::kFloat);
         var_scale = scale.to(torch::kFloat);
     }
+    // =====================================================================================================
 
     data = data.to(torch::kFloat);
 
