@@ -15,8 +15,13 @@ mkdir build && cd build
 
 cmake --build . --config Release -- -j$(nproc)
 
-../download_models.sh
+cd ..
 
+./download_models.sh
+
+cd models/compress_models/
+
+python3 compress_model.py
 
 ---
 Required Dependencies

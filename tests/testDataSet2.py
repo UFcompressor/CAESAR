@@ -14,7 +14,7 @@ def save_tensor_binary(tensor, filename):
     print(f"Saved tensor with shape {tuple(tensor.shape)} to {filename}")
 
 # Use bigger H, W so reflection pad works (>= 256)
-shape = (2, 10, 100, 256, 256)
+shape = (2, 12, 256, 256, 256)
 
 for i in range(1, 4):
     preloaded_data = torch.randn(shape, dtype=torch.float32)
