@@ -23,9 +23,9 @@ def save_tensor_binary(tensor, filename):
 shape = (2, 12, 256, 256, 256)
 
 # Create grid for spatial coordinates
-x = torch.linspace(0, 2 * np.pi, shape[3])
-y = torch.linspace(0, 2 * np.pi, shape[4])
-t = torch.linspace(0, 4 * np.pi, shape[2])  # time dimension
+x = torch.linspace(0, 1+ 2 * np.pi, shape[3])
+y = torch.linspace(0, 1- 2 * np.pi, shape[4])
+t = torch.linspace(0,2 - 4 * np.pi, shape[2])  # time dimension
 X, Y, T = torch.meshgrid(x, y, t, indexing="ij")  # shape (H, W, T)
 
 # Example synthetic "scientific" fields

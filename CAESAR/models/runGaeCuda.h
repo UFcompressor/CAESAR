@@ -18,15 +18,13 @@
 #include <torch/script.h>
 #include <unordered_map>
 #include <algorithm>
- // put clags #ifdef(cuda) this same with amd/apple gpu and other othe
-// --------------------------------------------------------
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <nvcomp/lz4.h>
 #include <nvcomp/cascaded.h>
-// ------------------------------------------------------
-
+#endif
 #include <zstd.h> 
 class PCA {
 public:

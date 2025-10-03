@@ -467,29 +467,29 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
     }
 
     // Normalization comment it out ???????? ======================================================================
-    if (!inst_norm) {
-        if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
-
-        torch::Tensor offset, scale;
-        if (norm_type == "mean_range") {
-            offset = torch::mean(data, {1,2,3,4}, true);
-            scale = torch::amax(data, {1,2,3,4}, true) - torch::amin(data, {1,2,3,4}, true);
-            data = (data - offset) / scale;
-        } else if (norm_type == "min_max") {
-            auto data_min = torch::amin(data, {1,2,3,4}, true);
-            auto data_max = torch::amax(data, {1,2,3,4}, true);
-            offset = (data_max + data_min) / 2;
-            scale = (data_max - data_min) / 2;
-            data = (data - offset) / scale;
-        } else if (norm_type == "std") {
-            offset = torch::mean(data, {1,2,3,4}, true);
-            scale = torch::std(data, {1,2,3,4}, true);
-            data = (data - offset) / scale;
-        }
-
-        var_offset = offset.to(torch::kFloat);
-        var_scale = scale.to(torch::kFloat);
-    }
+//    if (!inst_norm) {
+//        if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
+//
+//        torch::Tensor offset, scale;
+//        if (norm_type == "mean_range") {
+//            offset = torch::mean(data, {1,2,3,4}, true);
+//            scale = torch::amax(data, {1,2,3,4}, true) - torch::amin(data, {1,2,3,4}, true);
+//            data = (data - offset) / scale;
+//        } else if (norm_type == "min_max") {
+//            auto data_min = torch::amin(data, {1,2,3,4}, true);
+//            auto data_max = torch::amax(data, {1,2,3,4}, true);
+//            offset = (data_max + data_min) / 2;
+//            scale = (data_max - data_min) / 2;
+//            data = (data - offset) / scale;
+//        } else if (norm_type == "std") {
+//            offset = torch::mean(data, {1,2,3,4}, true);
+//            scale = torch::std(data, {1,2,3,4}, true);
+//            data = (data - offset) / scale;
+//        }
+//
+//        var_offset = offset.to(torch::kFloat);
+//        var_scale = scale.to(torch::kFloat);
+//    }
     // =====================================================================================================
 
     data = data.to(torch::kFloat);

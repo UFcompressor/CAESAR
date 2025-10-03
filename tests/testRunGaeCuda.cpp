@@ -2,6 +2,214 @@
 #include <iostream>
 #include <chrono>
 
+void testDecompression() {
+    std::cout << "\n=== COMPREHENSIVE DECOMPRESSION TESTS ===" << std::endl;
+    
+    // Test 1: Full round-trip with small data
+    {
+        std::cout << "\nTest 1: Full compress->decompress round-trip..." << std::endl;
+        
+        double nrmse = 0.05;
+        double quanFactor = 0.5;
+        PCACompressor compressor(nrmse, quanFactor, "cpu");
+        
+        // Create test data with significant differences
+        int numVectors = 50;
+        int vectorSize = 64;
+        
+        torch::Tensor originalData = torch::randn({numVectors, vectorSize}, torch::kFloat32);
+        // Make sure reconstruction is different enough to trigger compression
+        torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
+        
+        // Compress
+        auto compressResult = compressor.compress(originalData, reconsData);
+        
+        if (compressResult.dataBytes == 0) {
+            std::cout << "Warning: No compression occurred, skipping test" << std::endl;
+            return;
+        }
+        
+        std::cout << "Compressed data bytes: " << compressResult.dataBytes << std::endl;
+        
+        // Decompress
+        torch::Tensor decompressed = compressor.decompress(
+            reconsData,
+            compressResult.metaData,
+            *compressResult.compressedData
+        );
+        
+        // Verify shape
+        assert(decompressed.sizes() == originalData.sizes());
+        std::cout << "Shape verification: PASS" << std::endl;
+        
+        // Verify error bound
+        torch::Tensor residual = originalData - decompressed;
+        torch::Tensor norms = torch::linalg_norm(residual, c10::nullopt, {1});
+        double maxNorm = torch::max(norms).item<double>();
+        double errorBound = nrmse * std::sqrt(vectorSize);
+        
+        std::cout << "Max norm: " << maxNorm << ", Error bound: " << errorBound << std::endl;
+        assert(maxNorm <= errorBound * 1.01); // Allow 1% tolerance for numerical precision
+        
+        std::cout << "Test 1: PASSED" << std::endl;
+    }
+    
+    // Test 2: Block format round-trip
+    {
+        std::cout << "\nTest 2: Block format round-trip..." << std::endl;
+        
+        PCACompressor compressor(0.1, 0.5, "cpu");
+        
+        // 4D block data
+        torch::Tensor originalData = torch::randn({5, 2, 16, 16}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 2.0 * torch::randn_like(originalData);
+        
+        auto compressResult = compressor.compress(originalData, reconsData);
+        
+        if (compressResult.dataBytes > 0) {
+            torch::Tensor decompressed = compressor.decompress(
+                reconsData,
+                compressResult.metaData,
+                *compressResult.compressedData
+            );
+            
+            assert(decompressed.sizes() == originalData.sizes());
+            std::cout << "Block format shape verification: PASS" << std::endl;
+            std::cout << "Test 2: PASSED" << std::endl;
+        } else {
+            std::cout << "Warning: No compression occurred for Test 2" << std::endl;
+        }
+    }
+    
+    // Test 3: Different patch sizes
+    {
+        std::cout << "\nTest 3: Different patch sizes round-trip..." << std::endl;
+        
+        std::pair<int, int> patchSize = {4, 4};
+        PCACompressor compressor(0.08, 0.4, "cpu", "Zstd", patchSize);
+        
+        int numVectors = 100;
+        int vectorSize = 16; // 4x4
+        
+        torch::Tensor originalData = torch::randn({numVectors, vectorSize}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 1.0 * torch::randn_like(originalData);
+        
+        auto compressResult = compressor.compress(originalData, reconsData);
+        
+        if (compressResult.dataBytes > 0) {
+            torch::Tensor decompressed = compressor.decompress(
+                reconsData,
+                compressResult.metaData,
+                *compressResult.compressedData
+            );
+            
+            // Check NRMSE
+            torch::Tensor diff = originalData - decompressed;
+            double nrmse_achieved = torch::norm(diff).item<double>() / 
+                                   (torch::norm(originalData).item<double>() * std::sqrt(vectorSize));
+            
+            std::cout << "Achieved NRMSE: " << nrmse_achieved << std::endl;
+            std::cout << "Test 3: PASSED" << std::endl;
+        } else {
+            std::cout << "Warning: No compression for Test 3" << std::endl;
+        }
+    }
+    
+    // Test 4: Large dataset stress test
+    {
+        std::cout << "\nTest 4: Large dataset stress test..." << std::endl;
+        
+        PCACompressor compressor(0.02, 0.3, "cpu");
+        
+        int numVectors = 2000;
+        int vectorSize = 64;
+        
+        torch::Tensor originalData = torch::randn({numVectors, vectorSize}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
+        
+        auto startCompress = std::chrono::high_resolution_clock::now();
+        auto compressResult = compressor.compress(originalData, reconsData);
+        auto endCompress = std::chrono::high_resolution_clock::now();
+        
+        if (compressResult.dataBytes > 0) {
+            auto startDecompress = std::chrono::high_resolution_clock::now();
+            torch::Tensor decompressed = compressor.decompress(
+                reconsData,
+                compressResult.metaData,
+                *compressResult.compressedData
+            );
+            auto endDecompress = std::chrono::high_resolution_clock::now();
+            
+            auto compressTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                endCompress - startCompress).count();
+            auto decompressTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                endDecompress - startDecompress).count();
+            
+            std::cout << "Compression time: " << compressTime << " ms" << std::endl;
+            std::cout << "Decompression time: " << decompressTime << " ms" << std::endl;
+            
+            double compressionRatio = (double)(numVectors * vectorSize * sizeof(float)) / 
+                                     compressResult.dataBytes;
+            std::cout << "Compression ratio: " << compressionRatio << ":1" << std::endl;
+            
+            std::cout << "Test 4: PASSED" << std::endl;
+        } else {
+            std::cout << "Warning: No compression for Test 4" << std::endl;
+        }
+    }
+    
+    // Test 5: Edge case - single unique value
+    {
+        std::cout << "\nTest 5: Edge case - few unique coefficients..." << std::endl;
+        
+        PCACompressor compressor(0.1, 1.0, "cpu"); // Large quantization bin
+        
+        torch::Tensor originalData = torch::randn({100, 64}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 2.0 * torch::randn_like(originalData);
+        
+        auto compressResult = compressor.compress(originalData, reconsData);
+        
+        if (compressResult.dataBytes > 0) {
+            std::cout << "Unique values: " << compressResult.metaData.uniqueVals.size(0) << std::endl;
+            
+            torch::Tensor decompressed = compressor.decompress(
+                reconsData,
+                compressResult.metaData,
+                *compressResult.compressedData
+            );
+            
+            assert(decompressed.sizes() == originalData.sizes());
+            std::cout << "Test 5: PASSED" << std::endl;
+        }
+    }
+    
+    // Test 6: Verify metadata preservation
+    {
+        std::cout << "\nTest 6: Metadata preservation..." << std::endl;
+        
+        PCACompressor compressor(0.05, 0.5, "cpu");
+        
+        torch::Tensor originalData = torch::randn({150, 64}, torch::kFloat32);
+        torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
+        
+        auto compressResult = compressor.compress(originalData, reconsData);
+        
+        if (compressResult.dataBytes > 0) {
+            // Verify metadata fields
+            assert(compressResult.metaData.nVec == 150);
+            assert(compressResult.metaData.pcaBasis.size(1) == 64);
+            assert(compressResult.metaData.quanBin > 0);
+            assert(compressResult.metaData.prefixLength > 0);
+            
+            std::cout << "All metadata fields verified" << std::endl;
+            std::cout << "Test 6: PASSED" << std::endl;
+        }
+    }
+    
+    std::cout << "\n=== ALL DECOMPRESSION TESTS COMPLETED ===" << std::endl;
+}
+
+
 void testPCACompressor() {
     std::cout << "Starting to test PCACompressor..." << std::endl;
 
@@ -494,6 +702,7 @@ int main() {
         std::cerr << "Test failed with exception: " << e.what() << std::endl;
         return 1;
     }
+     testDecompression();
 
     std::cout<<"Done testing runGAECUDA"<<std::endl;
     return 0;

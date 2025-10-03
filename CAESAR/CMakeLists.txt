@@ -1,5 +1,6 @@
-# this is for parallel IO for later when using CARSAR directlu
+# this is for parallel IO for later when using CARSAR directly
 find_package(MPI)
+find_package(CUDA) 
 
 add_library(caesar_lib
     CAESAR.cpp
@@ -18,20 +19,28 @@ add_library(caesar_lib
     models/compressModules3dMidSR.cpp
     models/utils.cpp
     models/networkComponents.cpp
-    # ---------------------------------------
-    models/runGaeCuda.cpp
+    # --------------------------------------------
 
     # BCRN
-    # will go away 
+    # will go away
     # ----------------------------
     models/BCRN/blocks.cpp
     models/BCRN/bcrnModel.cpp
     # -----------------------------------
 
     models/compress/compressor.cpp
-
-
 )
+
+# Add runGaeCuda.cpp only if CUDA is available
+if(CUDA_FOUND)
+    message(STATUS "CUDA found, building with CUDA support")
+    target_sources(caesar_lib PRIVATE models/runGaeCuda.cpp)
+    target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+    target_include_directories(caesar_lib PUBLIC ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES})
+else()
+    message(STATUS "CUDA not found, building without CUDA support")
+endif()
 
 target_include_directories(caesar_lib
     PUBLIC
@@ -48,7 +57,6 @@ target_link_libraries(caesar_lib
         "${TORCH_LIBRARIES}"
 )
 
-# need to do this with cuda
 # If MPI was found, add its includes, link libs, and a flag
 if(MPI_FOUND)
     target_include_directories(caesar_lib PUBLIC ${MPI_INCLUDE_PATH})
