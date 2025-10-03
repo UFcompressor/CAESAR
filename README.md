@@ -49,7 +49,7 @@ LibTorch (PyTorch C++ API)
 CMake (3.10+)
 Zstandard (zstd) - For compression support
 
-⚡ Optional (GPU Support)
+Optional (GPU Support)
 
 CUDA Toolkit (ensure nvcc is in PATH)
 nvCOMP (NVIDIA Compression Library)
