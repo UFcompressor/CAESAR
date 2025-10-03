@@ -30,7 +30,10 @@ Required Dependencies
 PyTorch official website
 
 Use pytorch 2.8+
+INVIDA GPUU
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+CPU
+pip install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
 
 2. nvCOMP (NVIDIA Compression Library)
 

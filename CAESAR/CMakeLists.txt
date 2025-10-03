@@ -1,6 +1,6 @@
 # this is for parallel IO for later when using CARSAR directly
 find_package(MPI)
-find_package(CUDA) 
+find_package(CUDA)
 
 add_library(caesar_lib
     CAESAR.cpp
@@ -13,33 +13,25 @@ add_library(caesar_lib
     pretrainedModelIO/CaesarModelLoader.cpp
 
     # Models
-
-    # will go away
-    # --------------------------------------------
     models/compressModules3dMidSR.cpp
     models/utils.cpp
     models/networkComponents.cpp
-    # --------------------------------------------
-
-    # BCRN
-    # will go away
-    # ----------------------------
     models/BCRN/blocks.cpp
     models/BCRN/bcrnModel.cpp
-    # -----------------------------------
-
     models/compress/compressor.cpp
+
+    # Always include runGaeCuda.cpp (needed for linking test_runGaeCuda)
+    models/runGaeCuda.cpp
 )
 
-# Add runGaeCuda.cpp only if CUDA is available
+# If CUDA is available, add flags + libs
 if(CUDA_FOUND)
-    message(STATUS "CUDA found, building with CUDA support")
-    target_sources(caesar_lib PRIVATE models/runGaeCuda.cpp)
+    message(STATUS "CUDA found, enabling CUDA support in runGaeCuda.cpp")
     target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
     target_include_directories(caesar_lib PUBLIC ${CUDA_INCLUDE_DIRS})
     target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES})
 else()
-    message(STATUS "CUDA not found, building without CUDA support")
+    message(STATUS "CUDA not found, building runGaeCuda.cpp without CUDA")
 endif()
 
 target_include_directories(caesar_lib
