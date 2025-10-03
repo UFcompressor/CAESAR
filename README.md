@@ -22,6 +22,10 @@ The goal is to provide a C++ version of the CAESAR foundation model for efficien
 ```bash
 # Create build directory
 
+git clone https://github.com/Shaw-git/CAESAR/tree/main
+export CAESAR:$PYTHONPATH
+cd CAESAR
+pip install -r requirements.txt
 
 mkdir build && cd build
 
@@ -72,22 +76,13 @@ Python Environment
 This project relies on a Python environment for preprocessing and model compression.
 CPU Installation
 Tested with Python 3.10+:
-bashpip install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu \
+pip install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu \
   --index-url https://download.pytorch.org/whl/cpu
 
-pip install numpy<2 scipy==1.15.3 tqdm==4.67.1 einops==0.8.1 pyyaml==6.0.2 \
-  bsconv==0.4.0 einops-exts==0.0.4 rotary-embedding-torch==0.8.6 \
-  compressai==1.2.6 imageio==2.37.0 zstandard==0.23.0
 GPU Installation (NVIDIA only)
-Tested with CUDA 11.8/12.x:
-bashpip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
-  --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
-pip install numpy<2 scipy==1.15.3 tqdm==4.67.1 einops==0.8.1 pyyaml==6.0.2 \
-  bsconv==0.4.0 einops-exts==0.0.4 rotary-embedding-torch==0.8.6 \
-  compressai==1.2.6 imageio==2.37.0 zstandard==0.23.0
 
-pip install cupy-cuda11x==13.4.1 nvidia-nvcomp-cu11==4.2.0.11
 
 References
 
@@ -103,6 +98,7 @@ Notes
 GPU support currently tested only with NVIDIA GPUs
 MPI support is optional and not required for basic use
 Model compression requires Python environment to be set up correctly
+
 
 
 
