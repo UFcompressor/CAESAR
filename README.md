@@ -21,6 +21,8 @@ The goal is to provide a C++ version of the CAESAR foundation model for efficien
 ## Build Instructions
 ```bash
 # Create build directory
+
+
 mkdir build && cd build
 
 # Configure with CMake
@@ -102,4 +104,5 @@ GPU support currently tested only with NVIDIA GPUs
 MPI support is optional and not required for basic use
 Model compression requires Python environment to be set up correctly
 
-RetryClaude does not have the ability to run the code it generates yet.
+
+
