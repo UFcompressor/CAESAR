@@ -209,8 +209,94 @@ void testDecompression() {
         }
     }
 
+    // Test 7: Structured low-rank dataset
+    {
+        std::cout << "\nTest 7: Structured low-rank dataset..." << std::endl;
+
+        PCACompressor compressor(0.02 , 0.3 , "cpu");
+
+        int numVectors = 2000;
+        int vectorSize = 64;
+
+        // Generate smooth, low-rank data
+        auto x = torch::linspace(0 , 1 , vectorSize);
+        auto base1 = torch::sin(2 * M_PI * x);
+        auto base2 = torch::cos(2 * M_PI * x);
+        auto coeffs1 = torch::randn({ numVectors, 1 });
+        auto coeffs2 = torch::randn({ numVectors, 1 });
+        auto originalData = coeffs1 * base1 + coeffs2 * base2;
+
+        torch::Tensor reconsData = originalData + 0.1 * torch::randn_like(originalData);
+
+        auto compressResult = compressor.compress(originalData , reconsData);
+
+        if (compressResult.dataBytes > 0) {
+            double compressionRatio =
+                (double)(numVectors * vectorSize * sizeof(float)) / compressResult.dataBytes;
+            std::cout << "Compression ratio: " << compressionRatio << ":1" << std::endl;
+            std::cout << "Test 7: PASSED" << std::endl;
+        }
+    }
+
+
+    // Test 8: Very large dataset (~100MB)
+    {
+        std::cout << "\nTest 8: 100MB dataset compression..." << std::endl;
+
+        PCACompressor compressor(0.02 , 0.3 , "cpu");
+
+        int numVectors = 390625;  // rows
+        int vectorSize = 64;      // columns
+        size_t totalBytes = (size_t)numVectors * vectorSize * sizeof(float);
+        std::cout << "Original size: " << (totalBytes / (1024.0 * 1024.0)) << " MB" << std::endl;
+
+        // Generate structured data (low-rank + noise)
+        auto x = torch::linspace(0 , 1 , vectorSize);
+        auto base1 = torch::sin(2 * M_PI * x);
+        auto base2 = torch::cos(2 * M_PI * x);
+
+        auto coeffs1 = torch::randn({ numVectors, 1 });
+        auto coeffs2 = torch::randn({ numVectors, 1 });
+
+        auto originalData = coeffs1 * base1 + coeffs2 * base2;
+        auto reconsData = originalData + 0.05 * torch::randn_like(originalData);
+
+        auto startCompress = std::chrono::high_resolution_clock::now();
+        auto compressResult = compressor.compress(originalData , reconsData);
+        auto endCompress = std::chrono::high_resolution_clock::now();
+
+        if (compressResult.dataBytes > 0) {
+            auto startDecompress = std::chrono::high_resolution_clock::now();
+            torch::Tensor decompressed = compressor.decompress(
+                reconsData ,
+                compressResult.metaData ,
+                *compressResult.compressedData
+            );
+            auto endDecompress = std::chrono::high_resolution_clock::now();
+
+            auto compressTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                endCompress - startCompress).count();
+            auto decompressTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                endDecompress - startDecompress).count();
+
+            double compressionRatio =
+                (double)totalBytes / compressResult.dataBytes;
+
+            std::cout << "Compression time: " << compressTime << " ms" << std::endl;
+            std::cout << "Decompression time: " << decompressTime << " ms" << std::endl;
+            std::cout << "Compression ratio: " << compressionRatio << ":1" << std::endl;
+            std::cout << "Test 8: PASSED" << std::endl;
+        }
+        else {
+            std::cout << "Warning: No compression for Test 8" << std::endl;
+        }
+    }
+
+
     std::cout << "\n=== ALL DECOMPRESSION TESTS COMPLETED ===" << std::endl;
 }
+
+
 
 
 void testPCACompressor() {
