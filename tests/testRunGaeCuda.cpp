@@ -2,6 +2,184 @@
 #include <iostream>
 #include <chrono>
 
+
+// Helper function to compute NRMSE (Normalized Root Mean Square Error)
+double computeNRMSE(const torch::Tensor& original , const torch::Tensor& reconstructed) {
+    auto diff = original - reconstructed;
+    auto mse = torch::mean(diff * diff).item<double>();
+    auto rmse = std::sqrt(mse);
+
+    auto data_range = original.max().item<double>() - original.min().item<double>();
+    return rmse / data_range;
+}
+
+// Helper function to normalize data like in Python code
+std::tuple<torch::Tensor , double , double , double> normalizeData(const torch::Tensor& data) {
+    double x_min = data.min().item<double>();
+    double x_max = data.max().item<double>();
+    double x_mean = data.mean().item<double>();
+
+    auto normalized = (data - x_mean) / (x_max - x_min);
+    return std::make_tuple(normalized , x_min , x_max , x_mean);
+}
+
+// Helper function to denormalize data
+torch::Tensor denormalizeData(const torch::Tensor& data , double x_min , double x_max , double x_mean) {
+    return data * (x_max - x_min) + x_mean;
+}
+
+void testPCACompressor2() {
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Testing PCACompressor Implementation" << std::endl;
+    std::cout << "========================================\n" << std::endl;
+
+    // Create synthetic test data similar to what would come from a .npz file
+    // Using shape [100, 64] as an example (100 vectors of size 64)
+    int num_vectors = 100;
+    int vector_size = 64;  // 8x8 patch size
+
+    torch::manual_seed(42);
+
+    // Generate original data
+    torch::Tensor original_data = torch::randn({ num_vectors, vector_size } , torch::kFloat32);
+
+    // Generate reconstructed data (with some error to simulate NN reconstruction)
+    torch::Tensor recons_data = original_data + torch::randn({ num_vectors, vector_size } , torch::kFloat32) * 0.1;
+
+    // Get data statistics
+    int64_t data_size_bits = original_data.numel() * original_data.element_size() * 8;
+    double data_size_gbytes = original_data.nbytes() / (1024.0 * 1024.0 * 1024.0);
+
+    std::cout << "Original/Recons Shape: [" << num_vectors << ", " << vector_size << "]" << std::endl;
+    std::cout << "Original Data Size: " << data_size_bits << " bits" << std::endl;
+    std::cout << "Bits Per Element: " << original_data.element_size() * 8 << std::endl;
+    std::cout << "Data Size: " << data_size_gbytes * 1024 * 1024 << " MB\n" << std::endl;
+
+    // Normalize data (as done in Python)
+    auto [original_norm , x_min , x_max , x_mean] = normalizeData(original_data);
+    auto [recons_norm , y_min , y_max , y_mean] = normalizeData(recons_data);
+
+    std::cout << "Data range: [" << x_min << ", " << x_max << "], mean: " << x_mean << std::endl;
+
+    // Compute initial NRMSE
+    double init_nrmse = computeNRMSE(original_norm , recons_norm);
+    std::cout << "Initial NRMSE: " << init_nrmse << "\n" << std::endl;
+
+    // Test multiple NRMSE targets
+    std::vector<double> test_nrmse_values = { 0.001, 0.0005, 0.0002, 0.0001 };
+
+    // Simulated latent bits (would come from neural network compression)
+    int64_t latent_bits = data_size_bits / 10;  // Assume 10x compression from NN
+
+    std::cout << "Latent Bits: " << latent_bits << std::endl;
+    std::cout << "Original CR from NN: " << static_cast<double>(data_size_bits) / latent_bits << "\n" << std::endl;
+
+    std::cout << "========================================" << std::endl;
+    std::cout << "Running Compression Tests" << std::endl;
+    std::cout << "========================================\n" << std::endl;
+
+    for (double target_nrmse : test_nrmse_values) {
+        std::cout << "\n--- Testing NRMSE Target: " << target_nrmse << " ---" << std::endl;
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        // Initialize compressor (matching Python: nrmse, 2, codec_algorithm="Zstd", device=device)
+        double quan_factor = 2.0;
+#ifdef USE_CUDA
+        std::string device = torch::cuda::is_available() ? "cuda" : "cpu";
+#else
+        std::string device = "cpu";
+#endif
+        std::string codec_alg = "Zstd";
+        std::pair<int , int> patch_size = { 8, 8 };
+
+        PCACompressor compressor(target_nrmse , quan_factor , device , codec_alg , patch_size);
+
+        // Compress
+        auto compression_result = compressor.compress(original_norm , recons_norm);
+        auto encoding_end = std::chrono::high_resolution_clock::now();
+
+        int64_t compressed_bytes = compression_result.dataBytes;
+
+        // Decompress
+        torch::Tensor recons_gae;
+        if (compressed_bytes > 0) {
+            recons_gae = compressor.decompress(recons_norm ,
+                compression_result.metaData ,
+                *compression_result.compressedData);
+        }
+        else {
+            std::cout << "No compression needed (all vectors within error bound)" << std::endl;
+            recons_gae = recons_norm.clone();
+        }
+
+        auto decoding_end = std::chrono::high_resolution_clock::now();
+
+        // Denormalize for final comparison
+        auto original_denorm = denormalizeData(original_norm , x_min , x_max , x_mean);
+        auto recons_gae_denorm = denormalizeData(recons_gae , x_min , x_max , x_mean);
+
+        // Compute final NRMSE
+        double final_nrmse = computeNRMSE(original_denorm , recons_gae_denorm);
+
+        // Compute compression ratio
+        int64_t total_compressed_size = compressed_bytes + (latent_bits / 8);
+        double compression_ratio = static_cast<double>(original_data.nbytes()) / total_compressed_size;
+
+        // Compute speeds
+        auto encoding_time = std::chrono::duration<double>(encoding_end - start_time).count();
+        auto decoding_time = std::chrono::duration<double>(decoding_end - encoding_end).count();
+        auto total_time = std::chrono::duration<double>(decoding_end - start_time).count();
+
+        double encoding_speed = data_size_gbytes / encoding_time;
+        double decoding_speed = data_size_gbytes / decoding_time;
+        double overall_speed = data_size_gbytes / total_time;
+
+        // Print results
+        std::cout << "\nResults:" << std::endl;
+        std::cout << "  Target NRMSE:     " << target_nrmse << std::endl;
+        std::cout << "  Final NRMSE:      " << final_nrmse << std::endl;
+        std::cout << "  Compressed Bytes: " << compressed_bytes << std::endl;
+        std::cout << "  Compression Ratio: " << compression_ratio << "x" << std::endl;
+        std::cout << "  Overall Speed:    " << overall_speed * 1024 << " MB/s" << std::endl;
+        std::cout << "  Encoding Speed:   " << encoding_speed * 1024 << " MB/s" << std::endl;
+        std::cout << "  Decoding Speed:   " << decoding_speed * 1024 << " MB/s" << std::endl;
+
+        // Validate accuracy (floating point tolerance of 1e-6)
+        double nrmse_error = std::abs(final_nrmse - target_nrmse);
+        std::cout << "\nValidation:" << std::endl;
+        std::cout << "  NRMSE Error:      " << nrmse_error << std::endl;
+
+        if (nrmse_error < target_nrmse * 1.1 || nrmse_error < 1e-6) {
+            std::cout << "  Status:           ✓ PASSED (within tolerance)" << std::endl;
+        }
+        else {
+            std::cout << "  Status:           ✗ FAILED (exceeds tolerance)" << std::endl;
+        }
+
+        // Check element-wise differences
+        auto diff = torch::abs(original_denorm - recons_gae_denorm);
+        double max_diff = diff.max().item<double>();
+        double mean_diff = diff.mean().item<double>();
+
+        std::cout << "  Max Element Diff: " << max_diff << std::endl;
+        std::cout << "  Mean Element Diff: " << mean_diff << std::endl;
+
+        // Clean up
+#ifdef USE_CUDA
+        if (torch::cuda::is_available()) {
+            torch::cuda::empty_cache();
+        }
+#endif
+    }
+
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Test Complete" << std::endl;
+    std::cout << "========================================" << std::endl;
+}
+
+
 void testDecompression() {
     std::cout << "\n=== COMPREHENSIVE DECOMPRESSION TESTS ===" << std::endl;
 
@@ -803,6 +981,7 @@ int main() {
         return 1;
     }
     testDecompression();
+    testPCACompressor2();
 
     std::cout << "Done testing runGAECUDA" << std::endl;
     return 0;
