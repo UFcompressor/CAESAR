@@ -2,16 +2,31 @@
 find_package(MPI)
 find_package(CUDA)
 
+# Find Zstd library
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
+endif()
+
+# Fallback if pkg-config doesn't find it
+if(NOT ZSTD_FOUND)
+    find_path(ZSTD_INCLUDE_DIR zstd.h)
+    find_library(ZSTD_LIBRARY NAMES zstd)
+    if(ZSTD_INCLUDE_DIR AND ZSTD_LIBRARY)
+        set(ZSTD_FOUND TRUE)
+        message(STATUS "Found Zstd: ${ZSTD_LIBRARY}")
+    else()
+        message(FATAL_ERROR "Zstd library not found. Please install libzstd-dev")
+    endif()
+endif()
+
 add_library(caesar_lib
     CAESAR.cpp
     normalize.cpp
-
     # Dataset
     dataset/dataset.cpp
-
     # Pretrained model IO
     pretrainedModelIO/CaesarModelLoader.cpp
-
     # Models
     models/compressModules3dMidSR.cpp
     models/utils.cpp
@@ -19,7 +34,6 @@ add_library(caesar_lib
     models/BCRN/blocks.cpp
     models/BCRN/bcrnModel.cpp
     models/compress/compressor.cpp
-
     # Always include runGaeCuda.cpp (needed for linking test_runGaeCuda)
     models/runGaeCuda.cpp
 )
@@ -49,10 +63,20 @@ target_link_libraries(caesar_lib
         "${TORCH_LIBRARIES}"
 )
 
+# Link Zstd library
+if(ZSTD_FOUND)
+    if(TARGET PkgConfig::ZSTD)
+        target_link_libraries(caesar_lib PUBLIC PkgConfig::ZSTD)
+    else()
+        target_include_directories(caesar_lib PUBLIC ${ZSTD_INCLUDE_DIR})
+        target_link_libraries(caesar_lib PUBLIC ${ZSTD_LIBRARY})
+    endif()
+    message(STATUS "Zstd support enabled")
+endif()
+
 # If MPI was found, add its includes, link libs, and a flag
 if(MPI_FOUND)
     target_include_directories(caesar_lib PUBLIC ${MPI_INCLUDE_PATH})
     target_link_libraries(caesar_lib PUBLIC MPI::MPI_CXX)
     target_compile_definitions(caesar_lib PUBLIC USE_MPI)
 endif()
-
