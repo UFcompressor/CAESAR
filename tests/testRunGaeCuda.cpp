@@ -169,7 +169,7 @@ void testPCACompressor2() {
         // Clean up
 #ifdef USE_CUDA
         if (torch::cuda::is_available()) {
-            torch::cuda::empty_cache();
+             c10::cuda::CUDACachingAllocator::emptyCache();
         }
 #endif
     }
