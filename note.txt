@@ -22,3 +22,9 @@ idk
 
 
 clean up the repo
+
+TESTING python env and compressor  
+git clone https://github.com/E53klasky/Cpython_pytorch_converter.git
+
+
+
