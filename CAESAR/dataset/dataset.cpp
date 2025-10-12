@@ -161,6 +161,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
     int T = sizes[2];
     int H = sizes[3];
     int W = sizes[4];
+    
     if (T % nFrame != 0){
         throw std::runtime_error("T must be divisible by nFrame");
     }
@@ -169,7 +170,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
     std::vector<std::pair<int, float>> filteredBlocks;
     std::vector<int> filteredLabels;
 
-   for (int v = 0; v < V; v++) {
+    for (int v = 0; v < V; v++) {
         for (int s = 0; s < S; s++) {
             for (int blk_idx = 0; blk_idx < samples; blk_idx++) {
                 int start = blk_idx * nFrame;
@@ -177,10 +178,16 @@ data_filtering(const torch::Tensor& data, int nFrame) {
 
                 torch::Tensor block = data.index({v, s, torch::indexing::Slice(start, end)});
 
+                // Flatten the block
                 torch::Tensor flat = block.reshape({-1});
                 float first_val = flat[0].item<float>();
 
-                if (torch::allclose(flat, torch::full_like(flat, first_val))) {
+                // Check if ALL values equal the first value (exact equality, like Python)
+                // This is much faster than allclose and matches Python behavior
+                torch::Tensor comparison = (flat == first_val);
+                bool all_equal = torch::all(comparison).item<bool>();
+
+                if (all_equal) {
                     int label = v * (S * samples) + s * samples + blk_idx;
                     filteredBlocks.push_back({label, first_val});
                     filteredLabels.push_back(label);
@@ -189,7 +196,7 @@ data_filtering(const torch::Tensor& data, int nFrame) {
         }
     }
 
-   return {filteredBlocks, filteredLabels};
+    return {filteredBlocks, filteredLabels};
 }
 
 std::unordered_map<int, int> buildReverseIdMap(
@@ -467,29 +474,29 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
     }
 
     // Normalization comment it out ???????? ======================================================================
-//    if (!inst_norm) {
-//        if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
-//
-//        torch::Tensor offset, scale;
-//        if (norm_type == "mean_range") {
-//            offset = torch::mean(data, {1,2,3,4}, true);
-//            scale = torch::amax(data, {1,2,3,4}, true) - torch::amin(data, {1,2,3,4}, true);
-//            data = (data - offset) / scale;
-//        } else if (norm_type == "min_max") {
-//            auto data_min = torch::amin(data, {1,2,3,4}, true);
-//            auto data_max = torch::amax(data, {1,2,3,4}, true);
-//            offset = (data_max + data_min) / 2;
-//            scale = (data_max - data_min) / 2;
-//            data = (data - offset) / scale;
-//        } else if (norm_type == "std") {
-//            offset = torch::mean(data, {1,2,3,4}, true);
-//            scale = torch::std(data, {1,2,3,4}, true);
-//            data = (data - offset) / scale;
-//        }
-//
-//        var_offset = offset.to(torch::kFloat);
-//        var_scale = scale.to(torch::kFloat);
-//    }
+if (!inst_norm) {
+if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
+
+torch::Tensor offset, scale;
+if (norm_type == "mean_range") {
+offset = torch::mean(data, {1,2,3,4}, true);
+scale = torch::amax(data, {1,2,3,4}, true) - torch::amin(data, {1,2,3,4}, true);
+data = (data - offset) / scale;
+} else if (norm_type == "min_max") {
+auto data_min = torch::amin(data, {1,2,3,4}, true);
+auto data_max = torch::amax(data, {1,2,3,4}, true);
+offset = (data_max + data_min) / 2;
+scale = (data_max - data_min) / 2;
+data = (data - offset) / scale;
+} else if (norm_type == "std") {
+offset = torch::mean(data, {1,2,3,4}, true);
+scale = torch::std(data, {1,2,3,4}, true);
+data = (data - offset) / scale;
+}
+
+var_offset = offset.to(torch::kFloat);
+var_scale = scale.to(torch::kFloat);
+}
     // =====================================================================================================
 
     data = data.to(torch::kFloat);
