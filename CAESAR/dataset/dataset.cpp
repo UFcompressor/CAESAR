@@ -305,16 +305,23 @@ torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data , bool return_norm
 
     torch::Tensor offset , scale;
 
-    if (norm_type == "mean_range") {
-        offset = torch::mean(data).view({ 1, 1, 1 });
-        scale = data.max() - data.min();
+        if (norm_type == "mean_range") {
+        offset = torch::mean(data);
 
-        if (scale.item<float>() == 0) {
+        // Compute scale more carefully to avoid precision loss
+        float data_max = data.max().item<float>();
+        float data_min = data.min().item<float>();
+        float scale_val = data_max - data_min;
+
+        if (scale_val == 0.0f) {
             throw std::runtime_error("Scale is zero.");
         }
 
+        scale = torch::tensor(scale_val);
         data = (data - offset) / scale;
 
+        offset = offset.view({ 1, 1, 1 });
+        scale = scale.view({ 1, 1, 1 });
     }
     else if (norm_type == "min_max") {
         auto dmin = data.min();
@@ -525,28 +532,31 @@ torch::Tensor ScientificDataset::loadDatasetInMemory(
 
 // ------------------- Load from binary -------------------
 torch::Tensor ScientificDataset::loadDatasetFromBinary(
-    const std::string& bin_path ,
-    std::optional<int> variable_idx ,
-    std::optional<std::pair<int , int>> section_range ,
-    std::optional<std::pair<int , int>> frame_range)
+    const std::string& bin_path,
+    std::optional<int> variable_idx,
+    std::optional<std::pair<int, int>> section_range,
+    std::optional<std::pair<int, int>> frame_range)
 {
-    std::ifstream file(bin_path , std::ios::binary);
+    std::ifstream file(bin_path, std::ios::binary);
     if (!file.is_open()) throw std::runtime_error("Cannot open binary file: " + bin_path);
 
     int64_t shape[5];
-    file.read(reinterpret_cast<char*>(shape) , 5 * sizeof(int64_t));
+    file.read(reinterpret_cast<char*>(shape), 5 * sizeof(int64_t));
 
     size_t num_elements = shape[0] * shape[1] * shape[2] * shape[3] * shape[4];
     std::vector<float> buffer(num_elements);
-    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
+    file.read(reinterpret_cast<char*>(buffer.data()), num_elements * sizeof(float));
     file.close();
 
-    torch::Tensor data = torch::from_blob(buffer.data() ,
-        { shape[0], shape[1], shape[2], shape[3], shape[4] }).clone();
+    // Create tensor directly as Float32, no conversion needed
+    torch::Tensor data = torch::from_blob(
+        buffer.data(),
+        { shape[0], shape[1], shape[2], shape[3], shape[4] },
+        torch::kFloat32  // Explicitly specify dtype
+    ).clone();
 
     if (variable_idx.has_value()) {
-        data = data.index({ variable_idx.value() });
-        data = data.unsqueeze(0);
+        data = data.index({ variable_idx.value() }).unsqueeze(0);
     }
 
     if (section_range.has_value()) {
@@ -559,7 +569,7 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
         data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
     }
 
-    return data.to(torch::kFloat);
+    return data;  // Don't call .to(torch::kFloat) - it's already float32
 }
 
 int64_t ScientificDataset::update_length() {
