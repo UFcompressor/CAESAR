@@ -609,16 +609,12 @@ torch::Tensor ScientificDataset::deblocking_hw(const torch::Tensor& data) const 
 
 std::unordered_map<std::string , torch::Tensor> ScientificDataset::post_processing(
     const torch::Tensor& data , int var_idx , bool is_training) {
-
     torch::Tensor processed_data = data.clone();
-
     if (is_training) {
         processed_data = apply_augments(processed_data);
         processed_data = apply_padding_or_crop(processed_data);
     }
-
     torch::Tensor offset , scale;
-
     if (inst_norm) {
         auto norm_result = apply_inst_norm_with_params(processed_data);
         processed_data = std::get<0>(norm_result);
@@ -629,42 +625,38 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::post_processi
         offset = var_offset.index({ var_idx }).view({ 1, 1, 1 });
         scale = var_scale.index({ var_idx }).view({ 1, 1, 1 });
     }
-
     std::unordered_map<std::string , torch::Tensor> data_dict;
     data_dict["input"] = processed_data.unsqueeze(0);
     data_dict["offset"] = offset.unsqueeze(0);
     data_dict["scale"] = scale.unsqueeze(0);
-
     return data_dict;
 }
 
 std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size_t idx) {
     idx = idx % dataset_length;
-
     if (!filtered_labels.empty()) {
         auto it = reverse_id_map.find(static_cast<int>(idx));
         if (it != reverse_id_map.end()) {
             idx = it->second;
         }
     }
-
     int64_t idx0 = idx / (shape[1] * t_samples);
     int64_t idx1 = (idx / t_samples) % shape[1];
     int64_t idx2 = idx % t_samples;
-
     int64_t start_t = idx2 * delta_t;
     int64_t end_t = start_t + n_frame;
-
+    
     torch::Tensor data = data_input.index({
         static_cast<int64_t>(idx0),
         static_cast<int64_t>(idx1),
         torch::indexing::Slice(start_t, end_t)
-        });
-
+    });
+    
+    // ADD THIS LINE - Add channel dimension!
+    data = data.unsqueeze(0);  // Now shape is [1, 8, 256, 256]
+    
     auto data_dict = post_processing(data , static_cast<int>(idx0) , train_mode);
-
     torch::Tensor index_tensor = torch::tensor({ idx0, idx1, start_t, end_t } , torch::kLong);
     data_dict["index"] = index_tensor;
-
     return data_dict;
 }
