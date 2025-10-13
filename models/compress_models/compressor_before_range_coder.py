@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.init as init
 from CAESAR.models.RangeEncoding import RangeCoder
 
+# TODO: Add AMD ROCm support and clean up all unsesary imports and comments
 
 def get_best_device():
     """
