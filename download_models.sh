@@ -22,4 +22,4 @@ download_from_gdrive "1sVmxgdg0EdyRK2PhihVamToR2gdRu1nz" "caesar_v.pt"
 
 echo " All models downloaded into ${MODEL_DIR}/"
 
-echo "All done rember to convert the files to a readable format for libtorch with extract_tensors.py /"
+

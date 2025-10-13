@@ -1,24 +1,8 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-
-
-# In[2]:
-
-
-# Export program
-
-
-# In[3]:
-
 
 from CAESAR.models.network_components import ResnetBlock, FlexiblePrior, Downsample, Upsample
 from CAESAR.models.utils import quantize, NormalDistribution
@@ -28,6 +12,21 @@ from CAESAR.models.BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch.nn as nn
 import torch.nn.init as init
 from CAESAR.models.RangeEncoding import RangeCoder
+
+
+def get_best_device():
+    """
+    Automatically select the best available device.
+    Priority: CUDA > AMD (ROCm) > CPU
+    """
+    if torch.cuda.is_available():
+        # Check if it's NVIDIA CUDA or AMD ROCm
+        device_name = torch.cuda.get_device_name(0)
+        print(f'Using CUDA device: {device_name}')
+        return "cuda:0"
+    else:
+        print('CUDA not available, using CPU')
+        return "cpu"
 
 
 def load_yaml(file_path):
@@ -57,8 +56,6 @@ def reshape_batch_3d_2d(batch_data):
     B,C,T,H,W = batch_data.shape
     batch_data = batch_data.permute([0,2,1,3,4]).reshape([B*T,C,H,W])
     return batch_data
-
-
 
 class Compressor(nn.Module):
     def __init__(
@@ -128,9 +125,6 @@ class Compressor(nn.Module):
 
 
     def hyper_encode(self, x):
-
-
-
 
         for i, (conv, act) in enumerate(self.hyper_enc):
             x = conv(x)
@@ -386,8 +380,6 @@ class ResnetCompressor(Compressor):
                 )
             )
 
-
-
 class CompressorMix(nn.Module):
     def __init__(
         self,
@@ -497,10 +489,6 @@ class CompressorMix(nn.Module):
         x = reshape_batch_2d_3d(x, batch_size)
         return x
 
-
-# In[4]:
-
-
 from collections import OrderedDict
 
 def remove_module_prefix(state_dict):
@@ -509,6 +497,9 @@ def remove_module_prefix(state_dict):
             new_key = k.replace("module.", "")
             new_state_dict[new_key] = v
         return new_state_dict
+
+# Get the best available device
+device = get_best_device()
 
 model = CompressorMix(
             dim=16,
@@ -521,18 +512,12 @@ model = CompressorMix(
             sr_dim=16
         )
 
-state_dict = remove_module_prefix(torch.load('./pretrained/caesar_v.pt', map_location='cuda'))
-#state_dict = torch.load('./pretrained/caesar_v.pt', map_location='cuda')
+state_dict = remove_module_prefix(torch.load('../../pretrained_models/caesar_v.pt', map_location=device))
 model.load_state_dict(state_dict)
-
-
-# In[5]:
-
 
 model.eval()
 with torch.no_grad():
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    print('device: ', device)
+    print(f'Using device: {device}')
     model = model.to(device)
     example_inputs=(torch.randn(8, 1, 8, 256, 256, device=device),)
     batch_dim = torch.export.Dim("batch", min=1, max=255)
@@ -548,10 +533,4 @@ with torch.no_grad():
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), "model.pt2"),
     )
-
-
-# In[ ]:
-
-
-
-
+    print(f"Packaged model to {output_path}")
