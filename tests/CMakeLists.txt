@@ -47,6 +47,9 @@ add_executable(test_dataset2 testDataSet2.cpp)
 # Only link if MPI was found
 target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs ${MPI_LIB})
 
+#Test: Comrpess
+add_executable(test_compress testCompress.cpp)
+target_link_libraries(test_compress PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs)
 
 # Collect all targets
 set(TEST_TARGETS
@@ -60,6 +63,7 @@ set(TEST_TARGETS
     test_networkComponents
     test_dataset
     test_dataset2
+    test_compress
 )
 
 # Copy DLLs on MSVC if needed
