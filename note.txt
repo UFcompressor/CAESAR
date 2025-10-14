@@ -35,3 +35,4 @@ test verified commit
 another test line
 final test line
 commit that will finally be verified
+verified commit email fix
