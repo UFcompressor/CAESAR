@@ -36,3 +36,4 @@ another test line
 final test line
 commit that will finally be verified
 verified commit email fix
+verified commit with github no-reply email
