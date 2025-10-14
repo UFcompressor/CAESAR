@@ -30,4 +30,4 @@ git clone https://github.com/E53klasky/Cpython_pytorch_converter.git
 fix python code above to have the right path for the pretrained model
 
 
-test
+
