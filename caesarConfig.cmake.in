@@ -1,0 +1,9 @@
+
+@PACKAGE_INIT@
+
+
+
+include("${CMAKE_CURRENT_LIST_DIR}/caesarTargets.cmake")
+
+check_required_components(caesar)
+
