@@ -31,13 +31,15 @@ add_library(caesar_lib STATIC
     models/runGaeCuda.cpp
 )
 
-target_include_directories(caesar_lib PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/dataset
-    ${CMAKE_CURRENT_SOURCE_DIR}/pretrainedModelIO
-    ${CMAKE_CURRENT_SOURCE_DIR}/models
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/BCRN
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/compress
+target_include_directories(caesar_lib
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dataset>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/pretrainedModelIO>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models/BCRN>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models/compress>
+        $<INSTALL_INTERFACE:include/caesar>
 )
 
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})

@@ -9,6 +9,17 @@ find_package(Torch REQUIRED)
 add_subdirectory(CAESAR)
 add_subdirectory(tests)
 
+# ----------------------------
+# Install headers recursively
+# ----------------------------
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
+        DESTINATION include/caesar
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+
+# ----------------------------
+# Install the library
+# ----------------------------
+add_library(caesar::caesar ALIAS caesar_lib)
 
 install(TARGETS caesar_lib
   EXPORT caesarTargets
@@ -16,16 +27,17 @@ install(TARGETS caesar_lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 
-  install(EXPORT caesarTargets
+# ----------------------------
+# Export targets for downstream projects
+# ----------------------------
+install(EXPORT caesarTargets
   FILE caesarTargets.cmake
   NAMESPACE caesar::
   DESTINATION lib/cmake/caesar)
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/include/ 
-        DESTINATION include/caesar
-        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-
-
+# ----------------------------
+# Generate package config files
+# ----------------------------
 include(CMakePackageConfigHelpers)
 
 write_basic_package_version_file(
@@ -42,15 +54,3 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/caesarConfig.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/caesarConfigVersion.cmake"
   DESTINATION lib/cmake/caesar)
-
-
-
-
-
-
-
-
-
-
-
-
