@@ -36,7 +36,7 @@ int main() {
     config.n_frame = 8;
     config.dataset_name = "Scientific Inference Dataset";
     config.variable_idx = 0;
-    config.section_range = { 0, 12 };
+    config.section_range = { 0, 13};
     config.frame_range = { 0, 256 };
     config.train_mode = false;
     config.inst_norm = true;
