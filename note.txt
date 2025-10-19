@@ -30,10 +30,7 @@ git clone https://github.com/E53klasky/Cpython_pytorch_converter.git
 fix python code above to have the right path for the pretrained model
 
 
-
 test verified commit
 another test line
 final test line
 commit that will finally be verified
-verified commit email fix
-verified commit with github no-reply email
