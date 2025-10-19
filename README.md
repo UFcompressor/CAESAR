@@ -105,5 +105,5 @@ MPI support is optional and not required for basic use
 Model compression requires Python environment to be set up correctly
 
 
-
+build with adios2: cmake ..   -DCMAKE_INSTALL_PREFIX=~/Programs/CAESAR_C/install   -DTorch_DIR=/home/adios/.local/lib/python3.11/site-packages/torch/share/cmake/Torch
 
