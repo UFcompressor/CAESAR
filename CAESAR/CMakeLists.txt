@@ -17,7 +17,7 @@ if(NOT ZSTD_FOUND)
     endif()
 endif()
 
-add_library(caesar_lib STATIC
+add_library(caesar_lib SHARED
     CAESAR.cpp
     normalize.cpp
     dataset/dataset.cpp
