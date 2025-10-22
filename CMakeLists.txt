@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(caesar)
+project(CAESAR)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,29 +16,29 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
 add_library(caesar::caesar ALIAS caesar_lib)
 
 install(TARGETS caesar_lib
-  EXPORT caesarTargets
+  EXPORT CAESARTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 
-install(EXPORT caesarTargets
-  FILE caesarTargets.cmake
+install(EXPORT CAESARTargets
+  FILE CAESARTargets.cmake
   NAMESPACE caesar::
   DESTINATION lib/cmake/caesar)
 
 include(CMakePackageConfigHelpers)
 
 write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/caesarConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfigVersion.cmake"
   VERSION 1.0.0
   COMPATIBILITY AnyNewerVersion)
 
 configure_package_config_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/caesarConfig.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/caesarConfig.cmake"
+  "${CMAKE_CURRENT_SOURCE_DIR}/CAESARConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfig.cmake"
   INSTALL_DESTINATION lib/cmake/caesar)
 
 install(FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/caesarConfig.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/caesarConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfigVersion.cmake"
   DESTINATION lib/cmake/caesar)
