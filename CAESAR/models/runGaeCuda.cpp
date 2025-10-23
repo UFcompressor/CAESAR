@@ -244,6 +244,25 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     auto inputShape = originalData.sizes();
 
+    // FIX: Save the total vector count BEFORE any transformations
+    int64_t totalVectors;
+    if (inputShape.size() == 2) {
+        totalVectors = originalData.size(0);
+    }
+    else {
+     // For block data, calculate number of vectors after block2Vector
+        int T = inputShape[inputShape.size() - 3];
+        int H = inputShape[inputShape.size() - 2];
+        int W = inputShape[inputShape.size() - 1];
+        int nH = H / patchSize_.first;
+        int nW = W / patchSize_.second;
+        totalVectors = T * nH * nW;
+        // Account for batch dimensions if any
+        for (int i = 0; i < inputShape.size() - 3; ++i) {
+            totalVectors *= inputShape[i];
+        }
+    }
+
     torch::Tensor originalDataDevice = originalData.to(device_ , true);
     torch::Tensor reconsDataDevice = reconsData.to(device_ , true);
 
@@ -259,52 +278,70 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     torch::Tensor norms = torch::linalg_norm(residualPca , c10::nullopt , { 1 });
     torch::Tensor processMask = norms > errorBound_;
-
     if (torch::sum(processMask).item<int64_t>() <= 0) {
+        std::cout << "[DEBUG] No elements exceed errorBound_. Returning empty result." << std::endl;
+
         MetaData metaData;
-        metaData.pcaBasis = torch::Tensor();
-        metaData.uniqueVals = torch::Tensor();
+        // FIX: pcaBasis should be 2D [0, vectorSize_], not 1D [0]
+        metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
+        metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
-        metaData.nVec = 0;
+        metaData.nVec = originalData.size(0);
         metaData.prefixLength = 0;
         metaData.dataBytes = 0;
+        std::cout << "[DEBUG] Total vectors (no PCA needed): " << metaData.nVec << std::endl;
 
-        CompressionResult result;
-        result.metaData = metaData;
-        result.compressedData = nullptr;
-        result.dataBytes = 0;
+        auto compressedData = std::make_unique<CompressedData>();
+        compressedData->data.clear();  // Better than = {}
+        compressedData->dataBytes = 0;
+        compressedData->coeffIntBytes = 0;
+        std::cout << "[DEBUG] Created empty CompressedData." << std::endl;
 
-        return result;
+        std::cout << "[DEBUG] Returning result..." << std::endl;
+        // FIX: Use aggregate initialization or return directly
+        return { metaData, std::move(compressedData), 0 };
     }
 
-    residualPca = residualPca.index({ processMask });
+    auto indices = torch::nonzero(processMask).squeeze(1);
+    std::cout << "[DEBUG] Selected " << indices.size(0) << " indices for PCA processing." << std::endl;
+
+    residualPca = torch::index_select(residualPca , 0 , indices);
 
     PCA pca(-1 , device_.str());
     pca.fit(residualPca);
     torch::Tensor pcaBasis = pca.components();
-    std::cout << "PCA basis shape: " << pcaBasis.sizes() << std::endl;
+    std::cout << "[DEBUG] PCA basis shape: " << pcaBasis.sizes() << std::endl;
 
     if (pcaBasis.size(0) == 0 || pcaBasis.size(1) == 0) {
         std::cout << "PCA failed - empty basis" << std::endl;
+
         MetaData metaData;
-        metaData.dataBytes = 0;
-        metaData.pcaBasis = torch::empty({ 0, 0 });
-        metaData.uniqueVals = torch::empty({ 0 });
+        metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
+        metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
-        metaData.nVec = originalDataDevice.size(0);
+        metaData.nVec = originalData.size(0);
         metaData.prefixLength = 0;
-        return { metaData, nullptr, 0 };
+        metaData.dataBytes = 0;
+
+        auto compressedData = std::make_unique<CompressedData>();
+        compressedData->data.clear();
+        compressedData->dataBytes = 0;
+        compressedData->coeffIntBytes = 0;
+
+        return { metaData, std::move(compressedData), 0 };
     }
 
     torch::Tensor allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
+    std::cout << "[DEBUG] allCoeff shape: " << allCoeff.sizes() << std::endl;
 
     torch::Tensor reconstructedResidual = torch::matmul(allCoeff , pcaBasis);
     torch::Tensor reconError = torch::abs(reconstructedResidual - residualPca);
     double reconErrorMax = reconError.max().item<double>();
+    std::cout << "[DEBUG] PCA reconstruction error max: " << reconErrorMax << std::endl;
 
     if (reconErrorMax > error_) {
-        std::cout << "[PCA] Switching to float64 due to high PCA reconstruction error: "
-            << reconErrorMax << std::endl;
+        std::cout << "[WARN] High PCA reconstruction error (" << reconErrorMax
+            << ") > " << error_ << " — switching to float64" << std::endl;
 
         residualPca = residualPca.to(torch::kDouble);
         pca.fit(residualPca);
@@ -312,6 +349,7 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
         allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
     }
 
+    std::cout << "[DEBUG] Cleaning up intermediate tensors" << std::endl;
     originalDataDevice = torch::Tensor();
     reconsDataDevice = torch::Tensor();
     residualPca = torch::Tensor();
@@ -319,10 +357,12 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     torch::Tensor allCoeffPower = allCoeff.pow(2);
     torch::Tensor sortIndex = torch::argsort(allCoeffPower , 1 , true);
+    std::cout << "[DEBUG] Sorting coefficients by power" << std::endl;
 
     torch::Tensor allCoeffSorted = torch::gather(allCoeff , 1 , sortIndex);
     torch::Tensor quanCoeffSorted = torch::round(allCoeffSorted / quanBin_) * quanBin_;
     torch::Tensor resCoeffSorted = allCoeffSorted - quanCoeffSorted;
+    std::cout << "[DEBUG] Quantization bin size: " << quanBin_ << std::endl;
 
     allCoeffSorted = torch::Tensor();
     cleanupGPUMemory();
@@ -330,41 +370,52 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower , 1 , sortIndex) - resCoeffSorted.pow(2);
     torch::Tensor stepErrors = torch::ones_like(allCoeffPowerDesc);
     torch::Tensor remainErrors = torch::sum(allCoeffPower , 1);
+    std::cout << "[DEBUG] Starting step error loop..." << std::endl;
 
     for (int64_t i = 0; i < stepErrors.size(1); ++i) {
         remainErrors = remainErrors - allCoeffPowerDesc.select(1 , i);
         stepErrors.select(1 , i) = remainErrors;
     }
 
+    std::cout << "[DEBUG] Finished step error loop" << std::endl;
+
     allCoeffPowerDesc = torch::Tensor();
     remainErrors = torch::Tensor();
     cleanupGPUMemory();
 
     torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
+    std::cout << "[DEBUG] Generated mask shape: " << mask.sizes() << std::endl;
+
     stepErrors = torch::Tensor();
     cleanupGPUMemory();
 
     torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt) , 1);
     auto batchIndices = torch::arange(mask.size(0) , torch::TensorOptions().device(device_));
     mask.index_put_({ batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1) } , true);
+    std::cout << "[DEBUG] Applied firstFalseIdx mask modification" << std::endl;
 
     torch::Tensor selectedCoeffQ = quanCoeffSorted * mask;
+    std::cout << "[DEBUG] selectedCoeffQ shape: " << selectedCoeffQ.sizes() << std::endl;
+
     quanCoeffSorted = torch::Tensor();
     cleanupGPUMemory();
 
     torch::Tensor selectedCoeffUnsortQ = torch::zeros_like(selectedCoeffQ);
     auto idx = torch::arange(selectedCoeffQ.size(0) , torch::TensorOptions().device(device_)).unsqueeze(1);
     selectedCoeffUnsortQ.scatter_(1 , sortIndex , selectedCoeffQ);
+    std::cout << "[DEBUG] Restored original coefficient order" << std::endl;
 
     selectedCoeffQ = torch::Tensor();
     sortIndex = torch::Tensor();
     cleanupGPUMemory();
 
     mask = selectedCoeffUnsortQ != 0;
+    std::cout << "[DEBUG] Nonzero mask count: " << torch::sum(mask).item<int64_t>() << std::endl;
 
     torch::Tensor coeffIntFlatten = torch::round(
         allCoeff.masked_select(mask) / quanBin_
     );
+    std::cout << "[DEBUG] Flattened coefficient count: " << coeffIntFlatten.size(0) << std::endl;
 
     selectedCoeffUnsortQ = torch::Tensor();
     allCoeff = torch::Tensor();
@@ -374,12 +425,14 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     torch::Tensor uniqueVals = std::get<0>(uniqueResult);
     torch::Tensor inverseIndices = std::get<1>(uniqueResult);
     coeffIntFlatten = inverseIndices;
+    std::cout << "[DEBUG] Unique values count: " << uniqueVals.size(0) << std::endl;
 
     cleanupGPUMemory();
 
     auto prefixResult = indexMaskPrefix(mask);
     torch::Tensor prefixMaskFlatten = prefixResult.first;
     torch::Tensor maskLength = prefixResult.second;
+    std::cout << "[DEBUG] Prefix mask length: " << prefixMaskFlatten.size(0) << std::endl;
 
     mask = torch::Tensor();
     cleanupGPUMemory();
@@ -397,15 +450,23 @@ CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     mainData.maskLength = maskLength;
     mainData.coeffInt = coeffIntFlatten;
 
+    std::cout << "[DEBUG] Compressing lossless portion..." << std::endl;
     auto compressResult = compressLossless(metaData , mainData);
     metaData.dataBytes = compressResult.second;
+    std::cout << "[DEBUG] Compression complete. Compressed bytes: " << compressResult.second << std::endl;
 
+    std::cout << "[DEBUG] Exiting PCACompressor::compress()" << std::endl;
     return { metaData, std::move(compressResult.first), compressResult.second };
 }
+
 
 torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
     const MetaData& metaData ,
     const CompressedData& compressedData) {
+
+    if (metaData.dataBytes == 0 || metaData.pcaBasis.numel() == 0) {
+        return reconsData.clone();  // Return reconstruction as-is
+    }
     auto inputShape = reconsData.sizes();
     torch::Tensor reconsDevice = reconsData.clone().to(device_);
 

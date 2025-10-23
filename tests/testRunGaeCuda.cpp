@@ -169,7 +169,7 @@ void testPCACompressor2() {
         // Clean up
 #ifdef USE_CUDA
         if (torch::cuda::is_available()) {
-             c10::cuda::CUDACachingAllocator::emptyCache();
+            c10::cuda::CUDACachingAllocator::emptyCache();
         }
 #endif
     }
@@ -521,6 +521,7 @@ void testPCACompressor() {
             << ", " << reconsData.size(1) << "]" << std::endl;
 
         try {
+            std::cout << "Starting compression..." << std::endl;
             auto result = compressor.compress(originalData , reconsData);
 
             std::cout << "Compression completed!" << std::endl;
@@ -563,12 +564,17 @@ void testPCACompressor() {
 
         std::cout << "Data bytes (should be 0): " << result.dataBytes << std::endl;
         assert(result.dataBytes == 0);
-        assert(result.compressedData == nullptr);
+
+        // FIX: Check for empty compression, not nullptr
+        assert(result.compressedData != nullptr && "compressedData should never be null");
+        assert(result.compressedData->dataBytes == 0 && "dataBytes should be 0 for empty compression");
+        assert(result.compressedData->data.empty() && "data vector should be empty");
+        assert(result.metaData.pcaBasis.size(0) == 0 && "pcaBasis should have 0 rows");
 
         std::cout << "Test 3 passed" << std::endl;
     }
 
-    // Test 4: Different patch sizes
+        // Test 4: Different patch sizes
     {
         std::cout << "Test 4: Different patch sizes..." << std::endl;
 
