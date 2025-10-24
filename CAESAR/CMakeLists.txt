@@ -21,12 +21,6 @@ add_library(caesar_lib SHARED
     CAESAR.cpp
     normalize.cpp
     dataset/dataset.cpp
-    pretrainedModelIO/CaesarModelLoader.cpp
-    models/compressModules3dMidSR.cpp
-    models/utils.cpp
-    models/networkComponents.cpp
-    models/BCRN/blocks.cpp
-    models/BCRN/bcrnModel.cpp
     models/compress/compressor.cpp
     models/runGaeCuda.cpp
 )

@@ -1,0 +1,23 @@
+# Ignore build artifacts
+build/
+install/
+*.o
+*.o.d
+*.so
+*.a
+*.cmake
+CMakeFiles/
+CMakeCache.txt
+Makefile
+
+# Ignore IDE settings
+.vscode/
+
+# Ignore generated model files
+models/compress_models/
+pretrained_models/
+
+# Ignore Python cache (if any)
+__pycache__/
+*.pyc
+
