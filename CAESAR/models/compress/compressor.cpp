@@ -1,8 +1,8 @@
 #include "compressor.h"
 #include <filesystem>
-
+// NOTE: I am hard coding the path this needs to be changed I rather the user not have to give an extra argument
 Compressor::Compressor(torch::Device device)
-    : device_(device) , model_path_("../../models/compress_models/model.pt2") {
+    : device_(device) , model_path_("/home/adios/Programs/CAESAR_C/models/compress_models/model.pt2") {
     load_model();
 }
 
