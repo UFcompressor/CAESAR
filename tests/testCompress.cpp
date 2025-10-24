@@ -1,6 +1,6 @@
 #include <iostream>
 #include <fstream>
-#include "../CAESAR/models/compress/compressor.h"
+#include "../CAESAR/models/compressor.h"
 #include "../CAESAR/dataset/dataset.h"
 
 // Struct for tensor metadata

@@ -214,7 +214,7 @@ TEST_PASS();
 }
 
 TEST(mean_range_normalization)
-auto data = torch::ones({ 1, 1, 8, 4, 4 }) * 10.0f; // All values = 10
+auto data = torch::ones({ 1, 1, 8, 14, 14 }) * 10.0f; // All values = 10
 
 DatasetConfig config;
 config.n_frame = 8;
@@ -238,7 +238,7 @@ TEST_PASS();
 }
 
 TEST(min_max_normalization)
-auto data = torch::arange(0 , 64).view({ 1, 1, 8, 2, 4 }).to(torch::kFloat); // Values 0-63
+auto data = torch::arange(0 , 64).view({ 1, 1, 8, 32, 32 }).to(torch::kFloat); // Values 0-63
 
 DatasetConfig config;
 config.n_frame = 8;

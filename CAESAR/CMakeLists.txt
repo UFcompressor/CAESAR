@@ -21,18 +21,17 @@ add_library(caesar_lib SHARED
     CAESAR.cpp
     normalize.cpp
     dataset/dataset.cpp
-    models/compress/compressor.cpp
+    models/compressor.cpp
     models/runGaeCuda.cpp
+    models/range_coder/rans_coder.cpp
 )
 
 target_include_directories(caesar_lib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dataset>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/pretrainedModelIO>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models/BCRN>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models/compress>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/range_coder>
         $<INSTALL_INTERFACE:include/caesar>
 )
 

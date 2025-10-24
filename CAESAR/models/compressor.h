@@ -1,7 +1,7 @@
 #pragma once
 #include <torch/torch.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
-#include "../../dataset/dataset.h"
+#include "../dataset/dataset.h"
 #include <string>
 #include <vector>
 #include <iostream>
