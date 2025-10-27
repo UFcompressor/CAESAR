@@ -21,16 +21,23 @@ add_executable(test_dataset2 testDataSet2.cpp)
 # Only link if MPI was found
 target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs ${MPI_LIB})
 
-#Test: Comrpess
-add_executable(test_compress testCompress.cpp)
-target_link_libraries(test_compress PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs)
 
-# Collect all targets
+# Step 1: Declare the executable with only source files
+add_executable(test_caesarCD test_caesarCD.cpp)
+
+# Step 2: Link libraries with PRIVATE keyword
+target_link_libraries(test_caesarCD
+    PRIVATE
+    caesar_lib
+    "${TORCH_LIBRARIES}"
+    stdc++fs
+)
+
 set(TEST_TARGETS
     test_runGaeCuda
     test_dataset
     test_dataset2
-    test_compress
+    test_caesarCD
 )
 
 # Copy DLLs on MSVC if needed

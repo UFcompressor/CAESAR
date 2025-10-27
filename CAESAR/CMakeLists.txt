@@ -21,9 +21,10 @@ add_library(caesar_lib SHARED
     CAESAR.cpp
     normalize.cpp
     dataset/dataset.cpp
-    models/compressor.cpp
     models/runGaeCuda.cpp
     models/range_coder/rans_coder.cpp
+    models/caesar_compress.cpp
+    models/caesar_decompress.cpp
 )
 
 target_include_directories(caesar_lib

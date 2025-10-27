@@ -5,14 +5,14 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
-from CAESAR.models.network_components import ResnetBlock, FlexiblePrior, Downsample, Upsample
-from CAESAR.models.utils import quantize, NormalDistribution
+from pyCAESAR.models.network_components import ResnetBlock, FlexiblePrior, Downsample, Upsample
+from pyCAESAR.models.utils import quantize, NormalDistribution
 import time
 import yaml
-from CAESAR.models.BCRN.bcrn_model import BluePrintConvNeXt_SR
+from pyCAESAR.models.BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch.nn as nn
 import torch.nn.init as init
-from CAESAR.models.RangeEncoding import RangeCoder
+from pyCAESAR.models.RangeEncoding import RangeCoder
 from collections import OrderedDict
 
 def load_yaml(file_path):
