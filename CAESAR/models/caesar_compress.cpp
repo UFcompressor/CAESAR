@@ -50,19 +50,6 @@ std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
     return std::vector<T>(tensor_data_ptr , tensor_data_ptr + num_elements);
 }
 
-torch::Tensor build_indexes_tensor_C(const std::vector<int32_t>& size) {
-    int64_t dims = size.size();
-    TORCH_CHECK(dims >= 2 , "Input size must have at least 2 dimensions (N, C, ...)");
-
-    int64_t C = size[1];
-    std::vector<int64_t> view_dims = { 1, C };
-    view_dims.insert(view_dims.end() , dims - 2 , 1);
-
-    torch::Tensor indexes = torch::arange(C).view(view_dims);
-    std::vector<int64_t> size_int64(size.begin() , size.end());
-    return indexes.expand(size_int64).to(torch::kInt32);
-}
-
 Compressor::Compressor(torch::Device device) : device_(device) {
     load_models();
     load_probability_tables();
@@ -100,6 +87,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
     std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
+    std::cout << "N_frame: " << config.n_frame << std::endl;
 
     // Load dataset
     ScientificDataset dataset(config);
@@ -120,16 +108,26 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     for (size_t i = 0; i < dataset.size(); i++) {
         auto sample = dataset.get_item(i);
         torch::Tensor input_tensor = sample["input"];
+
+        if (i == 0) {
+            std::cout << "\n*** FIRST SAMPLE CHECK ***" << std::endl;
+            std::cout << "Input sample shape: " << input_tensor.sizes() << std::endl;
+        }
+
         batch_inputs.push_back(input_tensor);
 
         if (batch_inputs.size() == static_cast<size_t>(batch_size) || i == dataset.size() - 1) {
-            std::cout << "\n--- Processing Batch " << result.num_batches << " ---" << std::endl;
-            std::cout << "Samples in batch: " << batch_inputs.size() << std::endl;
+            std::cout << "\n========================================" << std::endl;
+            std::cout << "--- Processing Batch " << result.num_batches << " ---" << std::endl;
+            std::cout << "Input samples in batch: " << batch_inputs.size() << std::endl;
+            std::cout << "========================================" << std::endl;
 
             // Concatenate batch
             torch::Tensor batched_input = torch::cat(batch_inputs , 0).to(device_);
+            std::cout << "[COMPRESS] Batched input shape: " << batched_input.sizes() << std::endl;
 
             // Run compression model
+            std::cout << "[COMPRESS] Running compressor model..." << std::endl;
             std::vector<torch::Tensor> inputs = { batched_input };
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
 
@@ -138,8 +136,34 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor q_hyper_latent = outputs[2];
             torch::Tensor hyper_indexes = outputs[3];
 
-            // Encode each sample in the batch
-            for (size_t j = 0; j < batch_inputs.size(); j++) {
+            std::cout << "[COMPRESS] Compressor outputs:" << std::endl;
+            std::cout << "  q_latent shape: " << q_latent.sizes() << std::endl;
+            std::cout << "  latent_indexes shape: " << latent_indexes.sizes() << std::endl;
+            std::cout << "  q_hyper_latent shape: " << q_hyper_latent.sizes() << std::endl;
+            std::cout << "  hyper_indexes shape: " << hyper_indexes.sizes() << std::endl;
+
+            // Check dimension relationship
+            int64_t num_input_samples = batch_inputs.size();
+            int64_t num_latent_codes = q_latent.sizes()[0];
+            std::cout << "\n*** DIMENSION CHECK ***" << std::endl;
+            std::cout << "Number of input samples: " << num_input_samples << std::endl;
+            std::cout << "Number of latent codes: " << num_latent_codes << std::endl;
+            std::cout << "Ratio (latent_codes / input_samples): "
+                << static_cast<double>(num_latent_codes) / num_input_samples << std::endl;
+
+            if (num_latent_codes == num_input_samples * 2) {
+                std::cout << "✓ CORRECT: Each input sample produces 2 latent codes!" << std::endl;
+            }
+            else if (num_latent_codes == num_input_samples) {
+                std::cout << "✗ WARNING: 1:1 ratio - this may be incorrect!" << std::endl;
+            }
+            else {
+                std::cout << "? UNEXPECTED ratio!" << std::endl;
+            }
+
+            // Encode each latent code
+            std::cout << "\n[ENCODE] Encoding " << num_latent_codes << " latent codes..." << std::endl;
+            for (int64_t j = 0; j < num_latent_codes; j++) {
                 // Extract symbols and indexes
                 std::vector<int32_t> latent_symbol = tensor_to_vector<int32_t>(
                     q_latent.select(0 , j).reshape(-1)
@@ -168,8 +192,15 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
                 result.encoded_latents.push_back(latent_encoded);
                 result.encoded_hyper_latents.push_back(hyper_encoded);
-                result.num_samples++;
+
+                if (j < 3 || j == num_latent_codes - 1) {
+                    std::cout << "  Encoded latent " << j << ": "
+                        << latent_encoded.size() << " bytes (latent), "
+                        << hyper_encoded.size() << " bytes (hyper)" << std::endl;
+                }
             }
+
+            result.num_samples += num_input_samples;
 
             batch_inputs.clear();
             result.num_batches++;
@@ -177,8 +208,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     }
 
     std::cout << "\n========== COMPRESSION COMPLETE ==========" << std::endl;
-    std::cout << "Total samples compressed: " << result.num_samples << std::endl;
+    std::cout << "Total input samples processed: " << result.num_samples << std::endl;
+    std::cout << "Total latent codes generated: " << result.encoded_latents.size() << std::endl;
     std::cout << "Total batches processed: " << result.num_batches << std::endl;
+    std::cout << "Ratio (latent_codes / samples): "
+        << static_cast<double>(result.encoded_latents.size()) / result.num_samples << std::endl;
 
     return result;
 }

@@ -102,17 +102,36 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(
     int64_t batch_size ,
     int64_t n_frame
 ) {
+    // Input: [B*T, C, H, W] where T = n_frame
+    // Output: [B, C, T, H, W]
+
     auto sizes = batch_data.sizes();
+    std::cout << "  [reshape_batch_2d_3d] Input shape: " << sizes << std::endl;
+    std::cout << "  [reshape_batch_2d_3d] batch_size: " << batch_size << ", n_frame: " << n_frame << std::endl;
+
     TORCH_CHECK(sizes.size() == 4 , "Input tensor must be 4-dimensional.");
 
-    int64_t BT = sizes[0];
-    int64_t C = sizes[1];
-    int64_t H = sizes[2];
-    int64_t W = sizes[3];
+    int64_t BT = sizes[0];  // B * T
+    int64_t C = sizes[1];   // Channel
+    int64_t H = sizes[2];   // Height
+    int64_t W = sizes[3];   // Width
 
-    int64_t T = BT / batch_size;
+    int64_t T = BT / batch_size;  // Frames per sample
+
+    std::cout << "  [reshape_batch_2d_3d] Calculated T (frames per sample): " << T << std::endl;
+    std::cout << "  [reshape_batch_2d_3d] Expected T (n_frame): " << n_frame << std::endl;
+
+    if (T != n_frame) {
+        std::cout << "  [reshape_batch_2d_3d] WARNING: Calculated T != n_frame!" << std::endl;
+    }
+
+    // Reshape to [B, T, C, H, W]
     torch::Tensor reshaped_data = batch_data.view({ batch_size, T, C, H, W });
+    std::cout << "  [reshape_batch_2d_3d] After view: " << reshaped_data.sizes() << std::endl;
+
+    // Permute to [B, C, T, H, W]
     torch::Tensor permuted_data = reshaped_data.permute({ 0, 2, 1, 3, 4 });
+    std::cout << "  [reshape_batch_2d_3d] After permute (output): " << permuted_data.sizes() << std::endl;
 
     return permuted_data;
 }
@@ -128,7 +147,16 @@ DecompressionResult Decompressor::decompress(
     std::cout << "\n========== STARTING DECOMPRESSION ==========" << std::endl;
     std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
-    std::cout << "Total samples to decompress: " << encoded_latents.size() << std::endl;
+    std::cout << "N_frame: " << n_frame << std::endl;
+    std::cout << "Total encoded_latents: " << encoded_latents.size() << std::endl;
+    std::cout << "Total encoded_hyper_latents: " << encoded_hyper_latents.size() << std::endl;
+
+    // CRITICAL: Check if the number of latents matches expectations
+    std::cout << "\n*** DIMENSION CHECK ***" << std::endl;
+    std::cout << "Expected pattern: Each input sample (B, 1, " << n_frame << ", 256, 256)" << std::endl;
+    std::cout << "                  should produce (B*2) latent codes" << std::endl;
+    std::cout << "If you compressed " << (encoded_latents.size() / 2) << " samples, "
+        << "you should have " << encoded_latents.size() << " latent codes" << std::endl;
 
     DecompressionResult result;
     result.num_samples = 0;
@@ -141,17 +169,26 @@ DecompressionResult Decompressor::decompress(
         size_t batch_end = std::min(batch_start + batch_size , encoded_latents.size());
         size_t current_batch_size = batch_end - batch_start;
 
-        std::cout << "\n--- Decompressing Batch " << result.num_batches << " ---" << std::endl;
-        std::cout << "Samples in batch: " << current_batch_size << std::endl;
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "--- Decompressing Batch " << result.num_batches << " ---" << std::endl;
+        std::cout << "Latent codes in this batch: " << current_batch_size << std::endl;
+        std::cout << "Expected output samples: " << (current_batch_size / 2) << std::endl;
+        std::cout << "========================================" << std::endl;
 
         // Decode hyper latents
         std::vector<int32_t> hyper_size = {
             static_cast<int32_t>(current_batch_size), 64, 4, 4
         };
+        std::cout << "\n[HYPER DECODE] Building indexes with size: ["
+            << hyper_size[0] << ", " << hyper_size[1] << ", "
+            << hyper_size[2] << ", " << hyper_size[3] << "]" << std::endl;
+
         torch::Tensor hyper_index_tensor = build_indexes_tensor(hyper_size);
         torch::Tensor decoded_hyper_latents = torch::zeros(
             { static_cast<int64_t>(current_batch_size), 64, 4, 4 }
         ).to(torch::kInt32);
+
+        std::cout << "[HYPER DECODE] Decoding " << current_batch_size << " hyper-latent codes..." << std::endl;
 
         for (size_t i = 0; i < current_batch_size; i++) {
             torch::Tensor hyper_index_slice = hyper_index_tensor.select(0 , i);
@@ -170,8 +207,10 @@ DecompressionResult Decompressor::decompress(
             torch::Tensor hyper_tensor = torch::tensor(hyper_decoded).reshape({ 64, 4, 4 });
             decoded_hyper_latents.select(0 , i).copy_(hyper_tensor);
         }
+        std::cout << "[HYPER DECODE] Decoded hyper_latents shape: " << decoded_hyper_latents.sizes() << std::endl;
 
         // Run hyper decompressor
+        std::cout << "\n[HYPER DECOMPRESS] Running hyper decompressor..." << std::endl;
         std::vector<torch::Tensor> hyper_inputs = {
             decoded_hyper_latents.to(torch::kFloat32).to(device_)
         };
@@ -179,8 +218,11 @@ DecompressionResult Decompressor::decompress(
 
         torch::Tensor mean = hyper_outputs[0];
         torch::Tensor latent_indexes_recon = hyper_outputs[1];
+        std::cout << "[HYPER DECOMPRESS] Mean shape: " << mean.sizes() << std::endl;
+        std::cout << "[HYPER DECOMPRESS] Latent indexes shape: " << latent_indexes_recon.sizes() << std::endl;
 
         // Decode latents
+        std::cout << "\n[LATENT DECODE] Decoding " << current_batch_size << " latent codes..." << std::endl;
         torch::Tensor decoded_latents_before_offset = torch::zeros(
             { static_cast<int64_t>(current_batch_size), 64, 16, 16 }
         ).to(torch::kInt32);
@@ -204,27 +246,60 @@ DecompressionResult Decompressor::decompress(
 
         torch::Tensor decoded_latents =
             decoded_latents_before_offset.to(device_).to(torch::kFloat32) + mean;
+        std::cout << "[LATENT DECODE] Decoded latents shape (before reshape): " << decoded_latents.sizes() << std::endl;
 
         // Reshape for decompressor
+        std::cout << "\n[RESHAPE] Preparing latents for decompressor..." << std::endl;
         auto original_sizes = decoded_latents.sizes();
+        std::cout << "[RESHAPE] Original decoded_latents shape: " << original_sizes << std::endl;
+
         std::vector<int64_t> new_shape = { -1, 2 };
         new_shape.insert(new_shape.end() , original_sizes.begin() + 1 , original_sizes.end());
-        torch::Tensor reshaped_latents = decoded_latents.reshape(new_shape);
 
-        // Run decompressor
+        std::cout << "[RESHAPE] New shape vector: [";
+        for (size_t i = 0; i < new_shape.size(); i++) {
+            std::cout << new_shape[i];
+            if (i < new_shape.size() - 1) std::cout << ", ";
+        }
+        std::cout << "]" << std::endl;
+
+        torch::Tensor reshaped_latents = decoded_latents.reshape(new_shape);
+        std::cout << "[RESHAPE] Reshaped latents: " << reshaped_latents.sizes() << std::endl;
+        std::cout << "[RESHAPE] This means " << reshaped_latents.sizes()[0]
+            << " pairs of latent codes will be processed" << std::endl;
+
+  // Run decompressor
+        std::cout << "\n[DECOMPRESS] Running main decompressor..." << std::endl;
         std::vector<torch::Tensor> decompressor_inputs = { reshaped_latents };
         std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run(decompressor_inputs);
 
-        // Reshape output
+        torch::Tensor raw_output = decompressor_outputs[0];
+        std::cout << "[DECOMPRESS] Raw output shape: " << raw_output.sizes() << std::endl;
+
+        // Calculate how many original samples this represents
+        int64_t num_pairs = reshaped_latents.sizes()[0];
+        int64_t original_num_samples = num_pairs;  // Each pair = 1 original sample
+
+        std::cout << "\n[OUTPUT RESHAPE] Reshaping output..." << std::endl;
+        std::cout << "[OUTPUT RESHAPE] Number of original samples: " << original_num_samples << std::endl;
+        std::cout << "[OUTPUT RESHAPE] Target shape: [" << original_num_samples
+            << ", 1, " << n_frame << ", 256, 256]" << std::endl;
+
+  // Reshape output
         torch::Tensor output = reshape_batch_2d_3d(
-            decompressor_outputs[0] ,
-            current_batch_size ,
+            raw_output ,
+            original_num_samples ,
             n_frame
         );
 
+        std::cout << "[OUTPUT RESHAPE] Final output shape: " << output.sizes() << std::endl;
+
         // Split batch into individual samples
-        for (int64_t i = 0; i < static_cast<int64_t>(current_batch_size); i++) {
-            result.reconstructed_data.push_back(output.select(0 , i).clone());
+        std::cout << "\n[SPLIT] Splitting into individual samples..." << std::endl;
+        for (int64_t i = 0; i < original_num_samples; i++) {
+            torch::Tensor sample = output.select(0 , i).unsqueeze(0);
+            std::cout << "  Sample " << result.num_samples << " shape: " << sample.sizes() << std::endl;
+            result.reconstructed_data.push_back(sample.clone());
             result.num_samples++;
         }
 
