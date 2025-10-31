@@ -1,4 +1,4 @@
-markdown# CAESAR_C
+CAESAR_C
 
 C++ implementation of [CAESAR](https://github.com/Shaw-git/CAESAR) using **LibTorch**.  
 The goal is to provide a C++ version of the CAESAR foundation model for efficient compression of scientific data.
@@ -20,17 +20,12 @@ The goal is to provide a C++ version of the CAESAR foundation model for efficien
 
 ## Build Instructions
 ```bash
-# Create build directory
 
-git clone https://github.com/Shaw-git/CAESAR/tree/main
-export CAESAR:$PYTHONPATH
-cd CAESAR
-pip install -r requirements.txt
 
-cd ..
 
 git clone https://github.com/E53klasky/CAESAR_C.git
 cd CAECAR_C 
+pip install -r requirements.txt
 mkdir build && cd build
 
 # Configure with CMake
