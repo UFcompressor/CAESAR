@@ -19,7 +19,6 @@ endif()
 
 add_library(caesar_lib SHARED
     CAESAR.cpp
-    normalize.cpp
     dataset/dataset.cpp
     models/runGaeCuda.cpp
     models/range_coder/rans_coder.cpp
