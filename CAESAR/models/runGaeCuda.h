@@ -24,6 +24,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <nvcomp/lz4.h>
 #include <nvcomp/cascaded.h>
+#include <nvcomp/zstd.h>   
 #endif
 #include <zstd.h> 
 class PCA {
@@ -102,7 +103,13 @@ public:
     torch::Tensor decompress(const torch::Tensor& reconsData ,
         const MetaData& metaData ,
         const CompressedData& compressedData);
+    std::pair<std::unique_ptr<CompressedData>, int64_t> compressLossless(
+        const MetaData& metaData,
+        const MainData& mainData);
 
+    MainData decompressLossless(
+        const MetaData& metaData,
+        const CompressedData& compressedData);
 private:
     double quanBin_;
     torch::Device device_;
@@ -112,13 +119,13 @@ private:
     double errorBound_;
     double error_;
 
-    std::pair<std::unique_ptr<CompressedData> , int64_t> compressLossless(
-        const MetaData& metaData ,
-        const MainData& mainData);
+//     std::pair<std::unique_ptr<CompressedData> , int64_t> compressLossless(
+//         const MetaData& metaData ,
+//         const MainData& mainData);
 
 
-    MainData decompressLossless(const MetaData& metaData ,
-        const CompressedData& compressedData);
+//     MainData decompressLossless(const MetaData& metaData ,
+//         const CompressedData& compressedData);
 
     torch::Tensor toCPUContiguous(const torch::Tensor& tensor);
     std::vector<uint8_t> serializeTensor(const torch::Tensor& tensor);

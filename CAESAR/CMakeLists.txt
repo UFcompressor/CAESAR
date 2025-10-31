@@ -17,6 +17,42 @@ if(NOT ZSTD_FOUND)
     endif()
 endif()
 
+# Handle CUDA + nvcomp dependency
+set(CUDA_SUPPORT_ENABLED FALSE)
+if(CUDA_FOUND)
+    message(STATUS "CUDA found, checking for nvcomp...")
+    
+    # Try to find nvcomp
+    find_path(NVCOMP_INCLUDE_DIR 
+        NAMES nvcomp.h nvcomp/nvcomp.h
+        HINTS 
+            ENV NVCOMP_ROOT
+            ENV NVCOMP_DIR
+        PATH_SUFFIXES include
+    )
+    
+    find_library(NVCOMP_LIBRARY 
+        NAMES nvcomp
+        HINTS 
+            ENV NVCOMP_ROOT
+            ENV NVCOMP_DIR
+        PATH_SUFFIXES lib lib64
+    )
+    
+    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
+        set(NVCOMP_FOUND TRUE)
+        message(STATUS "Found nvcomp: ${NVCOMP_LIBRARY}")
+        message(STATUS "nvcomp include dir: ${NVCOMP_INCLUDE_DIR}")
+        set(CUDA_SUPPORT_ENABLED TRUE)
+    else()
+        message(WARNING "CUDA found but nvcomp NOT found. Building WITHOUT CUDA support.")
+        message(WARNING "To enable CUDA support, install nvcomp and set NVCOMP_ROOT or NVCOMP_DIR environment variable.")
+        message(WARNING "Example: export NVCOMP_ROOT=/path/to/nvcomp-linux-x86_64-5.0.0.6_cuda12-archive")
+    endif()
+else()
+    message(STATUS "CUDA not found, building without CUDA support")
+endif()
+
 add_library(caesar_lib SHARED
     CAESAR.cpp
     dataset/dataset.cpp
@@ -37,13 +73,12 @@ target_include_directories(caesar_lib
 
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
 
-if(CUDA_FOUND)
-    message(STATUS "CUDA found, enabling CUDA support in runGaeCuda.cpp")
+# Only enable CUDA if both CUDA and nvcomp are found
+if(CUDA_SUPPORT_ENABLED)
+    message(STATUS "Enabling CUDA support with nvcomp")
     target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
-    target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS})
-    target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES})
-else()
-    message(STATUS "CUDA not found, building runGaeCuda.cpp without CUDA")
+    target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS} ${NVCOMP_INCLUDE_DIR})
+    target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES} ${NVCOMP_LIBRARY})
 endif()
 
 if(ZSTD_FOUND)
