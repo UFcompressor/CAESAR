@@ -305,7 +305,7 @@ torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data , bool return_norm
 
     torch::Tensor offset , scale;
 
-        if (norm_type == "mean_range") {
+    if (norm_type == "mean_range") {
         offset = torch::mean(data);
 
         // Compute scale more carefully to avoid precision loss
@@ -456,32 +456,32 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
     }
 
     // Normalization comment it out ???????? ======================================================================
-if (!inst_norm) {
-if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
+    if (!inst_norm) {
+        if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
 
-torch::Tensor offset , scale;
-if (norm_type == "mean_range") {
-offset = torch::mean(data , { 1,2,3,4 } , true);
-scale = torch::amax(data , { 1,2,3,4 } , true) - torch::amin(data , { 1,2,3,4 } , true);
-data = (data - offset) / scale;
-}
-else if (norm_type == "min_max") {
-auto data_min = torch::amin(data , { 1,2,3,4 } , true);
-auto data_max = torch::amax(data , { 1,2,3,4 } , true);
-offset = (data_max + data_min) / 2;
-scale = (data_max - data_min) / 2;
-data = (data - offset) / scale;
-}
-else if (norm_type == "std") {
-offset = torch::mean(data , { 1,2,3,4 } , true);
-scale = torch::std(data , { 1,2,3,4 } , true);
-data = (data - offset) / scale;
-}
+        torch::Tensor offset , scale;
+        if (norm_type == "mean_range") {
+            offset = torch::mean(data , { 1,2,3,4 } , true);
+            scale = torch::amax(data , { 1,2,3,4 } , true) - torch::amin(data , { 1,2,3,4 } , true);
+            data = (data - offset) / scale;
+        }
+        else if (norm_type == "min_max") {
+            auto data_min = torch::amin(data , { 1,2,3,4 } , true);
+            auto data_max = torch::amax(data , { 1,2,3,4 } , true);
+            offset = (data_max + data_min) / 2;
+            scale = (data_max - data_min) / 2;
+            data = (data - offset) / scale;
+        }
+        else if (norm_type == "std") {
+            offset = torch::mean(data , { 1,2,3,4 } , true);
+            scale = torch::std(data , { 1,2,3,4 } , true);
+            data = (data - offset) / scale;
+        }
 
-var_offset = offset.to(torch::kFloat);
-var_scale = scale.to(torch::kFloat);
-}
-        // =====================================================================================================
+        var_offset = offset.to(torch::kFloat);
+        var_scale = scale.to(torch::kFloat);
+    }
+            // =====================================================================================================
 
     data = data.to(torch::kFloat);
 
@@ -530,28 +530,29 @@ torch::Tensor ScientificDataset::loadDatasetInMemory(
     return data.to(torch::kFloat);
 }
 
+// NOTE: this function may be a bit buggy since it is hard to use when reading in binary files since they are just a blob of data it is better to load it in memory and then to use load from memory
 // ------------------- Load from binary -------------------
 torch::Tensor ScientificDataset::loadDatasetFromBinary(
-    const std::string& bin_path,
-    std::optional<int> variable_idx,
-    std::optional<std::pair<int, int>> section_range,
-    std::optional<std::pair<int, int>> frame_range)
+    const std::string& bin_path ,
+    std::optional<int> variable_idx ,
+    std::optional<std::pair<int , int>> section_range ,
+    std::optional<std::pair<int , int>> frame_range)
 {
-    std::ifstream file(bin_path, std::ios::binary);
+    std::ifstream file(bin_path , std::ios::binary);
     if (!file.is_open()) throw std::runtime_error("Cannot open binary file: " + bin_path);
 
     int64_t shape[5];
-    file.read(reinterpret_cast<char*>(shape), 5 * sizeof(int64_t));
+    file.read(reinterpret_cast<char*>(shape) , 5 * sizeof(int64_t));
 
     size_t num_elements = shape[0] * shape[1] * shape[2] * shape[3] * shape[4];
     std::vector<float> buffer(num_elements);
-    file.read(reinterpret_cast<char*>(buffer.data()), num_elements * sizeof(float));
+    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
     file.close();
 
     // Create tensor directly as Float32, no conversion needed
     torch::Tensor data = torch::from_blob(
-        buffer.data(),
-        { shape[0], shape[1], shape[2], shape[3], shape[4] },
+        buffer.data() ,
+        { shape[0], shape[1], shape[2], shape[3], shape[4] } ,
         torch::kFloat32  // Explicitly specify dtype
     ).clone();
 
@@ -569,7 +570,7 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
         data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
     }
 
-    return data;  // Don't call .to(torch::kFloat) - it's already float32
+    return data;
 }
 
 int64_t ScientificDataset::update_length() {
@@ -655,16 +656,16 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
     int64_t idx2 = idx % t_samples;
     int64_t start_t = idx2 * delta_t;
     int64_t end_t = start_t + n_frame;
-    
+
     torch::Tensor data = data_input.index({
         static_cast<int64_t>(idx0),
         static_cast<int64_t>(idx1),
         torch::indexing::Slice(start_t, end_t)
-    });
-    
-    // ADD THIS LINE - Add channel dimension!
+        });
+
+        // ADD THIS LINE - Add channel dimension!
     data = data.unsqueeze(0);  // Now shape is [1, 8, 256, 256]
-    
+
     auto data_dict = post_processing(data , static_cast<int>(idx0) , train_mode);
     torch::Tensor index_tensor = torch::tensor({ idx0, idx1, start_t, end_t } , torch::kLong);
     data_dict["index"] = index_tensor;

@@ -309,6 +309,5 @@ DecompressionResult Decompressor::decompress(
     std::cout << "\n========== DECOMPRESSION COMPLETE ==========" << std::endl;
     std::cout << "Total samples decompressed: " << result.num_samples << std::endl;
     std::cout << "Total batches processed: " << result.num_batches << std::endl;
-
     return result;
 }
