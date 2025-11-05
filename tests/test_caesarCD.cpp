@@ -11,6 +11,34 @@
 #include "../CAESAR/models/caesar_decompress.h"
 #include "../CAESAR/dataset/dataset.h"
 
+torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int64_t>& shape) {
+    std::ifstream file(bin_path , std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open binary file: " + bin_path);
+    }
+
+    size_t num_elements = 1;
+    for (auto dim : shape) {
+        num_elements *= dim;
+    }
+
+    std::vector<float> buffer(num_elements);
+    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
+    file.close();
+
+    torch::Tensor data = torch::from_blob(
+        buffer.data() ,
+        shape ,
+        torch::kFloat32
+    ).clone();
+
+    std::cout << "Loaded " << bin_path << " with shape: " << data.sizes() << "\n";
+    std::cout << "  Min: " << data.min().item<float>() << ", Max: " << data.max().item<float>() << "\n";
+
+    return data;
+}
+
+
 bool save_encoded_streams(
     const std::vector<std::string>& streams ,
     const std::string& filename
@@ -99,16 +127,23 @@ int main() {
         Compressor compressor(device);
 
         // Configure dataset
+        torch::Tensor raw_data = loadRawBinary("TCf48.bin.f32" , { 1, 1, 100, 500, 500 });
+        std::cout << "\n";
+
         DatasetConfig config;
-        config.binary_path = "tensor_data_1.bin";
+        config.memory_data = raw_data;
         config.variable_idx = 0;
         config.n_frame = 8;
-        config.dataset_name = "My Scientific Dataset";
-        config.section_range = { 0, 256 };
-        config.frame_range = { 0, 256 };
+        config.dataset_name = "TCf48 Dataset";
+        config.section_range = std::nullopt;
+        config.frame_range = std::nullopt;
         config.train_size = 256;
         config.inst_norm = true;
         config.norm_type = "mean_range";
+        config.train_mode = false;
+        config.n_overlap = 0;
+        config.test_size = { 256, 256 };
+        config.augment_type = {};
 
         // Compress
         int batch_size = 32;
@@ -165,10 +200,10 @@ int main() {
         }
 
         if (data_matches) {
-            std::cout << "✓ Verification passed: Loaded data matches compressed data" << std::endl;
+            std::cout << " Verification passed: Loaded data matches compressed data" << std::endl;
         }
         else {
-            std::cerr << "✗ Verification failed: Loaded data does not match!" << std::endl;
+            std::cerr << " Verification failed: Loaded data does not match!" << std::endl;
             return 1;
         }
 
