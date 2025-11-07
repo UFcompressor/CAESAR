@@ -118,6 +118,23 @@ public:
     torch::Tensor recons_data(const torch::Tensor& recons_data) const;
     torch::Tensor deblocking_hw(const torch::Tensor& data) const;
 
+    // ** JL modified ** //
+    /**
+     * @brief Returns the block info (nH, nW, padding).
+     */
+    std::tuple<int64_t, int64_t, std::vector<int64_t>> get_block_info() const;
+
+    /**
+     * @brief Returns the (const reference to) the final data_input tensor.
+     */
+    const torch::Tensor& get_data_input() const;
+
+    /**
+     * @brief Returns the (const reference to) the vector of filtered blocks.
+     */
+    const std::vector<std::pair<int, float>>& get_filtered_blocks() const;
+    // **** //
+
 private:
     std::vector<int64_t> shape_org;
     std::vector<int64_t> shape;

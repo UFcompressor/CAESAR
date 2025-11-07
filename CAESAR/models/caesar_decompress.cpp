@@ -71,10 +71,10 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 void Decompressor::load_models() {
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
     );
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
     );
     std::cout << "Models loaded successfully." << std::endl;
 }
@@ -83,15 +83,15 @@ void Decompressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
 
     // Load VBR tables
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
+    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_cdf_length.bin");
+    vbr_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_offset.bin");
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
 
     // Load GS tables
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_quantized_cdf.bin");
+    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_cdf_length.bin");
+    gs_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_offset.bin");
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
     std::cout << "Probability tables loaded successfully." << std::endl;
@@ -139,6 +139,11 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(
 DecompressionResult Decompressor::decompress(
     const std::vector<std::string>& encoded_latents ,
     const std::vector<std::string>& encoded_hyper_latents ,
+    // ** JL modified ** //
+    const std::vector<torch::Tensor>& offsets ,
+    const std::vector<torch::Tensor>& scales ,
+    const std::vector<torch::Tensor>& indexes ,
+    // **** //
     int batch_size ,
     int n_frame
 ) {
@@ -157,6 +162,38 @@ DecompressionResult Decompressor::decompress(
     std::cout << "                  should produce (B*2) latent codes" << std::endl;
     std::cout << "If you compressed " << (encoded_latents.size() / 2) << " samples, "
         << "you should have " << encoded_latents.size() << " latent codes" << std::endl;
+
+    // ** JL modified ** //
+    torch::Tensor flat_offsets_tensor = torch::cat(offsets, 0);
+    torch::Tensor flat_scales_tensor = torch::cat(scales, 0);
+    torch::Tensor flat_indexes_tensor = torch::cat(indexes, 0);
+    // Check flat tensor sizes
+    std::cout << "flat_offsets_tensor sizes " << flat_offsets_tensor.sizes() << std::endl;
+    std::cout << "flat_scales_tensor sizes " << flat_scales_tensor.sizes() << std::endl;
+    std::cout << "flat_indexes_tensor sizes " << flat_indexes_tensor.sizes() << std::endl;
+    // Convert flat tensor to final output batch size -> this will be input batch_size / 2
+    std::vector<torch::Tensor> new_batched_offsets = torch::split(
+    flat_offsets_tensor,
+    batch_size / 2,
+    0 // dim=0
+    );
+    std::vector<torch::Tensor> new_batched_scales = torch::split(
+    flat_offsets_tensor,
+    batch_size / 2,
+    0 // dim=0
+    );
+    std::vector<torch::Tensor> new_batched_indexes = torch::split(
+    flat_offsets_tensor,
+    batch_size / 2,
+    0 // dim=0
+    );
+    std::cout << "batched_offsets_tensor[0] sizes " << new_batched_offsets[0].sizes() << std::endl;
+    std::cout << "batched_scales_tensor[0] sizes " << new_batched_scales[0].sizes() << std::endl;
+    std::cout << "batched_indexes_tensor[0] sizes " << new_batched_indexes[0].sizes() << std::endl;
+    std::cout << "batched_offsets_tensor[last] sizes " << new_batched_offsets.back().sizes() << std::endl;
+    std::cout << "batched_scales_tensor[last] sizes " << new_batched_scales.back().sizes() << std::endl;
+    std::cout << "batched_indexes_tensor[last] sizes " << new_batched_indexes.back().sizes() << std::endl;
+    // **** //
 
     DecompressionResult result;
     result.num_samples = 0;
@@ -293,6 +330,9 @@ DecompressionResult Decompressor::decompress(
         );
 
         std::cout << "[OUTPUT RESHAPE] Final output shape: " << output.sizes() << std::endl;
+        // ** JL modified ** //
+        std::cout << "[OUTPUT Check - Before Denormalization] Final output max min: " << output.max().item<float>() << ", " << output.min().item<float>() << std::endl;
+        // **** //
 
         // Split batch into individual samples
         std::cout << "\n[SPLIT] Splitting into individual samples..." << std::endl;

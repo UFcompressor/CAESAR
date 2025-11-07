@@ -20,23 +20,31 @@ add_executable(test_dataset2 testDataSet2.cpp)
 target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs ${MPI_LIB})
 
 
-add_executable(test_caesarCD test_caesarCD.cpp)
+# add_executable(test_caesarCD test_caesarCD.cpp)
+# target_link_libraries(test_caesarCD
+    # PRIVATE
+    # caesar_lib
+    # "${TORCH_LIBRARIES}"
+    # stdc++fs
+# )
 
-add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
-target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
-
-target_link_libraries(test_caesarCD
+add_executable(test_caesarC test_caesarC.cpp)
+target_link_libraries(test_caesarC
     PRIVATE
     caesar_lib
     "${TORCH_LIBRARIES}"
     stdc++fs
 )
 
+add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
+target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
+
 set(TEST_TARGETS
     test_runGaeCuda
     test_dataset
     test_dataset2
     test_caesarCD
+    test_caesarC
     test_datasetNRMSE
 )
 

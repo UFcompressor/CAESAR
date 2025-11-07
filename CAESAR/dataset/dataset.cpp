@@ -671,3 +671,28 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
     data_dict["index"] = index_tensor;
     return data_dict;
 }
+
+// ** JL modified ** //
+/**
+* @brief Public getter for the private 'block_info' member.
+*/
+std::tuple<int64_t, int64_t, std::vector<int64_t>> ScientificDataset::get_block_info() const {
+    return block_info;
+}
+
+/**
+* @brief Public getter for the private 'data_input' tensor.
+* Returns by const reference to avoid a deep copy.
+*/
+const torch::Tensor& ScientificDataset::get_data_input() const {
+    return data_input;
+}
+
+/**
+* @brief Public getter for the private 'filtered_blocks' vector.
+* Returns by const reference to avoid a large vector copy.
+*/
+const std::vector<std::pair<int, float>>& ScientificDataset::get_filtered_blocks() const {
+    return filtered_blocks;
+}
+// **** //

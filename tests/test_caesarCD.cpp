@@ -78,6 +78,34 @@ void save_tensor_to_bin(const torch::Tensor& tensor , const std::string& filenam
     std::cout << "  - Tensor saved to " << filename << std::endl;
 }
 
+// Function to load raw float32 binary into a tensor with specified shape
+torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int64_t>& shape) {
+    std::ifstream file(bin_path , std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open binary file: " + bin_path);
+    }
+
+    size_t num_elements = 1;
+    for (auto dim : shape) {
+        num_elements *= dim;
+    }
+
+    std::vector<float> buffer(num_elements);
+    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
+    file.close();
+
+    torch::Tensor data = torch::from_blob(
+        buffer.data() ,
+        shape ,
+        torch::kFloat32
+    ).clone();
+
+    std::cout << "Loaded " << bin_path << " with shape: " << data.sizes() << "\n";
+    std::cout << "  Min: " << data.min().item<float>() << ", Max: " << data.max().item<float>() << "\n";
+
+    return data;
+}
+
 int main() {
     try {
         // Determine device
@@ -98,17 +126,24 @@ int main() {
         // Create compressor
         Compressor compressor(device);
 
-        // Configure dataset
+        std::cout << "Loading TCf48.bin.f32 raw data...\n";
+        torch::Tensor raw_data = loadRawBinary("TCf48.bin.f32" , { 1, 1, 100, 500, 500 });
+        std::cout << "\n";
+
         DatasetConfig config;
-        config.binary_path = "tensor_data_1.bin";
+        config.memory_data = raw_data;
         config.variable_idx = 0;
         config.n_frame = 8;
-        config.dataset_name = "My Scientific Dataset";
-        config.section_range = { 0, 256 };
-        config.frame_range = { 0, 256 };
+        config.dataset_name = "TCf48 Dataset";
+        config.section_range = std::nullopt;
+        config.frame_range = std::nullopt;
         config.train_size = 256;
         config.inst_norm = true;
         config.norm_type = "mean_range";
+        config.train_mode = false;
+        config.n_overlap = 0;
+        config.test_size = { 256, 256 };
+        config.augment_type = {};
 
         // Compress
         int batch_size = 32;
@@ -116,8 +151,8 @@ int main() {
 
         // Save compressed data
         std::cout << "\nSaving compressed data..." << std::endl;
-        save_encoded_streams(comp_result.encoded_latents , "/home/adios/Programs/CAESAR_C/build/tests/output/encoded_latents.bin");
-        save_encoded_streams(comp_result.encoded_hyper_latents , "/home/adios/Programs/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
+        save_encoded_streams(comp_result.encoded_latents , "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_latents.bin");
+        save_encoded_streams(comp_result.encoded_hyper_latents , "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
         std::cout << "Compressed data saved to output/" << std::endl;
 
         // Calculate compression statistics
@@ -141,8 +176,8 @@ int main() {
 
         // Load compressed data
         std::cout << "Loading compressed data..." << std::endl;
-        std::vector<std::string> loaded_latents = load_encoded_streams("/home/adios/Programs/CAESAR_C/build/tests/output/encoded_latents.bin");
-        std::vector<std::string> loaded_hyper_latents = load_encoded_streams("/home/adios/Programs/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
+        std::vector<std::string> loaded_latents = load_encoded_streams("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_latents.bin");
+        std::vector<std::string> loaded_hyper_latents = load_encoded_streams("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
         std::cout << "Loaded " << loaded_latents.size() << " latent streams and "
             << loaded_hyper_latents.size() << " hyper-latent streams" << std::endl;
 
@@ -175,18 +210,31 @@ int main() {
         // Create decompressor
         Decompressor decompressor(device);
 
+        // ** JL modified ** //
+        if (batch_size % 2 != 0) {
+            std::cerr << "Error: batch_size must be evenly divisible by 2. Received: "
+                << batch_size << std::endl;
+            return 1; 
+        }
+        // **** //
+
         // Decompress
+        // ** JL modified ** //
         DecompressionResult decomp_result = decompressor.decompress(
             loaded_latents ,
             loaded_hyper_latents ,
+            comp_result.offsets ,
+            comp_result.scales ,
+            comp_result.indexes ,
             batch_size ,
             config.n_frame
         );
+        // **** //
 
         // Save decompressed data
         std::cout << "\nSaving decompressed data..." << std::endl;
         for (size_t i = 0; i < decomp_result.reconstructed_data.size(); i++) {
-            std::string filename = "/home/adios/Programs/CAESAR_C/build/tests/output/reconstructed_sample_" + std::to_string(i) + ".bin";
+            std::string filename = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/reconstructed_sample_" + std::to_string(i) + ".bin";
             save_tensor_to_bin(decomp_result.reconstructed_data[i] , filename);
         }
 
