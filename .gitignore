@@ -1,4 +1,3 @@
-
 build/
 install/
 *.o
@@ -9,9 +8,9 @@ install/
 CMakeFiles/
 CMakeCache.txt
 Makefile
-.bin
-exported_model
-.pt2
+*.bin
+*.pt2
+exported_model/
 .vscode/
 
 # Ignore generated model files
@@ -21,4 +20,5 @@ pretrained
 # Ignore Python cache (if any)
 __pycache__/
 *.pyc
-.ipynb_checkpoints
+.ipynb_checkpoints/
+
