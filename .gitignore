@@ -12,7 +12,7 @@ Makefile
 *.pt2
 exported_model/
 .vscode/
-
+*.f32
 # Ignore generated model files
 models/compress_models/
 pretrained_models/
