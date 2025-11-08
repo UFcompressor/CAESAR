@@ -20,6 +20,11 @@ public:
     DecompressionResult decompress(
         const std::vector<std::string>& encoded_latents,
         const std::vector<std::string>& encoded_hyper_latents,
+        // ** JL modified ** //
+        const std::vector<torch::Tensor>& offsets,
+        const std::vector<torch::Tensor>& scales,
+        const std::vector<torch::Tensor>& indexes,
+        // **** //
         int batch_size = 32,
         int n_frame = 8
     );

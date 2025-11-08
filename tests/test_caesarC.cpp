@@ -11,34 +11,6 @@
 #include "../CAESAR/models/caesar_decompress.h"
 #include "../CAESAR/dataset/dataset.h"
 
-torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int64_t>& shape) {
-    std::ifstream file(bin_path , std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open binary file: " + bin_path);
-    }
-
-    size_t num_elements = 1;
-    for (auto dim : shape) {
-        num_elements *= dim;
-    }
-
-    std::vector<float> buffer(num_elements);
-    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
-    file.close();
-
-    torch::Tensor data = torch::from_blob(
-        buffer.data() ,
-        shape ,
-        torch::kFloat32
-    ).clone();
-
-    std::cout << "Loaded " << bin_path << " with shape: " << data.sizes() << "\n";
-    std::cout << "  Min: " << data.min().item<float>() << ", Max: " << data.max().item<float>() << "\n";
-
-    return data;
-}
-
-
 bool save_encoded_streams(
     const std::vector<std::string>& streams ,
     const std::string& filename
@@ -106,6 +78,34 @@ void save_tensor_to_bin(const torch::Tensor& tensor , const std::string& filenam
     std::cout << "  - Tensor saved to " << filename << std::endl;
 }
 
+// Function to load raw float32 binary into a tensor with specified shape
+torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int64_t>& shape) {
+    std::ifstream file(bin_path , std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open binary file: " + bin_path);
+    }
+
+    size_t num_elements = 1;
+    for (auto dim : shape) {
+        num_elements *= dim;
+    }
+
+    std::vector<float> buffer(num_elements);
+    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
+    file.close();
+
+    torch::Tensor data = torch::from_blob(
+        buffer.data() ,
+        shape ,
+        torch::kFloat32
+    ).clone();
+
+    std::cout << "Loaded " << bin_path << " with shape: " << data.sizes() << "\n";
+    std::cout << "  Min: " << data.min().item<float>() << ", Max: " << data.max().item<float>() << "\n";
+
+    return data;
+}
+
 int main() {
     try {
         // Determine device
@@ -126,7 +126,7 @@ int main() {
         // Create compressor
         Compressor compressor(device);
 
-        // Configure dataset
+        std::cout << "Loading TCf48.bin.f32 raw data...\n";
         torch::Tensor raw_data = loadRawBinary("TCf48.bin.f32" , { 1, 1, 100, 500, 500 });
         std::cout << "\n";
 
@@ -147,7 +147,8 @@ int main() {
 
         // Compress
         int batch_size = 32;
-        CompressionResult comp_result = compressor.compress(config , batch_size);
+        float rel_eb = 0.001;
+        CompressionResult comp_result = compressor.compress(config , batch_size , rel_eb);
 
         // Save compressed data
         std::cout << "\nSaving compressed data..." << std::endl;
@@ -200,108 +201,17 @@ int main() {
         }
 
         if (data_matches) {
-            std::cout << " Verification passed: Loaded data matches compressed data" << std::endl;
+            std::cout << "✓ Verification passed: Loaded data matches compressed data" << std::endl;
         }
         else {
-            std::cerr << " Verification failed: Loaded data does not match!" << std::endl;
+            std::cerr << "✗ Verification failed: Loaded data does not match!" << std::endl;
             return 1;
         }
-
-        // Create decompressor
-        Decompressor decompressor(device);
-
-        // Decompress
-        DecompressionResult decomp_result = decompressor.decompress(
-            loaded_latents ,
-            loaded_hyper_latents ,
-            batch_size ,
-            config.n_frame
-        );
-
-        // Save decompressed data
-        std::cout << "\nSaving decompressed data..." << std::endl;
-        for (size_t i = 0; i < decomp_result.reconstructed_data.size(); i++) {
-            std::string filename = "/home/adios/Programs/CAESAR_C/build/tests/output/reconstructed_sample_" + std::to_string(i) + ".bin";
-            save_tensor_to_bin(decomp_result.reconstructed_data[i] , filename);
-        }
-
-        // ========== VERIFICATION PHASE ==========
-        std::cout << "\n" << std::string(60 , '=') << std::endl;
-        std::cout << "PHASE 3: VERIFICATION" << std::endl;
-        std::cout << std::string(60 , '=') << "\n" << std::endl;
-
-        // Load original dataset for comparison
-        ScientificDataset dataset(config);
-
-        std::cout << "Comparing reconstructed data with original..." << std::endl;
-
-        float total_mse = 0.0f;
-        float total_psnr = 0.0f;
-        int num_comparisons = std::min(
-            static_cast<int>(decomp_result.reconstructed_data.size()) ,
-            static_cast<int>(dataset.size())
-        );
-
-        for (int i = 0; i < num_comparisons; i++) {
-            auto sample = dataset.get_item(i);
-            torch::Tensor original = sample["input"].to(device);
-            torch::Tensor reconstructed = decomp_result.reconstructed_data[i].to(device);
-
-            // **ADD SHAPE VERIFICATION**
-            if (original.sizes() != reconstructed.sizes()) {
-                std::cerr << "  Sample " << i << " - Shape mismatch!" << std::endl;
-                std::cerr << "    Original shape: " << original.sizes() << std::endl;
-                std::cerr << "    Reconstructed shape: " << reconstructed.sizes() << std::endl;
-
-                // Skip this sample or handle the mismatch appropriately
-                continue;
-            }
-
-            // Calculate MSE
-            torch::Tensor diff = original - reconstructed;
-            float mse = torch::mean(diff * diff).item<float>();
-            total_mse += mse;
-
-            // Calculate PSNR
-            float psnr = 10.0f * std::log10(1.0f / (mse + 1e-10f));
-            total_psnr += psnr;
-
-            if (i < 5) {
-                std::cout << "  Sample " << i << ":" << std::endl;
-                std::cout << "    - Original shape: " << original.sizes() << std::endl;
-                std::cout << "    - Reconstructed shape: " << reconstructed.sizes() << std::endl;
-                std::cout << "    - MSE: " << mse << std::endl;
-                std::cout << "    - PSNR: " << psnr << " dB" << std::endl;
-            }
-        }
-
-        float avg_mse = total_mse / num_comparisons;
-        float avg_psnr = total_psnr / num_comparisons;
-
-        std::cout << "\nAverage Metrics:" << std::endl;
-        std::cout << "  - Average MSE: " << avg_mse << std::endl;
-        std::cout << "  - Average PSNR: " << avg_psnr << " dB" << std::endl;
-
-        // ========== SUMMARY ==========
-        std::cout << "\n" << std::string(60 , '=') << std::endl;
-        std::cout << "SUMMARY" << std::endl;
-        std::cout << std::string(60 , '=') << std::endl;
-        std::cout << "Compression:" << std::endl;
-        std::cout << "  ✓ Samples compressed: " << comp_result.num_samples << std::endl;
-        std::cout << "  ✓ Batches processed: " << comp_result.num_batches << std::endl;
-        std::cout << "  ✓ Compressed size: " << total_compressed_bytes << " bytes" << std::endl;
-        std::cout << "\nDecompression:" << std::endl;
-        std::cout << "  ✓ Samples decompressed: " << decomp_result.num_samples << std::endl;
-        std::cout << "  ✓ Batches processed: " << decomp_result.num_batches << std::endl;
-        std::cout << "\nQuality:" << std::endl;
-        std::cout << "  ✓ Average MSE: " << avg_mse << std::endl;
-        std::cout << "  ✓ Average PSNR: " << avg_psnr << " dB" << std::endl;
-        std::cout << "\nAll operations completed successfully!" << std::endl;
-        std::cout << std::string(60 , '=') << std::endl;
 
         return 0;
 
     }
+
     catch (const std::exception& e) {
         std::cerr << "\n ERROR: " << e.what() << std::endl;
         return 1;

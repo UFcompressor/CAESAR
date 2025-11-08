@@ -1,4 +1,3 @@
-# Ignore build artifacts
 build/
 install/
 *.o
@@ -9,15 +8,17 @@ install/
 CMakeFiles/
 CMakeCache.txt
 Makefile
-
-# Ignore IDE settings
+*.bin
+*.pt2
+exported_model/
 .vscode/
 
 # Ignore generated model files
 models/compress_models/
 pretrained_models/
-
+pretrained
 # Ignore Python cache (if any)
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
 
