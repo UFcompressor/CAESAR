@@ -148,12 +148,12 @@ int main() {
         // Compress
         int batch_size = 32;
         float rel_eb = 0.001;
-        CompressionResult comp_result = compressor.compress(config , batch_size, rel_eb);
+        CompressionResult comp_result = compressor.compress(config , batch_size , rel_eb);
 
         // Save compressed data
         std::cout << "\nSaving compressed data..." << std::endl;
-        save_encoded_streams(comp_result.encoded_latents , "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_latents.bin");
-        save_encoded_streams(comp_result.encoded_hyper_latents , "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
+        save_encoded_streams(comp_result.encoded_latents , "/home/adios/Programs/CAESAR_C/build/tests/output/encoded_latents.bin");
+        save_encoded_streams(comp_result.encoded_hyper_latents , "/home/adios/Programs/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
         std::cout << "Compressed data saved to output/" << std::endl;
 
         // Calculate compression statistics
@@ -177,8 +177,8 @@ int main() {
 
         // Load compressed data
         std::cout << "Loading compressed data..." << std::endl;
-        std::vector<std::string> loaded_latents = load_encoded_streams("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_latents.bin");
-        std::vector<std::string> loaded_hyper_latents = load_encoded_streams("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
+        std::vector<std::string> loaded_latents = load_encoded_streams("/home/adios/Programs/CAESAR_C/build/tests/output/encoded_latents.bin");
+        std::vector<std::string> loaded_hyper_latents = load_encoded_streams("/home/adios/Programs/CAESAR_C/build/tests/output/encoded_hyper_latents.bin");
         std::cout << "Loaded " << loaded_latents.size() << " latent streams and "
             << loaded_hyper_latents.size() << " hyper-latent streams" << std::endl;
 
@@ -211,7 +211,7 @@ int main() {
         return 0;
 
     }
-        
+
     catch (const std::exception& e) {
         std::cerr << "\n ERROR: " << e.what() << std::endl;
         return 1;

@@ -1,4 +1,4 @@
- #include "caesar_compress.h"
+#include "caesar_compress.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h" 
 #include <iostream>
@@ -50,8 +50,8 @@ std::vector<std::vector<T>> reshape_to_2d(const std::vector<T>& flat_vec , size_
 // ** JL modified ** //
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
-    
-    TORCH_CHECK(tensor.dim() == 2, "Input tensor must be 2-dimensional.");
+
+    TORCH_CHECK(tensor.dim() == 2 , "Input tensor must be 2-dimensional.");
 
     torch::Tensor cpu_tensor = tensor.cpu().contiguous();
 
@@ -60,39 +60,39 @@ std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
     const T* data_ptr = cpu_tensor.data_ptr<T>();
 
     std::vector<std::vector<T>> vec_2d;
-    
+
     vec_2d.reserve(rows);
 
     for (int64_t r = 0; r < rows; ++r) {
-        
+
         const T* row_start_ptr = data_ptr + (r * cols);
-        
-        std::vector<T> inner_vec(row_start_ptr, row_start_ptr + cols);
-        
+
+        std::vector<T> inner_vec(row_start_ptr , row_start_ptr + cols);
+
         vec_2d.push_back(inner_vec);
-        
+
     }
     return vec_2d;
 }
 
-torch::Tensor Compressor::recons_data(const torch::Tensor& recons_data, std::vector<int32_t> shape, int64_t pad_T) const {
+torch::Tensor Compressor::recons_data(const torch::Tensor& recons_data , std::vector<int32_t> shape , int64_t pad_T) const {
 
-    int64_t stop_t = shape[2] - pad_T; 
-    return recons_data.index({ 
+    int64_t stop_t = shape[2] - pad_T;
+    return recons_data.index({
         torch::indexing::Slice(),       // 0번 차원 (:)
         torch::indexing::Slice(),       // 1번 차원 (:)
         torch::indexing::Slice(0, stop_t), // 2번 차원 (:stop_t)
         torch::indexing::Slice(),       // 3번 차원 (:)
         torch::indexing::Slice()        // 4번 차원 (:)
-    });
+        });
 }
 
-torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor& batch_data, int64_t batch_size) {
-    
+torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor& batch_data , int64_t batch_size) {
+
     // 1. BT,C,H,W = batch_data.shape
     auto sizes = batch_data.sizes();
 
-    TORCH_CHECK(sizes.size() == 4, "Input tensor must be 4-dimensional.");
+    TORCH_CHECK(sizes.size() == 4 , "Input tensor must be 4-dimensional.");
 
     int64_t BT = sizes[0];
     int64_t C = sizes[1];
@@ -103,10 +103,10 @@ torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor& batch_data, i
     int64_t T = BT / batch_size;
 
     // 3. batch_data = batch_data.view([batch_size, T, C, H, W])
-    torch::Tensor reshaped_data = batch_data.view({batch_size, T, C, H, W});
+    torch::Tensor reshaped_data = batch_data.view({ batch_size, T, C, H, W });
 
     // 4. batch_data = batch_data.permute([0,2,1,3,4])
-    torch::Tensor permuted_data = reshaped_data.permute({0, 2, 1, 3, 4});
+    torch::Tensor permuted_data = reshaped_data.permute({ 0, 2, 1, 3, 4 });
 
     // 5. return batch_data
     return permuted_data;
@@ -166,15 +166,15 @@ torch::Tensor Compressor::deblockHW(const torch::Tensor& data ,
 /**
  * @return Relative RMSE
  */
-double relative_rmse_error(const torch::Tensor& x, const torch::Tensor& y) {
-    
-    TORCH_CHECK(x.sizes() == y.sizes(), "Input tensor shapes do not match.");
+double relative_rmse_error(const torch::Tensor& x , const torch::Tensor& y) {
+
+    TORCH_CHECK(x.sizes() == y.sizes() , "Input tensor shapes do not match.");
 
     torch::Tensor x_double = x.to(torch::kDouble);
     torch::Tensor y_double = y.to(torch::kDouble);
 
     torch::Tensor diff = x_double - y_double;
-    torch::Tensor squared_error = torch::pow(diff, 2);
+    torch::Tensor squared_error = torch::pow(diff , 2);
     torch::Tensor mse_tensor = torch::mean(squared_error);
 
     torch::Tensor maxv_tensor = torch::max(x_double);
@@ -192,16 +192,16 @@ double relative_rmse_error(const torch::Tensor& x, const torch::Tensor& y) {
         if (rmse == 0) {
             return 0.0;
         }
-        
+
         return std::numeric_limits<double>::infinity();
     }
 
     return rmse / range;
 }
 
-std::tuple<torch::Tensor, std::vector<int>> padding(
-    const torch::Tensor& data,
-    std::pair<int, int> block_size = {8, 8})
+std::tuple<torch::Tensor , std::vector<int>> padding(
+    const torch::Tensor& data ,
+    std::pair<int , int> block_size = { 8, 8 })
 {
     int h_block = block_size.first;
     int w_block = block_size.second;
@@ -225,22 +225,22 @@ std::tuple<torch::Tensor, std::vector<int>> padding(
     int leading_size = 1;
     for (size_t i = 0; i < leading_dims.size() - 2; ++i)
         leading_size *= leading_dims[i];
-    auto data_reshaped = data.view({leading_size, H, W});
+    auto data_reshaped = data.view({ leading_size, H, W });
 
     auto data_padded = torch::nn::functional::pad(
-        data_reshaped,
-        torch::nn::functional::PadFuncOptions({left, right, top, down}).mode(torch::kReflect));
+        data_reshaped ,
+        torch::nn::functional::PadFuncOptions({ left, right, top, down }).mode(torch::kReflect));
 
     auto new_shape = leading_dims;
     new_shape[new_shape.size() - 2] = data_padded.size(-2);
     new_shape[new_shape.size() - 1] = data_padded.size(-1);
     auto padded_data = data_padded.view(new_shape);
 
-    std::vector<int> padding_info = {top, down, left, right};
-    return {padded_data, padding_info};
+    std::vector<int> padding_info = { top, down, left, right };
+    return { padded_data, padding_info };
 }
 
-torch::Tensor unpadding(const torch::Tensor& padded_data, const std::vector<int>& padding)
+torch::Tensor unpadding(const torch::Tensor& padded_data , const std::vector<int>& padding)
 {
     int top = padding[0];
     int down = padding[1];
@@ -256,7 +256,7 @@ torch::Tensor unpadding(const torch::Tensor& padded_data, const std::vector<int>
         torch::indexing::Ellipsis,
         torch::indexing::Slice(top, H - down),
         torch::indexing::Slice(left, W - right)
-    });
+        });
 
     return unpadded;
 }
@@ -278,15 +278,15 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 void Compressor::load_models() {
     std::cout << "Loading compressor model..." << std::endl;
     compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor.pt2"
+        "/home/adios/Programs/CAESAR_C/exported_model/caesar_compressor.pt2"
     );
     // ** JL modified ** //
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
+        "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
     );
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
+        "/home/adios/Programs/CAESAR_C/exported_model/caesar_decompressor.pt2"
     );
     // **** //
     std::cout << "Model loaded successfully." << std::endl;
@@ -296,21 +296,21 @@ void Compressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
 
     // Load VBR tables
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
+    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
+    vbr_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
 
     // Load GS tables
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
+    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
+    gs_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
     std::cout << "Probability tables loaded successfully." << std::endl;
 }
 
-CompressionResult Compressor::compress(const DatasetConfig& config , int batch_size, float rel_eb) { // JL modified - add rel_eb
+CompressionResult Compressor::compress(const DatasetConfig& config , int batch_size , float rel_eb) { // JL modified - add rel_eb
     c10::InferenceMode guard;
 
     std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
@@ -332,7 +332,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     // 2. dataset.input_data()
     torch::Tensor input_data = dataset.input_data();
     std::cout << "[METADATA CHECK] Input data (unpadded) shape: " << input_data.sizes() << std::endl;
-    
+
     // 3. dataset metadata check
     std::cout << "[METADATA CHECK] original data size: " << dataset.original_data().sizes() << std::endl;
     std::cout << "[METADATA CHECK] input data size: " << dataset.input_data().sizes() << std::endl;
@@ -342,14 +342,14 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     CompressionResult result;
     result.num_samples = 0;
     result.num_batches = 0;
-    
+
     // ** JL modified ** // - record metadata
     int64_t pad_T = dataset.get_pad_T();
     result.compressionMetaData.pad_T = pad_T;
     //std::vector<int64_t> shape_info = dataset.get_shape_info(); - this is equal to dataset.get_data_input().sizes()
     std::cout << "[METADATA CHECK] pad_T: " << result.compressionMetaData.pad_T << std::endl;
     //std::cout << "[METADATA CHECK] shape_info: " << shape_info << std::endl;
-    
+
     // int64 -> int32 to reduce size
     // data_input_shape recored
     {
@@ -357,13 +357,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         std::cout << "[METADATA CHECK] Data input shape: " << data_input_shape << std::endl;
         std::vector<int32_t> data_input_shape_i32;
         data_input_shape_i32.reserve(data_input_shape.size());
-        
+
         for (int64_t dim : data_input_shape) {
             data_input_shape_i32.push_back(static_cast<int32_t>(dim));
         }
         result.compressionMetaData.data_input_shape = data_input_shape_i32;
     }
-    
+
     // filtered_blocks record
     {
         const auto& filtered_blocks = dataset.get_filtered_blocks();
@@ -371,9 +371,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         result.compressionMetaData.filtered_blocks.reserve(filtered_blocks.size());
         for (const auto& pair : filtered_blocks) {
             result.compressionMetaData.filtered_blocks.emplace_back(
-                static_cast<int32_t>(pair.first), // int -> int32_t
+                static_cast<int32_t>(pair.first) , // int -> int32_t
                 pair.second                      // float -> float
-                );
+            );
         }
     }
 
@@ -383,7 +383,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         std::cout << "[METADATA CHECK] Block nH: " << std::get<0>(block_info) << std::endl;
         std::cout << "[METADATA CHECK] Block nW: " << std::get<1>(block_info) << std::endl;
         std::cout << "[METADATA CHECK] Padding: [";
-        const auto& padding_vec = std::get<2>(block_info);     
+        const auto& padding_vec = std::get<2>(block_info);
         for (size_t i = 0; i < padding_vec.size(); ++i) {
             std::cout << padding_vec[i];
             if (i < padding_vec.size() - 1) {
@@ -391,20 +391,20 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             }
         }
         std::cout << "]" << std::endl;
-        
+
         int32_t nH_i32 = static_cast<int32_t>(std::get<0>(block_info));
         int32_t nW_i32 = static_cast<int32_t>(std::get<1>(block_info));
         const std::vector<int64_t>& padding_i64 = std::get<2>(block_info);
         std::vector<int32_t> padding_i32;
         padding_i32.reserve(padding_i64.size());
-        
+
         for (int64_t pad_val : padding_i64) {
             padding_i32.push_back(static_cast<int32_t>(pad_val)); // int64 -> int32
-        }    
-        result.compressionMetaData.block_info = std::make_tuple(nH_i32, nW_i32, padding_i32);
+        }
+        result.compressionMetaData.block_info = std::make_tuple(nH_i32 , nW_i32 , padding_i32);
     }
     // **** //
-        
+
     // Initialize encoder
     RansEncoder range_encoder;
 
@@ -419,19 +419,19 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     batch_scales_vec.reserve(batch_size);
     std::vector<torch::Tensor> batch_indexes;
     batch_indexes.reserve(batch_size);
-    
+
     result.compressionMetaData.offsets.reserve(dataset.size());
     result.compressionMetaData.scales.reserve(dataset.size());
     result.compressionMetaData.indexes.reserve(dataset.size());
 
     const std::vector<int32_t>& shape_i32 = result.compressionMetaData.data_input_shape;
-    std::vector<int64_t> input_shape(shape_i32.begin(), shape_i32.end());
+    std::vector<int64_t> input_shape(shape_i32.begin() , shape_i32.end());
     torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
     std::cout << "\nrecon_tensor shape: " << recon_tensor.sizes() << std::endl;
     float batch_max = 0.0;
     float batch_min = 1000000.0;
     // **** //
-    
+
     for (size_t i = 0; i < dataset.size(); i++) {
         auto sample = dataset.get_item(i);
         torch::Tensor input_tensor = sample["input"];
@@ -447,7 +447,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             // ** JL modified ** //            
             std::cout << "Offset sample shape: " << offset_tensor.sizes() << std::endl;
             std::cout << "Scale sample shape: " << scale_tensor.sizes() << std::endl;
-            std::cout << "Index sample shape: " << index_tensor.sizes() << std::endl;            
+            std::cout << "Index sample shape: " << index_tensor.sizes() << std::endl;
             // **** //
         }
 
@@ -459,16 +459,16 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         // Metadata record
         result.compressionMetaData.offsets.push_back(offset_tensor.item<float>());
         result.compressionMetaData.scales.push_back(scale_tensor.item<float>());
-        
+
         std::vector<int32_t> index_vec;
         index_vec.reserve(index_tensor.numel());
         const int64_t* index_data_ptr = index_tensor.data_ptr<int64_t>();
-        
+
         for (int j = 0; j < index_tensor.numel(); ++j) {
             index_vec.push_back(static_cast<int32_t>(index_data_ptr[j]));
         }
         result.compressionMetaData.indexes.push_back(index_vec);
-        
+
         float current_max = input_tensor.max().item<float>();
         float current_min = input_tensor.min().item<float>();
         if (current_max > batch_max) {
@@ -494,16 +494,16 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor batched_input = torch::cat(batch_inputs , 0).to(device_);
             std::cout << "[COMPRESS] Batched input shape: " << batched_input.sizes() << std::endl;
             // ** JL modified ** //
-            torch::Tensor batched_offsets = torch::tensor(batch_offsets_vec).view({-1, 1, 1, 1, 1}).to(device_);
+            torch::Tensor batched_offsets = torch::tensor(batch_offsets_vec).view({ -1, 1, 1, 1, 1 }).to(device_);
             //torch::Tensor batched_offsets = torch::cat(batch_offsets , 0).to(device_);
             std::cout << "[COMPRESS] Batched offset shape: " << batched_offsets.sizes() << std::endl;
-            torch::Tensor batched_scales = torch::tensor(batch_scales_vec).view({-1, 1, 1, 1, 1}).to(device_);
+            torch::Tensor batched_scales = torch::tensor(batch_scales_vec).view({ -1, 1, 1, 1, 1 }).to(device_);
             //torch::Tensor batched_scales = torch::cat(batch_scales , 0).to(device_);
             std::cout << "[COMPRESS] Batched scale shape: " << batched_scales.sizes() << std::endl;
             torch::Tensor batched_indexes = torch::cat(batch_indexes , 0).to(device_);
             std::cout << "[COMPRESS] Batched index shape: " << batched_indexes.sizes() << std::endl;
             // **** //
-            
+
             // Run compression model
             std::cout << "[COMPRESS] Running compressor model..." << std::endl;
             std::vector<torch::Tensor> inputs = { batched_input };
@@ -591,8 +591,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             std::cout << "========================================" << std::endl;
             // Run hyper decompressor
             std::cout << "\n[HYPER DECOMPRESS] Running hyper decompressor..." << std::endl;
-            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({q_hyper_latent.to(torch::kFloat32)});
-        
+            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kFloat32) });
+
             torch::Tensor mean = hyper_outputs[0];
             torch::Tensor latent_indexes_recon = hyper_outputs[1];
             std::cout << "[HYPER DECOMPRESS] Mean shape: " << mean.sizes() << std::endl;
@@ -600,7 +600,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
             std::cout << "[LATENT DECODE] q_latent_with_offsetv shape (before reshape): " << q_latent_with_offset.sizes() << std::endl;
-            
+
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
             std::cout << "[RESHAPE] Original decoded_latents shape: " << decoded_latents_sizes << std::endl;
 
@@ -616,9 +616,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
             std::cout << "[LATENT DECODE - RESHAPE] Reshaped latents: " << reshaped_latents.sizes() << std::endl;
             std::cout << "[LATENT DECODE - RESHAPE] This means " << reshaped_latents.sizes()[0]
-            << " pairs of latent codes will be processed" << std::endl;
+                << " pairs of latent codes will be processed" << std::endl;
             std::cout << "\n[DECOMPRESS] Running main decompressor..." << std::endl;
-            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({reshaped_latents});
+            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
 
             torch::Tensor raw_output = decompressor_outputs[0];
             std::cout << "[DECOMPRESS] Raw output shape: " << raw_output.sizes() << std::endl;
@@ -629,36 +629,36 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             );
             std::cout << "[DECOMPRESS] norm_output shape: " << norm_output.sizes() << std::endl;
 
-            torch::Tensor denorm_output = norm_output*batched_scales + batched_offsets;
+            torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
             std::cout << "[DECOMPRESS] denorm_output max min: " << denorm_output.max().item<float>() << ", " << denorm_output.min().item<float>() << std::endl;
             // Construct recon with input data shape
             torch::Tensor indexes_cpu = batched_indexes.to(torch::kCPU);
             for (int64_t i = 0; i < num_input_samples; ++i) {
-                torch::Tensor index_row = indexes_cpu.select(0, i);
-                int64_t idx0    = index_row[0].item<int64_t>();
-                int64_t idx1    = index_row[1].item<int64_t>();
+                torch::Tensor index_row = indexes_cpu.select(0 , i);
+                int64_t idx0 = index_row[0].item<int64_t>();
+                int64_t idx1 = index_row[1].item<int64_t>();
                 int64_t start_t = index_row[2].item<int64_t>();
-                int64_t end_t   = index_row[3].item<int64_t>();
-                
-                torch::Tensor source_slice_3d = denorm_output.select(0, i).squeeze(0);
+                int64_t end_t = index_row[3].item<int64_t>();
+
+                torch::Tensor source_slice_3d = denorm_output.select(0 , i).squeeze(0);
                 //std::cout << "[DECOMPRESS] source_slice_3d shape: " << source_slice_3d.sizes() << std::endl;
-                torch::Tensor dest_slice = recon_tensor.select(0, idx0).select(0, idx1).slice(0, start_t, end_t);
-                
-                dest_slice.copy_(source_slice_3d);                
+                torch::Tensor dest_slice = recon_tensor.select(0 , idx0).select(0 , idx1).slice(0 , start_t , end_t);
+
+                dest_slice.copy_(source_slice_3d);
             }
-            
+
             // **** //
-            
+
             // ** JL modified ** //
             batch_offsets_vec.clear();
             batch_scales_vec.clear();
             batch_indexes.clear();
             // **** //
-            
+
             result.num_batches++;
         }
     }
-    
+
     // ** JL modified ** //
     // Address filtered block
     if (!result.compressionMetaData.filtered_blocks.empty()) {
@@ -672,7 +672,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
         if (samples == 0 || S == 0) {
             std::cerr << "Error: 'samples' or 'S' is zero, cannot calculate indexes." << std::endl;
-        } else {
+        }
+        else {
             const int64_t S_times_samples = S * samples;
 
             // Python: for label, value in filtered_blocks:
@@ -686,21 +687,21 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
                 const int64_t blk_idx = remain % samples;
                 const int64_t start_t = blk_idx * n_frame_filtered;
                 const int64_t end_t = (blk_idx + 1) * n_frame_filtered;
-                
+
                 torch::Tensor dest_slice = recon_tensor
-                    .select(0, v)     // shape: [S, T, H, W]
-                    .select(0, s)     // shape: [T, H, W]
-                    .slice(0, start_t, end_t); // shape: [n_frame_filtered, H, W]
-            
+                    .select(0 , v)     // shape: [S, T, H, W]
+                    .select(0 , s)     // shape: [T, H, W]
+                    .slice(0 , start_t , end_t); // shape: [n_frame_filtered, H, W]
+
                 dest_slice.fill_(value);
             }
         }
     }
-    
+
     // Intermediate error check
     std::cout << "\n========== Intermediate Data Check ==========" << std::endl;
     std::cout << "[DECOMPRESS OUTPUT CHECK] recon_tensor max min: " << recon_tensor.max().item<float>() << ", " << recon_tensor.min().item<float>() << std::endl;
-    std::cout << "[DECOMPRESS OUTPUT CHECK] intermediate NRMSE: " << relative_rmse_error(dataset.get_data_input().to(device_), recon_tensor) << std::endl;
+    std::cout << "[DECOMPRESS OUTPUT CHECK] intermediate NRMSE: " << relative_rmse_error(dataset.get_data_input().to(device_) , recon_tensor) << std::endl;
 
     // deblocking recon_tensor
     int64_t block_info_1 = static_cast<int64_t>(std::get<0>(result.compressionMetaData.block_info));
@@ -712,11 +713,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     for (int32_t val : padding_vec_i32) {
         block_info_3.push_back(static_cast<int64_t>(val));
     }
-    torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
-    
+    torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor , block_info_1 , block_info_2 , block_info_3);
+
     // padding before using GAE
-    std::tuple<torch::Tensor, std::vector<int>> padding_original = padding(dataset.original_data());
-    std::tuple<torch::Tensor, std::vector<int>> padding_recon = padding(recon_tensor_deblock);
+    std::tuple<torch::Tensor , std::vector<int>> padding_original = padding(dataset.original_data());
+    std::tuple<torch::Tensor , std::vector<int>> padding_recon = padding(recon_tensor_deblock);
 
     torch::Tensor padded_original_tensor = std::get<0>(padding_original);
     torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
@@ -734,22 +735,22 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     result.compressionMetaData.global_scale = global_scale;
     result.compressionMetaData.global_offset = global_offset;
 
-    torch::Tensor padded_original_tensor_norm = (padded_original_tensor-global_offset)/global_scale;
-    torch::Tensor padded_recon_tensor_norm = (padded_recon_tensor-global_offset)/global_scale;
+    torch::Tensor padded_original_tensor_norm = (padded_original_tensor - global_offset) / global_scale;
+    torch::Tensor padded_recon_tensor_norm = (padded_recon_tensor - global_offset) / global_scale;
 
     double quan_factor = 2.0;
 
     std::string codec_alg = "Zstd";
     std::pair<int , int> patch_size = { 8, 8 };
 
-    PCACompressor pca_compressor(rel_eb,
-    quan_factor,
-    device_.is_cuda() ? "cuda" : "cpu",
-    codec_alg,
-    patch_size);
+    PCACompressor pca_compressor(rel_eb ,
+        quan_factor ,
+        device_.is_cuda() ? "cuda" : "cpu" ,
+        codec_alg ,
+        patch_size);
 
-    // GAE Run
-    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm, padded_recon_tensor_norm);
+        // GAE Run
+    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm , padded_recon_tensor_norm);
     std::cout << "\n[GAE METADATA CHECK] pcaBasis shape: " << gae_compression_result.metaData.pcaBasis.sizes() << std::endl;
     std::cout << "[GAE METADATA CHECK] pcaBasis data type: " << gae_compression_result.metaData.pcaBasis.dtype() << std::endl;
     std::cout << "[GAE METADATA CHECK] uniqueVals shape: " << gae_compression_result.metaData.uniqueVals.sizes() << std::endl;
@@ -767,21 +768,21 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     // Construct GAE Struct for GAE decompression
     MetaData gae_record_metaData;
     CompressedData gae_record_compressedData;
-    
+
     int64_t pca_rows = result.gaeMetaData.pcaBasis.size();
-    int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size(); 
+    int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size();
 
     std::vector<float> pca_vec;
     pca_vec.reserve(pca_rows * pca_cols);
 
     for (const auto& row_vec : result.gaeMetaData.pcaBasis) {
-        pca_vec.insert(pca_vec.end(), row_vec.begin(), row_vec.end());
+        pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
     }
     torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
-    torch::Tensor pcaBasis = pca_vec_1d.reshape({pca_rows, pca_cols});
-    
+    torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
+
     std::cout << std::boolalpha;
-    std::cout << "\n[GAE Intermediate CHECK] pcaBasis are equal?: " << torch::equal(gae_compression_result.metaData.pcaBasis.to(device_), pcaBasis.to(device_)) << std::endl;
+    std::cout << "\n[GAE Intermediate CHECK] pcaBasis are equal?: " << torch::equal(gae_compression_result.metaData.pcaBasis.to(device_) , pcaBasis.to(device_)) << std::endl;
 
     gae_record_metaData.pcaBasis = pcaBasis.to(device_);
     gae_record_metaData.uniqueVals = torch::tensor(result.gaeMetaData.uniqueVals).to(device_);
@@ -796,24 +797,24 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
     // Run GAE decompression
     torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
-                gae_record_metaData ,
-                gae_record_compressedData);
+        gae_record_metaData ,
+        gae_record_compressedData);
 
     std::cout << "[GAE Intermediate CHECK] recons_gae size: " << recons_gae.sizes() << std::endl;
-    
-    torch::Tensor recons_gae_unpadded = unpadding(recons_gae, result.compressionMetaData.padding_recon_info);
+
+    torch::Tensor recons_gae_unpadded = unpadding(recons_gae , result.compressionMetaData.padding_recon_info);
     std::cout << "[GAE Intermediate CHECK] recons_gae_unpadded size: " << recons_gae_unpadded.sizes() << std::endl;
 
-    torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded, result.compressionMetaData.data_input_shape, result.compressionMetaData.pad_T);
+    torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
     std::cout << "[GAE Intermediate CHECK] final_recon_norm size: " << final_recon_norm.sizes() << std::endl;
     std::cout << "[GAE Intermediate CHECK] final_recon_norm max min: " << final_recon_norm.max().item<float>() << ", " << final_recon_norm.min().item<float>() << std::endl;
 
-    torch::Tensor final_recon = final_recon_norm*result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
+    torch::Tensor final_recon = final_recon_norm * result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
     std::cout << "[GAE Intermediate CHECK] final_recon max min: " << final_recon.max().item<float>() << ", " << final_recon.min().item<float>() << std::endl;
 
-    double final_nrmse = relative_rmse_error(input_data.to(device_), final_recon.to(device_));
+    double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
     result.final_nrmse = final_nrmse;
-            
+
     // Check
     std::cout << "\n[RECORDED METADATA CHECK] Data input shape: " << result.compressionMetaData.data_input_shape << std::endl;
     std::cout << "[RECORDED METADATA CHECK] Filtered blocks count: " << result.compressionMetaData.filtered_blocks.size() << std::endl;
@@ -821,7 +822,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     std::cout << "[RECORDED METADATA CHECK] Block nW: " << std::get<1>(result.compressionMetaData.block_info) << std::endl;
     std::cout << "[RECORDED METADATA CHECK] Padding: [";
     {
-        const auto& padding_vec = std::get<2>(result.compressionMetaData.block_info);     
+        const auto& padding_vec = std::get<2>(result.compressionMetaData.block_info);
         for (size_t i = 0; i < padding_vec.size(); ++i) {
             std::cout << padding_vec[i];
             if (i < padding_vec.size() - 1) {
@@ -837,7 +838,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)
     }
     std::cout << std::endl;
-    
+
     std::cout << "\n[RECORDED GAE METADATA CHECK] pcaBasis shape: " << result.gaeMetaData.pcaBasis.size() << ", " << result.gaeMetaData.pcaBasis[0].size() << std::endl;
     std::cout << "[RECORDED GAE METADATA CHECK] uniqueVals shape: " << result.gaeMetaData.uniqueVals.size() << std::endl;
     // **** //

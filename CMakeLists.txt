@@ -4,10 +4,33 @@ project(CAESAR)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type (Debug or Release)" FORCE)
+endif()
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+# Optional debug/release flags
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS ">> Debug mode enabled")
+    add_compile_definitions(DEBUG_MODE)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(STATUS ">> Release mode enabled")
+    add_compile_definitions(NDEBUG)
+endif()
+
 find_package(Torch REQUIRED)
 
 add_subdirectory(CAESAR)
-add_subdirectory(tests)
+
+option(BUILD_TESTS "Build CAESAR test files" OFF)
+
+if(BUILD_TESTS)
+    message(STATUS "Building test files...")
+    add_subdirectory(tests)
+else()
+    message(STATUS "Skipping test files (BUILD_TESTS=OFF)")
+endif()
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
         DESTINATION include/caesar
@@ -42,3 +65,4 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfig.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/CAESARConfigVersion.cmake"
   DESTINATION lib/cmake/caesar)
+
