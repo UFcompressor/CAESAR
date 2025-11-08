@@ -176,6 +176,7 @@ DecompressionResult Decompressor::decompress(
         std::cout << "========================================" << std::endl;
 
         // Decode hyper latents
+        //  here -----------------------------------------------------------------------------------------------------------------------
         std::vector<int32_t> hyper_size = {
             static_cast<int32_t>(current_batch_size), 64, 4, 4
         };
@@ -220,7 +221,7 @@ DecompressionResult Decompressor::decompress(
         torch::Tensor latent_indexes_recon = hyper_outputs[1];
         std::cout << "[HYPER DECOMPRESS] Mean shape: " << mean.sizes() << std::endl;
         std::cout << "[HYPER DECOMPRESS] Latent indexes shape: " << latent_indexes_recon.sizes() << std::endl;
-
+        // --------------------------------------------------------------------------------------------------------------------------------
         // Decode latents
         std::cout << "\n[LATENT DECODE] Decoding " << current_batch_size << " latent codes..." << std::endl;
         torch::Tensor decoded_latents_before_offset = torch::zeros(
@@ -291,6 +292,9 @@ DecompressionResult Decompressor::decompress(
             original_num_samples ,
             n_frame
         );
+
+        std::cout << "[OUTPUT Check - Before Denormalization] Final output max min: " << output.max().item<float>() << ", " << output.min().item<float>() << std::endl;
+
 
         std::cout << "[OUTPUT RESHAPE] Final output shape: " << output.sizes() << std::endl;
 
