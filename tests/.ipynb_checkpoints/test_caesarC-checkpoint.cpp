@@ -147,7 +147,8 @@ int main() {
 
         // Compress
         int batch_size = 32;
-        CompressionResult comp_result = compressor.compress(config , batch_size);
+        float rel_eb = 0.001;
+        CompressionResult comp_result = compressor.compress(config , batch_size, rel_eb);
 
         // Save compressed data
         std::cout << "\nSaving compressed data..." << std::endl;

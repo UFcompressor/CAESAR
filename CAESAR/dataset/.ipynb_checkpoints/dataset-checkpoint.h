@@ -133,6 +133,9 @@ public:
      * @brief Returns the (const reference to) the vector of filtered blocks.
      */
     const std::vector<std::pair<int, float>>& get_filtered_blocks() const;
+
+    const int64_t& get_pad_T() const;
+    const std::vector<int64_t>& get_shape_info() const;
     // **** //
 
 private:

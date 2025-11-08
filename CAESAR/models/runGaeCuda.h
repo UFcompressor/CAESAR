@@ -81,7 +81,7 @@ struct MainData {
     torch::Tensor coeffInt;
 };
 
-struct CompressionResult {
+struct GAECompressionResult {
     MetaData metaData;
     std::unique_ptr<CompressedData> compressedData;
     int64_t dataBytes;
@@ -96,7 +96,7 @@ public:
         std::pair<int , int> patchSize = { 8, 8 });
     ~PCACompressor();
 
-    CompressionResult compress(const torch::Tensor& originalData ,
+    GAECompressionResult compress(const torch::Tensor& originalData ,
         const torch::Tensor& reconsData);
 
 

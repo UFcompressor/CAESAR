@@ -255,7 +255,7 @@ PCACompressor::~PCACompressor() {
     cleanupGPUMemory();
 }
 
-CompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
+GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     const torch::Tensor& reconsData) {
 
     auto inputShape = originalData.sizes();

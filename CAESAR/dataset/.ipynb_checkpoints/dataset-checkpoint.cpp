@@ -695,4 +695,12 @@ const torch::Tensor& ScientificDataset::get_data_input() const {
 const std::vector<std::pair<int, float>>& ScientificDataset::get_filtered_blocks() const {
     return filtered_blocks;
 }
+
+const int64_t& ScientificDataset::get_pad_T() const {
+    return pad_T;
+}
+
+const std::vector<int64_t>& ScientificDataset::get_shape_info() const {
+    return shape;
+}
 // **** //
