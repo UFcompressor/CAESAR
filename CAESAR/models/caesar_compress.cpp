@@ -278,15 +278,15 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 void Compressor::load_models() {
     std::cout << "Loading compressor model..." << std::endl;
     compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_compressor.pt2"
+        "/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/caesar_compressor.pt2"
     );
     // ** JL modified ** //
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
+        "/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/caesar_hyper_decompressor.pt2"
     );
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_decompressor.pt2"
+        "/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/caesar_decompressor.pt2"
     );
     // **** //
     std::cout << "Model loaded successfully." << std::endl;
@@ -296,15 +296,15 @@ void Compressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
 
     // Load VBR tables
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/vbr_quantized_cdf.bin");
+    vbr_cdf_length_ = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/vbr_cdf_length.bin");
+    vbr_offset_ = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/vbr_offset.bin");
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
 
     // Load GS tables
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/gs_quantized_cdf.bin");
+    gs_cdf_length_ = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/gs_cdf_length.bin");
+    gs_offset_ = load_array_from_bin<int32_t>("/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/exported_model/gs_offset.bin");
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
     std::cout << "Probability tables loaded successfully." << std::endl;
@@ -627,6 +627,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
                 raw_output ,
                 num_input_samples
             );
+            std::cout << "[DEBUG] output (before denorm) range: "
+              << norm_output.min().item<float>() << " ~ "
+              << norm_output.max().item<float>() << std::endl;
             std::cout << "[DECOMPRESS] norm_output shape: " << norm_output.sizes() << std::endl;
 
             torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
@@ -697,7 +700,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             }
         }
     }
-
+    std::string save_path = "/blue/ranka/zhu.liangji/CAESAR_C++/CAESAR_C_v2/build/tests/output/recon_tensor.pt";
+    try {
+        torch::save(recon_tensor.cpu(), save_path);
+        std::cout << "[SAVE CHECK] recon_tensor saved to: " << save_path << std::endl;
+    } catch (const c10::Error& e) {
+        std::cerr << "[ERROR] Failed to save recon_tensor: " << e.msg() << std::endl;
+    }
     // Intermediate error check
     std::cout << "\n========== Intermediate Data Check ==========" << std::endl;
     std::cout << "[DECOMPRESS OUTPUT CHECK] recon_tensor max min: " << recon_tensor.max().item<float>() << ", " << recon_tensor.min().item<float>() << std::endl;
@@ -713,7 +722,18 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     for (int32_t val : padding_vec_i32) {
         block_info_3.push_back(static_cast<int64_t>(val));
     }
+    std::cout << "\n[DEBUG] Final recon_tensor shape: " << recon_tensor.sizes() << std::endl;
     torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor , block_info_1 , block_info_2 , block_info_3);
+    std::cout << "\n[DEBUG] deblockHW parameters:" << std::endl;
+    std::cout << "  nH = " << block_info_1 << std::endl;
+    std::cout << "  nW = " << block_info_2 << std::endl;
+    std::cout << "  padding = [";
+    for (size_t i = 0; i < block_info_3.size(); ++i) {
+        std::cout << block_info_3[i];
+        if (i < block_info_3.size() - 1)
+            std::cout << ", ";
+    }
+    std::cout << "]" << std::endl;
 
     // padding before using GAE
     std::tuple<torch::Tensor , std::vector<int>> padding_original = padding(dataset.original_data());
