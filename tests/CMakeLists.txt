@@ -40,6 +40,9 @@ target_link_libraries(test_caesarC
     stdc++fs
 )
 
+add_executable(test_caesarD test_decompress_consistency.cpp)
+target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
+
 add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
 
@@ -51,6 +54,7 @@ set(TEST_TARGETS
     test_caesarCD
     test_datasetNRMSE
     test_rans
+    test_caesarD
 )
 
 # Copy DLLs on MSVC if needed
