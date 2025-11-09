@@ -29,6 +29,8 @@ target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc
 #    stdc++fs
 #)
 
+add_executable(test_rans test_range_coder_consistency.cpp)
+target_link_libraries(test_rans PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
 
 add_executable(test_caesarC test_caesarC.cpp)
 target_link_libraries(test_caesarC
@@ -48,6 +50,7 @@ set(TEST_TARGETS
     test_caesarC
     test_caesarCD
     test_datasetNRMSE
+    test_rans
 )
 
 # Copy DLLs on MSVC if needed
