@@ -21,13 +21,13 @@ target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc
 
 
 
-add_executable(test_caesarCD test_caesarCD.cpp)
-target_link_libraries(test_caesarCD
-    PRIVATE
-    caesar_lib
-    "${TORCH_LIBRARIES}"
-    stdc++fs
-)
+#add_executable(test_caesarCD test_caesarCD.cpp)
+#target_link_libraries(test_caesarCD
+#    PRIVATE
+#    caesar_lib
+#    "${TORCH_LIBRARIES}"
+#    stdc++fs
+#)
 
 
 add_executable(test_caesarC test_caesarC.cpp)
