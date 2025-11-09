@@ -35,6 +35,8 @@ cmake \
   -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/local/nvcomp/lib" \
   ..
 
+# Compile debug mode on
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -S . -B build
 # Compile with all available cores
 cmake --build . --config Release -- -j$(nproc)
 
