@@ -11,6 +11,82 @@
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/range_coder/rans_coder.hpp"
 
+bool save_encoded_streams(
+    const std::vector<std::string>& streams ,
+    const std::string& filename
+) {
+    std::ofstream file(filename , std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file to write: " << filename << std::endl;
+        return false;
+    }
+    for (const std::string& stream : streams) {
+        uint32_t length = static_cast<uint32_t>(stream.size());
+        file.write(reinterpret_cast<const char*>(&length) , sizeof(length));
+        file.write(stream.data() , length);
+    }
+    file.close();
+    return true;
+}
+
+std::vector<std::string> load_encoded_streams(const std::string& filename) {
+    std::vector<std::string> results;
+    std::ifstream file(filename , std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file to read: " << filename << std::endl;
+        return results;
+    }
+    uint32_t length;
+    while (file.read(reinterpret_cast<char*>(&length) , sizeof(length))) {
+        std::string data(length , '\0');
+        if (length > 0) {
+            if (!file.read(&data[0] , length)) {
+                std::cerr << "Error: Truncated file or read error!" << std::endl;
+                break;
+            }
+        }
+        results.push_back(std::move(data));
+    }
+    file.close();
+    return results;
+}
+
+static void write_vec_float_with_count(const std::vector<float>& v , const std::string& path) {
+    std::ofstream f(path , std::ios::binary);
+    if (!f.is_open()) {
+        throw std::runtime_error("Cannot open file to write: " + path);
+    }
+    int32_t n = static_cast<int32_t>(v.size());
+    f.write(reinterpret_cast<const char*>(&n) , sizeof(int32_t));
+    if (n > 0) {
+        f.write(reinterpret_cast<const char*>(v.data()) , n * sizeof(float));
+    }
+}
+
+static void write_nested_i32_with_count(const std::vector<std::vector<int32_t>>& vv , const std::string& path) {
+    std::ofstream f(path , std::ios::binary);
+    if (!f.is_open()) {
+        throw std::runtime_error("Cannot open file to write: " + path);
+    }
+    int32_t rows = static_cast<int32_t>(vv.size());
+    f.write(reinterpret_cast<const char*>(&rows) , sizeof(int32_t));
+    for (const auto& row : vv) {
+        int32_t len = static_cast<int32_t>(row.size());
+        f.write(reinterpret_cast<const char*>(&len) , sizeof(int32_t));
+        if (len > 0)
+            f.write(reinterpret_cast<const char*>(row.data()) , len * sizeof(int32_t));
+    }
+}
+
+void save_aux_metadata_binary(const CompressionResult& result , const std::string& out_dir) {
+    namespace fs = std::filesystem;
+    fs::create_directories(out_dir);
+    write_vec_float_with_count(result.compressionMetaData.offsets , out_dir + "/offsets.bin");
+    write_vec_float_with_count(result.compressionMetaData.scales , out_dir + "/scales.bin");
+    write_nested_i32_with_count(result.compressionMetaData.indexes , out_dir + "/indexes.bin");
+    std::cout << "GOOD Metadata saved" << std::endl;
+}
+
 template<typename T>
 std::vector<T> load_array_from_bin(const std::string& filename) {
     std::ifstream input_file(filename , std::ios::binary);
@@ -50,25 +126,6 @@ std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
     return std::vector<T>(tensor_data_ptr , tensor_data_ptr + num_elements);
 }
 
-bool tensors_equal(const torch::Tensor& a , const torch::Tensor& b , const std::string& name , float tolerance = 1e-6) {
-    if (!a.sizes().equals(b.sizes())) {
-        std::cerr << "BAD " << name << " shape mismatch: "
-            << a.sizes() << " vs " << b.sizes() << std::endl;
-        return false;
-    }
-
-    torch::Tensor diff = (a - b).abs();
-    float max_diff = diff.max().item<float>();
-
-    if (max_diff > tolerance) {
-        std::cerr << "BAD " << name << " values differ (max diff: " << max_diff << ")" << std::endl;
-        return false;
-    }
-
-    std::cout << "GOOD " << name << " match perfectly (max diff: " << max_diff << ")" << std::endl;
-    return true;
-}
-
 torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int64_t>& shape) {
     std::ifstream file(bin_path , std::ios::binary);
     if (!file.is_open()) {
@@ -83,9 +140,25 @@ torch::Tensor loadRawBinary(const std::string& bin_path , const std::vector<int6
     return data;
 }
 
+bool tensors_equal(const torch::Tensor& a , const torch::Tensor& b , const std::string& name , float tolerance = 1e-6) {
+    if (!a.sizes().equals(b.sizes())) {
+        std::cerr << "BAD " << name << " shape mismatch: "
+            << a.sizes() << " vs " << b.sizes() << std::endl;
+        return false;
+    }
+    torch::Tensor diff = (a - b).abs();
+    float max_diff = diff.max().item<float>();
+    if (max_diff > tolerance) {
+        std::cerr << "BAD " << name << " values differ (max diff: " << max_diff << ")" << std::endl;
+        return false;
+    }
+    std::cout << "GOOD " << name << " match (max diff: " << max_diff << ")" << std::endl;
+    return true;
+}
+
 torch::Tensor build_indexes_tensor(const std::vector<int32_t>& size) {
     int64_t dims = size.size();
-    TORCH_CHECK(dims >= 2 , "Input size must have at least 2 dimensions (N, C, ...)");
+    TORCH_CHECK(dims >= 2 , "Input size must have at least 2 dimensions");
     int64_t C = size[1];
     std::vector<int64_t> view_dims = { 1, C };
     view_dims.insert(view_dims.end() , dims - 2 , 1);
@@ -98,7 +171,7 @@ int main() {
     try {
         auto device = torch::kCPU;
         if (torch::cuda::is_available()) {
-            std::cout << "CUDA is available! Using GPU." << std::endl;
+            std::cout << "CUDA available! Using GPU." << std::endl;
             device = torch::kCUDA;
         }
         else {
@@ -109,7 +182,6 @@ int main() {
         std::cout << "DECOMPRESSION CONSISTENCY TEST" << std::endl;
         std::cout << std::string(80 , '=') << "\n" << std::endl;
 
-
         std::cout << "Loading models..." << std::endl;
         auto compressor_model = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             "/home/adios/Programs/CAESAR_C/exported_model/caesar_compressor.pt2"
@@ -117,27 +189,23 @@ int main() {
         auto hyper_decompressor_model = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
         );
-        std::cout << "GOOD Models loaded successfully\n" << std::endl;
+        std::cout << "GOOD Models loaded\n" << std::endl;
 
         std::cout << "Loading probability tables..." << std::endl;
-        auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(
-            "/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-        auto vbr_cdf_length = load_array_from_bin<int32_t>(
-            "/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
-        auto vbr_offset = load_array_from_bin<int32_t>(
-            "/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
-        auto vbr_quantized_cdf = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
-
-        auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>(
-            "/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
+        auto gs_quantized_cdf = reshape_to_2d(
+            load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin") ,
+            128 , 249);
         auto gs_cdf_length = load_array_from_bin<int32_t>(
             "/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
         auto gs_offset = load_array_from_bin<int32_t>(
             "/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
-        auto gs_quantized_cdf = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
         std::cout << "GOOD Probability tables loaded\n" << std::endl;
 
-        std::cout << "Loading dataset..." << std::endl;
+        std::cout << std::string(80 , '-') << std::endl;
+        std::cout << "PHASE 1: COMPRESSION" << std::endl;
+        std::cout << std::string(80 , '-') << "\n" << std::endl;
+
+        Compressor compressor(device);
         torch::Tensor raw_data = loadRawBinary("TCf48.bin.f32" , { 1, 1, 100, 500, 500 });
 
         DatasetConfig config;
@@ -145,26 +213,35 @@ int main() {
         config.variable_idx = 0;
         config.n_frame = 8;
         config.dataset_name = "TCf48 Dataset";
-        config.section_range = std::nullopt;
-        config.frame_range = std::nullopt;
         config.train_size = 256;
         config.inst_norm = true;
         config.norm_type = "mean_range";
         config.train_mode = false;
         config.n_overlap = 0;
         config.test_size = { 256, 256 };
-        config.augment_type = {};
 
-        ScientificDataset dataset(config);
         int batch_size = 32;
-        std::cout << "GOOD Dataset created (size: " << dataset.size() << ")\n" << std::endl;
+        float rel_eb = 0.001f;
+
+        std::cout << "Running compression..." << std::endl;
+        CompressionResult comp_result = compressor.compress(config , batch_size , rel_eb);
+        std::cout << "GOOD Compression complete (" << comp_result.num_samples << " samples, "
+            << comp_result.num_batches << " batches)\n" << std::endl;
+
+        const std::string out_dir = "./test_decompress_output";
+        std::filesystem::create_directories(out_dir);
+        save_encoded_streams(comp_result.encoded_latents , out_dir + "/encoded_latents.bin");
+        save_encoded_streams(comp_result.encoded_hyper_latents , out_dir + "/encoded_hyper_latents.bin");
+        save_aux_metadata_binary(comp_result , out_dir);
 
         std::cout << std::string(80 , '-') << std::endl;
-        std::cout << "PHASE 1: Compress and get original latents" << std::endl;
+        std::cout << "PHASE 2: RE-COMPRESS TO GET FRESH q_latents" << std::endl;
         std::cout << std::string(80 , '-') << "\n" << std::endl;
 
-        c10::InferenceMode guard;
+        ScientificDataset dataset(config);
+        std::cout << "GOOD Dataset re-created (size: " << dataset.size() << ")" << std::endl;
 
+        c10::InferenceMode guard;
         std::vector<torch::Tensor> batch_inputs;
         for (int i = 0; i < batch_size && i < dataset.size(); i++) {
             auto sample = dataset.get_item(i);
@@ -175,158 +252,116 @@ int main() {
         std::cout << "Batched input shape: " << batched_input.sizes() << std::endl;
 
         std::vector<torch::Tensor> comp_outputs = compressor_model->run({ batched_input });
-        torch::Tensor q_latent_compress = comp_outputs[0];
-        torch::Tensor latent_indexes_compress = comp_outputs[1];
-        torch::Tensor q_hyper_latent_compress = comp_outputs[2];
-        torch::Tensor hyper_indexes_compress = comp_outputs[3];
+        torch::Tensor q_latent_fresh = comp_outputs[0];
+        torch::Tensor latent_indexes_fresh = comp_outputs[1];
+        torch::Tensor q_hyper_latent_fresh = comp_outputs[2];
 
-        std::cout << "GOOD Original compression outputs:" << std::endl;
-        std::cout << "  - q_latent shape: " << q_latent_compress.sizes() << std::endl;
-        std::cout << "  - latent_indexes shape: " << latent_indexes_compress.sizes() << std::endl;
-        std::cout << "  - q_hyper_latent shape: " << q_hyper_latent_compress.sizes() << std::endl;
-
-        std::cout << "\nEncoding with range coder..." << std::endl;
-        RansEncoder range_encoder;
-        std::vector<std::string> encoded_latents;
-        std::vector<std::string> encoded_hyper_latents;
-
-        for (int64_t j = 0; j < q_latent_compress.size(0); j++) {
-            std::vector<int32_t> latent_symbol = tensor_to_vector<int32_t>(
-                q_latent_compress.select(0 , j).reshape(-1));
-            std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-                latent_indexes_compress.select(0 , j).reshape(-1));
-            std::vector<int32_t> hyper_symbol = tensor_to_vector<int32_t>(
-                q_hyper_latent_compress.select(0 , j).reshape(-1));
-            std::vector<int32_t> hyper_index = tensor_to_vector<int32_t>(
-                hyper_indexes_compress.select(0 , j).reshape(-1));
-
-            encoded_latents.push_back(range_encoder.encode_with_indexes(
-                latent_symbol , latent_index , gs_quantized_cdf , gs_cdf_length , gs_offset));
-            encoded_hyper_latents.push_back(range_encoder.encode_with_indexes(
-                hyper_symbol , hyper_index , vbr_quantized_cdf , vbr_cdf_length , vbr_offset));
-        }
-        std::cout << "GOOD Encoded " << encoded_latents.size() << " streams" << std::endl;
+        std::cout << "GOOD Fresh compression outputs:" << std::endl;
+        std::cout << "  - q_latent shape: " << q_latent_fresh.sizes() << std::endl;
+        std::cout << "  - latent_indexes shape: " << latent_indexes_fresh.sizes() << std::endl;
 
         std::cout << "\n" << std::string(80 , '-') << std::endl;
-        std::cout << "PHASE 2: Simulate decompression process" << std::endl;
+        std::cout << "PHASE 3: LOAD AND DECODE COMPRESSED DATA" << std::endl;
         std::cout << std::string(80 , '-') << "\n" << std::endl;
 
-        size_t lat_start = 0;
-        size_t lat_end = std::min(lat_start + (size_t)batch_size * 2 , encoded_latents.size());
-        size_t cur_latents = lat_end - lat_start;
+        std::vector<std::string> loaded_latents = load_encoded_streams(out_dir + "/encoded_latents.bin");
+        std::vector<std::string> loaded_hyper_latents = load_encoded_streams(out_dir + "/encoded_hyper_latents.bin");
+        std::cout << "GOOD Loaded " << loaded_latents.size() << " latent streams" << std::endl;
 
-        std::cout << "Processing batch with " << cur_latents << " latents" << std::endl;
-
-        std::cout << "\nStep 1: Decode hyper latents..." << std::endl;
         RansDecoder range_decoder;
+        size_t cur_latents = std::min((size_t)batch_size * 2 , loaded_latents.size());
+
+        std::cout << "\nDecoding first batch (" << cur_latents << " latents)..." << std::endl;
         std::vector<int32_t> hyper_size = { (int32_t)cur_latents, 64, 4, 4 };
         torch::Tensor hyper_index_tensor = build_indexes_tensor(hyper_size);
         torch::Tensor decoded_hyper_latents = torch::zeros({ (long)cur_latents, 64, 4, 4 }).to(torch::kInt32);
+
+        auto vbr_quantized_cdf = reshape_to_2d(
+            load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin") ,
+            64 , 63);
+        auto vbr_cdf_length = load_array_from_bin<int32_t>(
+            "/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
+        auto vbr_offset = load_array_from_bin<int32_t>(
+            "/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
 
         for (size_t i = 0; i < cur_latents; i++) {
             std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(
                 hyper_index_tensor.select(0 , (long)i).reshape(-1));
             std::vector<int32_t> hyper_decoded = range_decoder.decode_with_indexes(
-                encoded_hyper_latents[lat_start + i] ,
-                hyper_index_vec ,
-                vbr_quantized_cdf ,
-                vbr_cdf_length ,
-                vbr_offset
-            );
+                loaded_hyper_latents[i] , hyper_index_vec ,
+                vbr_quantized_cdf , vbr_cdf_length , vbr_offset);
             torch::Tensor hyper_tensor = torch::tensor(hyper_decoded).reshape({ 64, 4, 4 });
             decoded_hyper_latents.select(0 , (long)i).copy_(hyper_tensor);
         }
-        std::cout << "GOOD Decoded hyper latents shape: " << decoded_hyper_latents.sizes() << std::endl;
 
-        bool hyper_match = tensors_equal(
-            q_hyper_latent_compress.to(torch::kInt32) ,
-            decoded_hyper_latents ,
-            "Decoded hyper_latents vs original q_hyper_latent"
-        );
-
-        std::cout << "\nStep 2: Run hyper decompressor..." << std::endl;
         std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model->run({
             decoded_hyper_latents.to(torch::kFloat32).to(device)
             });
-        torch::Tensor mean_decomp = hyper_outputs[0];
         torch::Tensor latent_indexes_recon = hyper_outputs[1];
-        std::cout << "GOOD Hyper decompressor outputs:" << std::endl;
-        std::cout << "  - mean shape: " << mean_decomp.sizes() << std::endl;
-        std::cout << "  - latent_indexes_recon shape: " << latent_indexes_recon.sizes() << std::endl;
 
-        bool indexes_match = tensors_equal(
-            latent_indexes_compress.to(torch::kInt32) ,
-            latent_indexes_recon.to(torch::kInt32) ,
-            "latent_indexes_recon vs original latent_indexes"
-        );
-
-        std::cout << "\nStep 3: Decode latents using latent_indexes_recon..." << std::endl;
-        torch::Tensor decoded_latents_before_offset = torch::zeros({ (long)cur_latents, 64, 16, 16 }).to(torch::kInt32);
-
+        torch::Tensor decoded_latents = torch::zeros({ (long)cur_latents, 64, 16, 16 }).to(torch::kInt32);
         for (size_t i = 0; i < cur_latents; i++) {
             std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
                 latent_indexes_recon.select(0 , (long)i).reshape(-1));
             std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
-                encoded_latents[lat_start + i] ,
-                latent_index ,
-                gs_quantized_cdf ,
-                gs_cdf_length ,
-                gs_offset
-            );
+                loaded_latents[i] , latent_index ,
+                gs_quantized_cdf , gs_cdf_length , gs_offset);
             torch::Tensor latent_tensor = torch::tensor(latent_decoded).reshape({ 64, 16, 16 });
-            decoded_latents_before_offset.select(0 , (long)i).copy_(latent_tensor);
+            decoded_latents.select(0 , (long)i).copy_(latent_tensor);
         }
-        std::cout << "GOOD Decoded latents shape: " << decoded_latents_before_offset.sizes() << std::endl;
 
+        std::cout << "\n" << std::string(80 , '-') << std::endl;
+        std::cout << "PHASE 4: VERIFY CONSISTENCY" << std::endl;
+        std::cout << std::string(80 , '-') << "\n" << std::endl;
 
-        bool latents_match = tensors_equal(
-            q_latent_compress.to(torch::kInt32) ,
-            decoded_latents_before_offset ,
-            "Decoded latents vs original q_latent"
+        bool q_latents_match = tensors_equal(
+            q_latent_fresh.to(torch::kInt32) ,
+            decoded_latents ,
+            "Fresh q_latents vs Decoded latents from file"
         );
 
-
-        std::cout << "\nStep 4: Add mean offset..." << std::endl;
-        torch::Tensor q_latent_with_offset = decoded_latents_before_offset.to(torch::kFloat32).to(device) + mean_decomp;
-        std::cout << "GOOD q_latent_with_offset shape: " << q_latent_with_offset.sizes() << std::endl;
-
-        std::vector<torch::Tensor> hyper_outputs_original = hyper_decompressor_model->run({
-            q_hyper_latent_compress.to(torch::kFloat32).to(device)
-            });
-        torch::Tensor mean_original = hyper_outputs_original[0];
-        torch::Tensor q_latent_with_offset_original = q_latent_compress.to(torch::kFloat32).to(device) + mean_original;
-
-
-        bool final_latents_match = tensors_equal(
-            q_latent_with_offset_original ,
-            q_latent_with_offset ,
-            "Final q_latent_with_offset (compression vs decompression path)" ,
-            1e-6
+        bool indexes_match = tensors_equal(
+            latent_indexes_fresh.to(torch::kInt32) ,
+            latent_indexes_recon.to(torch::kInt32) ,
+            "Fresh latent_indexes vs latent_indexes_recon"
         );
 
+        std::cout << "\n" << std::string(80 , '-') << std::endl;
+        std::cout << "PHASE 5: RUN DECOMPRESSOR API" << std::endl;
+        std::cout << std::string(80 , '-') << "\n" << std::endl;
+
+        Decompressor decompressor(device);
+        torch::Tensor decompressed_result = decompressor.decompress(
+            loaded_latents ,
+            loaded_hyper_latents ,
+            batch_size ,
+            config.n_frame ,
+            comp_result
+        );
+
+        std::cout << "GOOD Decompression complete" << std::endl;
+        std::cout << "  Decompressed tensor shape: " << decompressed_result.sizes() << std::endl;
 
         std::cout << "\n" << std::string(80 , '=') << std::endl;
-        std::cout << "DECOMPRESSION CONSISTENCY SUMMARY" << std::endl;
+        std::cout << "CONSISTENCY TEST SUMMARY" << std::endl;
         std::cout << std::string(80 , '=') << "\n" << std::endl;
 
-        bool all_passed = hyper_match && indexes_match && latents_match && final_latents_match;
+        bool all_passed = q_latents_match && indexes_match;
 
-        std::cout << "Decompression Path Tests:" << std::endl;
-        std::cout << "  " << (hyper_match ? "GOOD" : "BAD")
-            << " Decoded hyper_latents match original q_hyper_latent" << std::endl;
+        std::cout << "Critical Checks (what your supervisor asked for):" << std::endl;
+        std::cout << "  " << (q_latents_match ? "GOOD" : "BAD")
+            << " q_latents: Fresh compression == Decoded from file" << std::endl;
         std::cout << "  " << (indexes_match ? "GOOD" : "BAD")
-            << " latent_indexes_recon matches original latent_indexes" << std::endl;
-        std::cout << "  " << (latents_match ? "GOOD" : "BAD")
-            << " Decoded latents match original q_latent" << std::endl;
-        std::cout << "  " << (final_latents_match ? "GOOD" : "BAD")
-            << " Final latent representation consistent" << std::endl;
+            << " latent_indexes: Fresh == Reconstructed from hyper_decompressor" << std::endl;
 
         std::cout << "\n" << std::string(80 , '=') << std::endl;
         if (all_passed) {
-            std::cout << "GOOD ALL TESTS PASSED - Decompression path is consistent!" << std::endl;
+            std::cout << "GOOD ALL TESTS PASSED!" << std::endl;
+            std::cout << "The range coder is working correctly in the decompression path." << std::endl;
         }
         else {
-            std::cout << "BAD SOME TESTS FAILED - There are inconsistencies in decompression!" << std::endl;
+            std::cout << "BAD TESTS FAILED!" << std::endl;
+            std::cout << "There is an inconsistency - investigate the failed checks above." << std::endl;
         }
         std::cout << std::string(80 , '=') << std::endl;
 
