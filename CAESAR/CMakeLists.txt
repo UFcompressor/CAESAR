@@ -1,7 +1,8 @@
 find_package(MPI)
 find_package(CUDA)
-
 find_package(PkgConfig)
+
+# Zstd
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
 endif()
@@ -17,28 +18,23 @@ if(NOT ZSTD_FOUND)
     endif()
 endif()
 
-# Handle CUDA + nvcomp dependency
+# CUDA + nvcomp
 set(CUDA_SUPPORT_ENABLED FALSE)
 if(CUDA_FOUND)
     message(STATUS "CUDA found, checking for nvcomp...")
-    
-    # Try to find nvcomp
-    find_path(NVCOMP_INCLUDE_DIR 
+
+    find_path(NVCOMP_INCLUDE_DIR
         NAMES nvcomp.h nvcomp/nvcomp.h
-        HINTS 
-            ENV NVCOMP_ROOT
-            ENV NVCOMP_DIR
+        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
         PATH_SUFFIXES include
     )
-    
-    find_library(NVCOMP_LIBRARY 
+
+    find_library(NVCOMP_LIBRARY
         NAMES nvcomp
-        HINTS 
-            ENV NVCOMP_ROOT
-            ENV NVCOMP_DIR
+        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
         PATH_SUFFIXES lib lib64
     )
-    
+
     if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
         set(NVCOMP_FOUND TRUE)
         message(STATUS "Found nvcomp: ${NVCOMP_LIBRARY}")
@@ -46,13 +42,12 @@ if(CUDA_FOUND)
         set(CUDA_SUPPORT_ENABLED TRUE)
     else()
         message(WARNING "CUDA found but nvcomp NOT found. Building WITHOUT CUDA support.")
-        message(WARNING "To enable CUDA support, install nvcomp and set NVCOMP_ROOT or NVCOMP_DIR environment variable.")
-        message(WARNING "Example: export NVCOMP_ROOT=/path/to/nvcomp-linux-x86_64-5.0.0.6_cuda12-archive")
     endif()
 else()
     message(STATUS "CUDA not found, building without CUDA support")
 endif()
 
+# Library
 add_library(caesar_lib SHARED
     CAESAR.cpp
     dataset/dataset.cpp
@@ -62,6 +57,7 @@ add_library(caesar_lib SHARED
     models/caesar_decompress.cpp
 )
 
+# Include directories
 target_include_directories(caesar_lib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -71,9 +67,10 @@ target_include_directories(caesar_lib
         $<INSTALL_INTERFACE:include/caesar>
 )
 
+# Torch
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
 
-# Only enable CUDA if both CUDA and nvcomp are found
+# CUDA support
 if(CUDA_SUPPORT_ENABLED)
     message(STATUS "Enabling CUDA support with nvcomp")
     target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
@@ -81,6 +78,7 @@ if(CUDA_SUPPORT_ENABLED)
     target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES} ${NVCOMP_LIBRARY})
 endif()
 
+# Zstd support
 if(ZSTD_FOUND)
     if(TARGET PkgConfig::ZSTD)
         target_link_libraries(caesar_lib PUBLIC PkgConfig::ZSTD)
@@ -91,12 +89,20 @@ if(ZSTD_FOUND)
     message(STATUS "Zstd support enabled")
 endif()
 
+# MPI support
 if(MPI_FOUND)
     target_include_directories(caesar_lib PRIVATE ${MPI_INCLUDE_PATH})
     target_link_libraries(caesar_lib PUBLIC MPI::MPI_CXX)
     target_compile_definitions(caesar_lib PUBLIC USE_MPI)
 endif()
 
+# Set Debug/Release compiler flags
+target_compile_options(caesar_lib PRIVATE
+    $<$<CONFIG:Debug>:-g -O0>
+    $<$<CONFIG:Release>:-O3>
+)
+
+# Versioning
 set_target_properties(caesar_lib PROPERTIES
     VERSION 1.0.0
     SOVERSION 1

@@ -378,7 +378,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
     const std::vector<int32_t>& shape_i32 = result.compressionMetaData.data_input_shape;
     std::vector<int64_t> input_shape(shape_i32.begin() , shape_i32.end());
-    torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
+    torch::Tensor recon_tensor = torch::zeros(input_shape , torch::TensorOptions().device(device_));
+
     std::cout << "\nrecon_tensor shape: " << recon_tensor.sizes() << std::endl;
     float batch_max = 0.0;
     float batch_min = 1000000.0;

@@ -6,7 +6,7 @@
 #include <string>
 #include <memory>
 
-struct CompressionResult; 
+struct CompressionResult;
 struct DecompressionResult {
     std::vector<torch::Tensor> reconstructed_data;
     int num_samples = 0;
@@ -15,14 +15,14 @@ struct DecompressionResult {
 
 class Decompressor {
 public:
-    explicit Decompressor(torch::Device device = torch::kCPU);
+    explicit Decompressor(torch::Device device = torch::Device(torch::kCPU));
     ~Decompressor() = default;
 
     torch::Tensor decompress(
-        const std::vector<std::string>& encoded_latents,
-        const std::vector<std::string>& encoded_hyper_latents,
-        int batch_size,
-        int n_frame,
+        const std::vector<std::string>& encoded_latents ,
+        const std::vector<std::string>& encoded_hyper_latents ,
+        int batch_size ,
+        int n_frame ,
         const CompressionResult& comp_result
     );
 
@@ -33,18 +33,18 @@ private:
 
     void load_models();
     void load_probability_tables();
-    torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data, int64_t batch_size, int64_t n_frame);
+    torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data , int64_t batch_size , int64_t n_frame);
     torch::Tensor range_decode_latents(
-        const std::vector<std::string>& encoded_latents,
+        const std::vector<std::string>& encoded_latents ,
         const std::vector<std::string>& encoded_hyper_latents
     );
     torch::Tensor apply_inverse_normalization(
-        const torch::Tensor& data,
-        const std::vector<float>& offsets,
+        const torch::Tensor& data ,
+        const std::vector<float>& offsets ,
         const std::vector<float>& scales
     );
     torch::Tensor reconstruct_full_tensor(
-        const std::vector<torch::Tensor>& block_tensors,
+        const std::vector<torch::Tensor>& block_tensors ,
         const std::vector<std::vector<int32_t>>& indexes
     );
 
