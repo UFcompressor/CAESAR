@@ -189,28 +189,20 @@ int main() {
 
 
         Decompressor decompressor(device);
-        DecompressionResult decomp = decompressor.decompress(
+        torch::Tensor recon = decompressor.decompress(
             loaded_latents ,
             loaded_hyper ,
-            offsets ,
-            scales ,
-            indexes ,
             batch_size ,
-            n_frame
+            config.n_frame ,
+            comp
         );
 
-        if (decomp.reconstructed_data.empty()) {
-            std::cerr << "Decompression failed: reconstructed_data is empty.\n";
+        // Check if the tensor is empty
+        if (!recon.defined() || recon.numel() == 0) {
+            std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
             return 1;
         }
 
-        torch::Tensor recon;
-        if (decomp.reconstructed_data.size() == 1) {
-            recon = decomp.reconstructed_data[0].to(torch::kFloat32).contiguous();
-        }
-        else {
-            recon = torch::cat(decomp.reconstructed_data , 0).to(torch::kFloat32).contiguous();
-        }
         std::cout << "Reconstructed tensor shape: " << recon.sizes() << std::endl;
 
         int full_frames = 100;
@@ -218,7 +210,6 @@ int main() {
         int full_w = 500;
         int n_patches = recon.size(0);
         int frames_per_patch = recon.size(2);
-
 
         torch::Tensor recon_merged = torch::zeros({ 1, 1, full_frames, full_h, full_w } , recon.options());
 
@@ -233,14 +224,18 @@ int main() {
             );
 
             recon_merged.index_put_(
-                { 0, 0,
-                 torch::indexing::Slice(frame_idx, frame_idx + frames_to_copy),
-                 torch::indexing::Slice(0, full_h),
-                 torch::indexing::Slice(0, full_w) } ,
-                patch_padded.index({ 0,
-                                   torch::indexing::Slice(0, frames_to_copy),
-                                   torch::indexing::Slice(0, full_h),
-                                   torch::indexing::Slice(0, full_w) })
+                {
+                    0, 0,
+                    torch::indexing::Slice(frame_idx, frame_idx + frames_to_copy),
+                    torch::indexing::Slice(0, full_h),
+                    torch::indexing::Slice(0, full_w)
+                } ,
+                patch_padded.index({
+                    0,
+                    torch::indexing::Slice(0, frames_to_copy),
+                    torch::indexing::Slice(0, full_h),
+                    torch::indexing::Slice(0, full_w)
+                    })
             );
 
             frame_idx += frames_to_copy;
@@ -260,10 +255,9 @@ int main() {
         std::cout << "NRMSE: " << nrmse << std::endl;
         std::cout << "Compression Ratio (CR): " << CR << std::endl;
 
-
-
         std::cout << "Decompression finished. Reconstructed data shape: " << recon_merged.sizes() << "\n";
         return 0;
+
     }
     catch (const std::exception& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
