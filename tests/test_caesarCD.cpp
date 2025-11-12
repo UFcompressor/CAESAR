@@ -85,6 +85,82 @@ void save_tensor_to_bin(const torch::Tensor& tensor , const std::string& filenam
     std::cout << "Saved tensor to " << filename << "\n";
 }
 
+// ** JL modified ** //
+// Compute metadata bytes //
+template<typename T>
+size_t get_vector_data_size(const std::vector<T>& vec) {
+    if (vec.empty()) {
+        return 0;
+    }
+    return vec.size() * sizeof(T);
+}
+
+template<typename T>
+size_t get_2d_vector_data_size(const std::vector<std::vector<T>>& vec_2d) {
+    size_t total_bytes = 0;
+    for (const auto& inner_vec : vec_2d) {
+        total_bytes += inner_vec.size() * sizeof(T);
+    }
+    return total_bytes;
+}
+
+size_t calculate_metadata_size(const CompressionResult& result) {
+    size_t total_bytes = 0;
+
+    // --- 1. CompressionResult except bitstreams ---
+    // std::vector<uint8_t> gae_comp_data
+    total_bytes += get_vector_data_size(result.gae_comp_data);     
+    // double final_nrmse
+    total_bytes += sizeof(result.final_nrmse);     
+    // int num_samples
+    total_bytes += sizeof(result.num_samples);     
+    // int num_batches
+    total_bytes += sizeof(result.num_batches); 
+
+    // --- 2. CompressionMetaData ---
+    const auto& meta = result.compressionMetaData;
+    
+    // std::vector<float> offsets
+    total_bytes += get_vector_data_size(meta.offsets);    
+    // std::vector<float> scales
+    total_bytes += get_vector_data_size(meta.scales);    
+    // std::vector<std::vector<int32_t>> indexes
+    total_bytes += get_2d_vector_data_size(meta.indexes);    
+    // std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info
+    total_bytes += sizeof(std::get<0>(meta.block_info)); // nH (int32_t)
+    total_bytes += sizeof(std::get<1>(meta.block_info)); // nW (int32_t)
+    total_bytes += get_vector_data_size(std::get<2>(meta.block_info)); // padding (vector<int32_t>)    
+    // std::vector<int32_t> data_input_shape
+    total_bytes += get_vector_data_size(meta.data_input_shape);    
+    // std::vector<std::pair<int32_t, float>> filtered_blocks
+    total_bytes += get_vector_data_size(meta.filtered_blocks);    
+    // float global_scale, float global_offset, int64_t pad_T
+    total_bytes += sizeof(meta.global_scale);
+    total_bytes += sizeof(meta.global_offset);
+    total_bytes += sizeof(meta.pad_T);
+
+    // --- 3. GAEMetaData ---
+    const auto& gae_meta = result.gaeMetaData;
+
+    // bool GAE_correction_occur
+    total_bytes += sizeof(gae_meta.GAE_correction_occur);    
+    // std::vector<int> padding_recon_info
+    total_bytes += get_vector_data_size(gae_meta.padding_recon_info);    
+    // std::vector<std::vector<float>> pcaBasis
+    total_bytes += get_2d_vector_data_size(gae_meta.pcaBasis);    
+    // std::vector<float> uniqueVals
+    total_bytes += get_vector_data_size(gae_meta.uniqueVals);    
+    // double quanBin, int64_t nVec, int64_t prefixLength, ...
+    total_bytes += sizeof(gae_meta.quanBin);
+    total_bytes += sizeof(gae_meta.nVec);
+    total_bytes += sizeof(gae_meta.prefixLength);
+    total_bytes += sizeof(gae_meta.dataBytes);
+    total_bytes += sizeof(gae_meta.coeffIntBytes);
+
+    return total_bytes;
+}
+// **** //
+
 int main() {
     try {
         // device
@@ -96,11 +172,13 @@ int main() {
         else {
             std::cout << "Using CPU\n";
         }
+        //device = torch::Device(torch::kCPU);
+        //std::cout << "Device: " << device << std::endl;
 
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
         const std::string raw_path = "TCf48.bin.f32";
-        const std::string out_dir = "/home/adios/Programs/CAESAR_C/build/tests/output/";
+        const std::string out_dir = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/";
         std::filesystem::create_directories(out_dir);
         const int batch_size = 32;
         const int n_frame = 8;
@@ -126,7 +204,7 @@ int main() {
         config.test_size = { 256, 256 };
         config.augment_type = {};
 
-        float rel_eb = 0.001f;
+        float rel_eb = 0.1f;
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
 
 
@@ -150,8 +228,12 @@ int main() {
         uint64_t num_elements = 1;
         for (auto d : shape) num_elements *= static_cast<uint64_t>(d);
         uint64_t uncompressed_bytes = num_elements * sizeof(float);
-
-        double CR = (compressed_bytes > 0) ? static_cast<double>(uncompressed_bytes) / static_cast<double>(compressed_bytes) : 0.0;
+        
+        // ** JL modified ** //
+        size_t comp_all_meta_size = calculate_metadata_size(comp);
+        
+        double CR = (compressed_bytes > 0) ? static_cast<double>(uncompressed_bytes) / (static_cast<double>(compressed_bytes) + static_cast<double>(comp_all_meta_size)) : 0.0;
+        // **** //
         std::cout << "\nCompression stats:\n";
         std::cout << "  - Uncompressed bytes: " << uncompressed_bytes << "\n";
         std::cout << "  - Compressed bytes:   " << compressed_bytes << "\n";
@@ -189,28 +271,20 @@ int main() {
 
 
         Decompressor decompressor(device);
-        DecompressionResult decomp = decompressor.decompress(
+        torch::Tensor recon = decompressor.decompress(
             loaded_latents ,
             loaded_hyper ,
-            offsets ,
-            scales ,
-            indexes ,
             batch_size ,
-            n_frame
+            config.n_frame ,
+            comp
         );
 
-        if (decomp.reconstructed_data.empty()) {
-            std::cerr << "Decompression failed: reconstructed_data is empty.\n";
+        // Check if the tensor is empty
+        if (!recon.defined() || recon.numel() == 0) {
+            std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
             return 1;
         }
 
-        torch::Tensor recon;
-        if (decomp.reconstructed_data.size() == 1) {
-            recon = decomp.reconstructed_data[0].to(torch::kFloat32).contiguous();
-        }
-        else {
-            recon = torch::cat(decomp.reconstructed_data , 0).to(torch::kFloat32).contiguous();
-        }
         std::cout << "Reconstructed tensor shape: " << recon.sizes() << std::endl;
 
         int full_frames = 100;
@@ -218,7 +292,6 @@ int main() {
         int full_w = 500;
         int n_patches = recon.size(0);
         int frames_per_patch = recon.size(2);
-
 
         torch::Tensor recon_merged = torch::zeros({ 1, 1, full_frames, full_h, full_w } , recon.options());
 
@@ -233,14 +306,18 @@ int main() {
             );
 
             recon_merged.index_put_(
-                { 0, 0,
-                 torch::indexing::Slice(frame_idx, frame_idx + frames_to_copy),
-                 torch::indexing::Slice(0, full_h),
-                 torch::indexing::Slice(0, full_w) } ,
-                patch_padded.index({ 0,
-                                   torch::indexing::Slice(0, frames_to_copy),
-                                   torch::indexing::Slice(0, full_h),
-                                   torch::indexing::Slice(0, full_w) })
+                {
+                    0, 0,
+                    torch::indexing::Slice(frame_idx, frame_idx + frames_to_copy),
+                    torch::indexing::Slice(0, full_h),
+                    torch::indexing::Slice(0, full_w)
+                } ,
+                patch_padded.index({
+                    0,
+                    torch::indexing::Slice(0, frames_to_copy),
+                    torch::indexing::Slice(0, full_h),
+                    torch::indexing::Slice(0, full_w)
+                    })
             );
 
             frame_idx += frames_to_copy;
@@ -260,10 +337,9 @@ int main() {
         std::cout << "NRMSE: " << nrmse << std::endl;
         std::cout << "Compression Ratio (CR): " << CR << std::endl;
 
-
-
         std::cout << "Decompression finished. Reconstructed data shape: " << recon_merged.sizes() << "\n";
         return 0;
+
     }
     catch (const std::exception& e) {
         std::cerr << "ERROR: " << e.what() << "\n";

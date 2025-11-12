@@ -66,6 +66,7 @@ struct CompressedData {
 };
 
 struct MetaData {
+    bool GAE_correction_occur;
     torch::Tensor pcaBasis;
     torch::Tensor uniqueVals;
     double quanBin;

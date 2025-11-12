@@ -10,7 +10,6 @@ endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-# Optional debug/release flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS ">> Debug mode enabled")
     add_compile_definitions(DEBUG_MODE)

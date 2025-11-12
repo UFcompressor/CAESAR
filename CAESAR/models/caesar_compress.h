@@ -8,6 +8,8 @@
 
 // ** JL modified ** //
 struct GAEMetaData {
+    bool GAE_correction_occur;
+    std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
     std::vector<std::vector<float>> pcaBasis; // tensor is converted into vector for adios
     std::vector<float> uniqueVals; // tensor is converted into vector for adios
     double quanBin;
@@ -26,7 +28,6 @@ struct CompressionMetaData {
     std::vector<std::pair<int32_t , float>> filtered_blocks; // global info
     float global_scale; // global info
     float global_offset; // global info
-    std::vector<int> padding_recon_info; // global info
     int64_t pad_T; // global_info
 };
 // **** //
