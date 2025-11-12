@@ -594,7 +594,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         codec_alg ,
         patch_size);
 
-    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm , padded_recon_tensor_norm);
+    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm.to(device_) , padded_recon_tensor_norm.to(device_));
     result.gaeMetaData.GAE_correction_occur = gae_compression_result.metaData.GAE_correction_occur;
 
     MetaData gae_record_metaData;
