@@ -87,23 +87,23 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 void Decompressor::load_models() {
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
     );
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
     );
     std::cout << "Models loaded successfully." << std::endl;
 }
 
 void Decompressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
+    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_cdf_length.bin");
+    vbr_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_offset.bin");
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_quantized_cdf.bin");
+    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_cdf_length.bin");
+    gs_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_offset.bin");
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
     std::cout << "Probability tables loaded successfully." << std::endl;
 }
@@ -274,57 +274,63 @@ torch::Tensor Decompressor::decompress(
     std::cout << std::endl;
     
     torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor , block_info_1 , block_info_2 , block_info_3);
-    std::tuple<torch::Tensor , std::vector<int>> padding_recon = padding(recon_tensor_deblock);
-    torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
-    std::vector<int> padding_recon_info = std::get<1>(padding_recon);
-
-    float global_scale = meta.global_scale;
-    float global_offset = meta.global_offset;
-    torch::Tensor padded_recon_tensor_norm = (padded_recon_tensor - global_offset) / global_scale;
-    double quan_factor = 2.0;
-
-    std::string codec_alg = "Zstd";
-    std::pair<int , int> patch_size = { 8, 8 };
-    double rel_eb = 1e-3;
-    PCACompressor pca_compressor(rel_eb ,
-        quan_factor ,
-        device_.is_cuda() ? "cuda" : "cpu" ,
-        codec_alg ,
-        patch_size);
-        
-    MetaData gae_record_metaData;
-    CompressedData gae_record_compressedData;
-
-    int64_t pca_rows = comp_result.gaeMetaData.pcaBasis.size();
-    int64_t pca_cols = comp_result.gaeMetaData.pcaBasis[0].size();
-
-    std::vector<float> pca_vec;
-    pca_vec.reserve(pca_rows * pca_cols);
-
-    for (const auto& row_vec : comp_result.gaeMetaData.pcaBasis) {
-        pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
-    }
-    torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
-    torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
-
-    gae_record_metaData.pcaBasis = pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals = torch::tensor(comp_result.gaeMetaData.uniqueVals).to(device_);
-    gae_record_metaData.quanBin = comp_result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec = comp_result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = comp_result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes = comp_result.gaeMetaData.dataBytes;
-
-    gae_record_compressedData.data = comp_result.gae_comp_data;
-    gae_record_compressedData.dataBytes = comp_result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = comp_result.gaeMetaData.coeffIntBytes;
-
-    torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
-        gae_record_metaData ,
-        gae_record_compressedData);
-
-    torch::Tensor recons_gae_unpadded = unpadding(recons_gae , meta.padding_recon_info);
-    torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , meta.data_input_shape , meta.pad_T);
-    torch::Tensor final_recon = final_recon_norm * meta.global_scale + meta.global_offset;
-    return final_recon;
-}
     
+    if (comp_result.gaeMetaData.GAE_correction_occur) {
+        std::tuple<torch::Tensor , std::vector<int>> padding_recon = padding(recon_tensor_deblock);
+        torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
+        std::vector<int> padding_recon_info = std::get<1>(padding_recon);
+        
+        float global_scale = meta.global_scale;
+        float global_offset = meta.global_offset;
+        torch::Tensor padded_recon_tensor_norm = (padded_recon_tensor - global_offset) / global_scale;
+        double quan_factor = 2.0;
+        
+        std::string codec_alg = "Zstd";
+        std::pair<int , int> patch_size = { 8, 8 };
+        double rel_eb = 1e-3;
+        PCACompressor pca_compressor(rel_eb ,
+            quan_factor ,
+            device_.is_cuda() ? "cuda" : "cpu" ,
+            codec_alg ,
+            patch_size);
+        
+        MetaData gae_record_metaData;
+        CompressedData gae_record_compressedData;
+        
+        int64_t pca_rows = comp_result.gaeMetaData.pcaBasis.size();
+        int64_t pca_cols = comp_result.gaeMetaData.pcaBasis[0].size();
+        
+        std::vector<float> pca_vec;
+        pca_vec.reserve(pca_rows * pca_cols);
+        
+        for (const auto& row_vec : comp_result.gaeMetaData.pcaBasis) {
+            pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
+        }
+        torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
+        torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
+        
+        gae_record_metaData.pcaBasis = pcaBasis.to(device_);
+        gae_record_metaData.uniqueVals = torch::tensor(comp_result.gaeMetaData.uniqueVals).to(device_);
+        gae_record_metaData.quanBin = comp_result.gaeMetaData.quanBin;
+        gae_record_metaData.nVec = comp_result.gaeMetaData.nVec;
+        gae_record_metaData.prefixLength = comp_result.gaeMetaData.prefixLength;
+        gae_record_metaData.dataBytes = comp_result.gaeMetaData.dataBytes;
+        
+        gae_record_compressedData.data = comp_result.gae_comp_data;
+        gae_record_compressedData.dataBytes = comp_result.gaeMetaData.dataBytes;
+        gae_record_compressedData.coeffIntBytes = comp_result.gaeMetaData.coeffIntBytes;
+        
+        torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
+            gae_record_metaData ,
+            gae_record_compressedData);
+        
+        torch::Tensor recons_gae_unpadded = unpadding(recons_gae , comp_result.gaeMetaData.padding_recon_info);
+        torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , meta.data_input_shape , meta.pad_T);
+        torch::Tensor final_recon = final_recon_norm * meta.global_scale + meta.global_offset;
+        return final_recon;
+    }
+    else{
+        torch::Tensor final_recon = recons_data(recon_tensor_deblock , meta.data_input_shape , meta.pad_T);
+        return final_recon;
+    }
+}

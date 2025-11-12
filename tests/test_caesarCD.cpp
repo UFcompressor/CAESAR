@@ -100,7 +100,7 @@ int main() {
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
         const std::string raw_path = "TCf48.bin.f32";
-        const std::string out_dir = "/home/adios/Programs/CAESAR_C/build/tests/output/";
+        const std::string out_dir = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/";
         std::filesystem::create_directories(out_dir);
         const int batch_size = 32;
         const int n_frame = 8;
@@ -126,7 +126,7 @@ int main() {
         config.test_size = { 256, 256 };
         config.augment_type = {};
 
-        float rel_eb = 0.001f;
+        float rel_eb = 0.01f;
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
 
 
