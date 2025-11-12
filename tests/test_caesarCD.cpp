@@ -204,7 +204,7 @@ int main() {
         config.test_size = { 256, 256 };
         config.augment_type = {};
 
-        float rel_eb = 0.000005f;
+        float rel_eb = 0.1f;
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
 
 
