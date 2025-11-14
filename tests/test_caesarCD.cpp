@@ -109,31 +109,31 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
     // --- 1. CompressionResult except bitstreams ---
     // std::vector<uint8_t> gae_comp_data
-    total_bytes += get_vector_data_size(result.gae_comp_data);     
+    total_bytes += get_vector_data_size(result.gae_comp_data);
     // double final_nrmse
-    total_bytes += sizeof(result.final_nrmse);     
+    total_bytes += sizeof(result.final_nrmse);
     // int num_samples
-    total_bytes += sizeof(result.num_samples);     
+    total_bytes += sizeof(result.num_samples);
     // int num_batches
-    total_bytes += sizeof(result.num_batches); 
+    total_bytes += sizeof(result.num_batches);
 
     // --- 2. CompressionMetaData ---
     const auto& meta = result.compressionMetaData;
-    
+
     // std::vector<float> offsets
-    total_bytes += get_vector_data_size(meta.offsets);    
+    total_bytes += get_vector_data_size(meta.offsets);
     // std::vector<float> scales
-    total_bytes += get_vector_data_size(meta.scales);    
+    total_bytes += get_vector_data_size(meta.scales);
     // std::vector<std::vector<int32_t>> indexes
-    total_bytes += get_2d_vector_data_size(meta.indexes);    
+    total_bytes += get_2d_vector_data_size(meta.indexes);
     // std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info
     total_bytes += sizeof(std::get<0>(meta.block_info)); // nH (int32_t)
     total_bytes += sizeof(std::get<1>(meta.block_info)); // nW (int32_t)
     total_bytes += get_vector_data_size(std::get<2>(meta.block_info)); // padding (vector<int32_t>)    
     // std::vector<int32_t> data_input_shape
-    total_bytes += get_vector_data_size(meta.data_input_shape);    
+    total_bytes += get_vector_data_size(meta.data_input_shape);
     // std::vector<std::pair<int32_t, float>> filtered_blocks
-    total_bytes += get_vector_data_size(meta.filtered_blocks);    
+    total_bytes += get_vector_data_size(meta.filtered_blocks);
     // float global_scale, float global_offset, int64_t pad_T
     total_bytes += sizeof(meta.global_scale);
     total_bytes += sizeof(meta.global_offset);
@@ -143,13 +143,13 @@ size_t calculate_metadata_size(const CompressionResult& result) {
     const auto& gae_meta = result.gaeMetaData;
 
     // bool GAE_correction_occur
-    total_bytes += sizeof(gae_meta.GAE_correction_occur);    
+    total_bytes += sizeof(gae_meta.GAE_correction_occur);
     // std::vector<int> padding_recon_info
-    total_bytes += get_vector_data_size(gae_meta.padding_recon_info);    
+    total_bytes += get_vector_data_size(gae_meta.padding_recon_info);
     // std::vector<std::vector<float>> pcaBasis
-    total_bytes += get_2d_vector_data_size(gae_meta.pcaBasis);    
+    total_bytes += get_2d_vector_data_size(gae_meta.pcaBasis);
     // std::vector<float> uniqueVals
-    total_bytes += get_vector_data_size(gae_meta.uniqueVals);    
+    total_bytes += get_vector_data_size(gae_meta.uniqueVals);
     // double quanBin, int64_t nVec, int64_t prefixLength, ...
     total_bytes += sizeof(gae_meta.quanBin);
     total_bytes += sizeof(gae_meta.nVec);
@@ -178,7 +178,7 @@ int main() {
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
         const std::string raw_path = "TCf48.bin.f32";
-        const std::string out_dir = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/build/tests/output/";
+        const std::string out_dir = "/home/adios/Programs/CAESAR_C/build/tests/output/";
         std::filesystem::create_directories(out_dir);
         const int batch_size = 32;
         const int n_frame = 8;
@@ -228,10 +228,10 @@ int main() {
         uint64_t num_elements = 1;
         for (auto d : shape) num_elements *= static_cast<uint64_t>(d);
         uint64_t uncompressed_bytes = num_elements * sizeof(float);
-        
+
         // ** JL modified ** //
         size_t comp_all_meta_size = calculate_metadata_size(comp);
-        
+
         double CR = (compressed_bytes > 0) ? static_cast<double>(uncompressed_bytes) / (static_cast<double>(compressed_bytes) + static_cast<double>(comp_all_meta_size)) : 0.0;
         // **** //
         std::cout << "\nCompression stats:\n";

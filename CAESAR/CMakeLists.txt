@@ -52,6 +52,11 @@ add_library(caesar_lib SHARED
     models/range_coder/rans_coder.cpp
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
+    models/model_utils.cpp 
+)
+
+target_compile_definitions(caesar_lib PRIVATE 
+    DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
 target_include_directories(caesar_lib
