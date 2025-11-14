@@ -264,14 +264,14 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 void Compressor::load_models() {
     std::cout << "Loading compressor model..." << std::endl;
     compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_compressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor.pt2"
     );
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
     );
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/adios/Programs/CAESAR_C/exported_model/caesar_decompressor.pt2"
+        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
     );
     std::cout << "Model loaded successfully." << std::endl;
 }
@@ -280,15 +280,15 @@ void Compressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
 
     // Load VBR tables
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
+    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_cdf_length.bin");
+    vbr_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_offset.bin");
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
 
     // Load GS tables
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/adios/Programs/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_quantized_cdf.bin");
+    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_cdf_length.bin");
+    gs_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_offset.bin");
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
     std::cout << "Probability tables loaded successfully." << std::endl;
@@ -573,7 +573,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     torch::Tensor padded_original_tensor = std::get<0>(padding_original);
     torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
     std::vector<int> padding_recon_info = std::get<1>(padding_recon);
-    result.compressionMetaData.padding_recon_info = padding_recon_info;
+    result.gaeMetaData.padding_recon_info = padding_recon_info;
 
     float global_scale = padded_original_tensor.max().item<float>() - padded_original_tensor.min().item<float>();
     float global_offset = padded_original_tensor.mean().item<float>();
@@ -594,10 +594,12 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         codec_alg ,
         patch_size);
 
-    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm , padded_recon_tensor_norm);
+    auto gae_compression_result = pca_compressor.compress(padded_original_tensor_norm.to(device_) , padded_recon_tensor_norm.to(device_));
+    result.gaeMetaData.GAE_correction_occur = gae_compression_result.metaData.GAE_correction_occur;
 
-    result.gaeMetaData.pcaBasis = tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
-    result.gaeMetaData.uniqueVals = tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
+    MetaData gae_record_metaData;
+    CompressedData gae_record_compressedData;
+
     result.gaeMetaData.quanBin = gae_compression_result.metaData.quanBin;
     result.gaeMetaData.nVec = gae_compression_result.metaData.nVec;
     result.gaeMetaData.prefixLength = gae_compression_result.metaData.prefixLength;
@@ -605,45 +607,56 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
     result.gae_comp_data = gae_compression_result.compressedData->data;
 
+    if (result.gaeMetaData.GAE_correction_occur) {
+        result.gaeMetaData.pcaBasis = tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
+        result.gaeMetaData.uniqueVals = tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
+        
+        int64_t pca_rows = result.gaeMetaData.pcaBasis.size();
+        int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size();
+        
+        std::vector<float> pca_vec;
+        pca_vec.reserve(pca_rows * pca_cols);
+        
+        for (const auto& row_vec : result.gaeMetaData.pcaBasis) {
+            pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
+        }
+        torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
+        torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
+        
+        gae_record_metaData.pcaBasis = pcaBasis.to(device_);
+        gae_record_metaData.uniqueVals = torch::tensor(result.gaeMetaData.uniqueVals).to(device_);
+        gae_record_metaData.quanBin = result.gaeMetaData.quanBin;
+        gae_record_metaData.nVec = result.gaeMetaData.nVec;
+        gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
+        gae_record_metaData.dataBytes = result.gaeMetaData.dataBytes;
+        
+        gae_record_compressedData.data = result.gae_comp_data;
+        gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
+        gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
+        
+        torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
+            gae_record_metaData ,
+            gae_record_compressedData);
 
-    MetaData gae_record_metaData;
-    CompressedData gae_record_compressedData;
-
-    int64_t pca_rows = result.gaeMetaData.pcaBasis.size();
-    int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size();
-
-    std::vector<float> pca_vec;
-    pca_vec.reserve(pca_rows * pca_cols);
-
-    for (const auto& row_vec : result.gaeMetaData.pcaBasis) {
-        pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
+        
+        torch::Tensor recons_gae_unpadded = unpadding(recons_gae , result.gaeMetaData.padding_recon_info);
+        torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
+        torch::Tensor final_recon = final_recon_norm * result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
+        
+        double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
+        result.final_nrmse = final_nrmse;
     }
-    torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
-    torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
+    
+    else {
+        std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
+        // 'result.gaeMetaData.pcaBasis' and 'uniqueVals' are already emtpy. Skip record these.
+        
+        torch::Tensor final_recon = recons_data(recon_tensor_deblock , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
+        double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
+        result.final_nrmse = final_nrmse;
+    }
 
-    gae_record_metaData.pcaBasis = pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals = torch::tensor(result.gaeMetaData.uniqueVals).to(device_);
-    gae_record_metaData.quanBin = result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec = result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes = result.gaeMetaData.dataBytes;
-
-    gae_record_compressedData.data = result.gae_comp_data;
-    gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
-
-    torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
-        gae_record_metaData ,
-        gae_record_compressedData);
-
-
-    torch::Tensor recons_gae_unpadded = unpadding(recons_gae , result.compressionMetaData.padding_recon_info);
-    torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
-    torch::Tensor final_recon = final_recon_norm * result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
-
-    double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
-    result.final_nrmse = final_nrmse;
-
+    /*
     {
         const auto& padding_vec = std::get<2>(result.compressionMetaData.block_info);
         for (size_t i = 0; i < padding_vec.size(); ++i) {
@@ -654,6 +667,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         }
         std::cout << "]" << std::endl;
     }
+    */
 
     if (!result.compressionMetaData.indexes.empty()) {
         std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)

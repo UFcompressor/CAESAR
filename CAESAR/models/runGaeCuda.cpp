@@ -292,8 +292,8 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     torch::Tensor norms = torch::linalg_norm(residualPca , c10::nullopt , { 1 });
     torch::Tensor processMask = norms > errorBound_;
     if (torch::sum(processMask).item<int64_t>() <= 0) {
-
         MetaData metaData;
+        metaData.GAE_correction_occur = false;
         metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
         metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
@@ -319,6 +319,7 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     if (pcaBasis.size(0) == 0 || pcaBasis.size(1) == 0) {
         MetaData metaData;
+        metaData.GAE_correction_occur = false;
         metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
         metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
@@ -432,6 +433,7 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     metaData.prefixLength = prefixMaskFlatten.size(0);
 
     MainData mainData;
+    metaData.GAE_correction_occur = true;
     mainData.processMask = processMask;
     mainData.prefixMask = prefixMaskFlatten;
     mainData.maskLength = maskLength;
