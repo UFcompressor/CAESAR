@@ -139,18 +139,18 @@ size_t calculate_metadata_size(const CompressionResult& result) {
     total_bytes += sizeof(meta.global_offset);
     total_bytes += sizeof(meta.pad_T);
 
-    // --- 3. GAEMetaData ---
+
     const auto& gae_meta = result.gaeMetaData;
 
-    // bool GAE_correction_occur
+
     total_bytes += sizeof(gae_meta.GAE_correction_occur);
-    // std::vector<int> padding_recon_info
+
     total_bytes += get_vector_data_size(gae_meta.padding_recon_info);
-    // std::vector<std::vector<float>> pcaBasis
+
     total_bytes += get_2d_vector_data_size(gae_meta.pcaBasis);
-    // std::vector<float> uniqueVals
+
     total_bytes += get_vector_data_size(gae_meta.uniqueVals);
-    // double quanBin, int64_t nVec, int64_t prefixLength, ...
+
     total_bytes += sizeof(gae_meta.quanBin);
     total_bytes += sizeof(gae_meta.nVec);
     total_bytes += sizeof(gae_meta.prefixLength);
@@ -159,11 +159,11 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
     return total_bytes;
 }
-// **** //
+
 
 int main() {
     try {
-        // device
+     
         torch::Device device(torch::kCPU);
         if (torch::cuda::is_available()) {
             std::cout << "CUDA available, using GPU\n";
@@ -172,8 +172,8 @@ int main() {
         else {
             std::cout << "Using CPU\n";
         }
-        //device = torch::Device(torch::kCPU);
-        //std::cout << "Device: " << device << std::endl;
+      
+       
 
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
