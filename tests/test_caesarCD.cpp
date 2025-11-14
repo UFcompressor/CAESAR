@@ -107,17 +107,17 @@ size_t get_2d_vector_data_size(const std::vector<std::vector<T>>& vec_2d) {
 size_t calculate_metadata_size(const CompressionResult& result) {
     size_t total_bytes = 0;
 
-    // --- 1. CompressionResult except bitstreams ---
-    // std::vector<uint8_t> gae_comp_data
+  
+   
     total_bytes += get_vector_data_size(result.gae_comp_data);
-    // double final_nrmse
+ 
     total_bytes += sizeof(result.final_nrmse);
-    // int num_samples
+
     total_bytes += sizeof(result.num_samples);
-    // int num_batches
+
     total_bytes += sizeof(result.num_batches);
 
-    // --- 2. CompressionMetaData ---
+
     const auto& meta = result.compressionMetaData;
 
     // std::vector<float> offsets
