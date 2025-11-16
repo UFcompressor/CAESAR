@@ -6,7 +6,7 @@ import numpy as np
 # import compressai.entropy_models.entropy_models as entropy_models_lib
 # import compressai.entropy_models.entropy_models_vbr as entropy_models_vbr_lib
 
-from compressai.ops.bound_ops import LowerBoundFunction  # modify
+#from compressai.ops.bound_ops import LowerBoundFunction  # modify
 class PatchedLowerBound(nn.Module):
     """Lower bound operator, computes `torch.max(x, bound)` with a custom
     gradient.
@@ -19,9 +19,9 @@ class PatchedLowerBound(nn.Module):
         super().__init__()
         self.register_buffer("bound", torch.tensor([float(bound)]))
     
-    @torch.jit.unused
-    def lower_bound(self, x):
-        return LowerBoundFunction.apply(x, self.bound)
+    # @torch.jit.unused
+    # def lower_bound(self, x):
+    #     return LowerBoundFunction.apply(x, self.bound)
     
     def forward(self, x):
         
