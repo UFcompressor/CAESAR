@@ -36,8 +36,8 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           brew install cmake zstd python
-          pip3 install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
-          pip3 install -r requirements.txt
+          pip3 install --break-system-packages torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip3 install --break-system-packages -r requirements.txt
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -98,4 +98,4 @@ jobs:
 
       - name: Check test results
         run: |
-          echo "  Test completed successfully on ${{ matrix.os }}!"
+          echo "✓ Test completed successfully on ${{ matrix.os }}!"
