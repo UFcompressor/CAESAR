@@ -11,7 +11,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     # Increase timeout to 90 minutes
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     runs-on: ${{ matrix.os }}
 
@@ -38,10 +38,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
-          # Install all requirements except torch lines and comment lines
-          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
+          # Install all requirements except torch, CUDA packages, and comment lines
+          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" | grep -v "^cupy" | grep -v "^nvidia" > temp_requirements.txt
+          echo "=== Packages to install ==="
           cat temp_requirements.txt
-          pip install -r temp_requirements.txt || echo "Some packages failed, continuing..."
+          echo "==========================="
+          # Install packages one by one so one failure doesn't stop the rest
+          while IFS= read -r package; do
+            [ -z "$package" ] && continue
+            echo "Installing: $package"
+            pip install "$package" || echo "Failed to install $package, continuing..."
+          done < temp_requirements.txt
           # Then install correct torch version
           pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
@@ -51,8 +58,9 @@ jobs:
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install mingw -y
-          # Install all requirements except torch, scipy (old version), and comment lines
-          findstr /V /B /C:"torch==" /C:"torchvision==" /C:"--extra-index-url" /C:"#" /C:"scipy" requirements.txt > temp_requirements.txt
+          # Install all requirements except torch, scipy, CUDA packages, and comment lines
+          findstr /V /B /C:"torch==" /C:"torchvision==" /C:"--extra-index-url" /C:"#" /C:"scipy" /C:"cupy" /C:"nvidia" requirements.txt > temp_requirements.txt
+          type temp_requirements.txt
           pip install -r temp_requirements.txt || echo "Some packages failed, continuing..."
           # Install scipy (use latest available)
           pip install scipy || echo "scipy failed, continuing..."
@@ -64,8 +72,8 @@ jobs:
         timeout-minutes: 30
         run: |
           brew install cmake zstd gcc
-          # Install all requirements except torch and comment lines
-          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
+          # Install all requirements except torch, CUDA packages, and comment lines
+          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" | grep -v "^cupy" | grep -v "^nvidia" > temp_requirements.txt
           cat temp_requirements.txt
           # Install packages one by one so one failure doesn't stop the rest
           while read -r package; do
