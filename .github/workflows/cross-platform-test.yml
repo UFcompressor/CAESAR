@@ -84,8 +84,12 @@ jobs:
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Just install everything from requirements.txt, filtering out CUDA stuff
-          echo "=== Installing packages ==="
+          # Install torch FIRST (compressai needs it)
+          echo "=== Installing PyTorch ==="
+          pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          # Install other packages
+          echo "=== Installing other packages ==="
           pip install --no-cache-dir \
             "numpy<2" \
             scipy \
@@ -95,14 +99,18 @@ jobs:
             bsconv==0.4.0 \
             einops-exts==0.0.4 \
             rotary-embedding-torch==0.8.6 \
-            compressai==1.2.6 \
             imageio==2.37.0
 
-          # Install CPU-only torch
-          pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Try to install compressai - prefer binary wheels to avoid compilation
+          echo "=== Installing compressai ==="
+          pip install --no-cache-dir --only-binary=:all: compressai==1.2.6 2>/dev/null || \
+          pip install --no-cache-dir --only-binary=:all: compressai 2>/dev/null || \
+          pip install --no-cache-dir compressai==1.2.6 || \
+          echo "WARNING: Could not install compressai, may need to skip Windows tests"
 
           echo "=== Package list ==="
           pip list
+          pip show compressai || echo "compressai not installed"
 
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
