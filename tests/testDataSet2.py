@@ -3,55 +3,38 @@ import numpy as np
 import os
 import argparse
 
-parser = argparse.ArgumentParser(description="Save synthetic tensors to binary files.")
-parser.add_argument("output_dir", type=str, help="Path to the directory where .bin files will be saved")
+parser = argparse.ArgumentParser(description="Generate dummy test data for CAESAR compression testing.")
+parser.add_argument("output_dir", type=str, help="Path to the directory where the binary file will be saved")
+parser.add_argument("--filename", type=str, default="TCf48.bin.f32", help="Output filename (default: TCf48.bin.f32)")
 args = parser.parse_args()
 
 output_dir = args.output_dir
 os.makedirs(output_dir, exist_ok=True)
 
-def save_tensor_binary(tensor, filename):
-    contig = tensor.contiguous()
-    shape = np.array(tensor.shape, dtype=np.int64)
-    with open(filename, "wb") as f:
-        f.write(shape.tobytes())
-        f.write(contig.numpy().astype(np.float64).tobytes())
-    print(f"Saved tensor with shape {tuple(tensor.shape)} to {filename}")
+
+shape = (1, 1, 100, 500, 500)
+
+print(f"Generating dummy data with shape: {shape}")
 
 
-# Shape: (batch, channels, time, height, width)
-shape = (2, 12, 256, 256, 256)
+x = torch.linspace(0, 2 * np.pi, shape[4])  
+y = torch.linspace(0, 2 * np.pi, shape[3])  
+t = torch.linspace(0, 4 * np.pi, shape[2])  
 
-# Create grid for spatial coordinates
-x = torch.linspace(0, 1+ 2 * np.pi, shape[3])
-y = torch.linspace(0, 1- 2 * np.pi, shape[4])
-t = torch.linspace(0,2 - 4 * np.pi, shape[2])  # time dimension
-X, Y, T = torch.meshgrid(x, y, t, indexing="ij")  # shape (H, W, T)
 
-# Example synthetic "scientific" fields
-# Standing wave (H, W, T)
-wave = torch.sin(X) * torch.cos(Y)
+X, Y, T = torch.meshgrid(y, x, t, indexing="ij")  
 
-# Propagating wave (H, W, T)
-prop_wave = torch.sin(X - T)
+data = torch.sin(X) * torch.cos(Y) * torch.cos(T * 0.1)
+data = data + 0.3 * torch.sin(2 * X + T * 0.05)
+data = data.permute(2, 0, 1).contiguous()  
+data = data.unsqueeze(0).unsqueeze(0)  
+data = data.to(torch.float32)
 
-# Permute to (T, H, W) to match dataset convention
-wave = wave.permute(2, 0, 1).contiguous()
-prop_wave = prop_wave.permute(2, 0, 1).contiguous()
+output_path = os.path.join(output_dir, args.filename)
+with open(output_path, "wb") as f:
+    f.write(data.numpy().tobytes())
 
-# Fill tensor (batch, channels, time, height, width)
-data = torch.zeros(shape, dtype=torch.float64)
-for c in range(shape[1]):
-    if c % 2 == 0:
-        data[0, c] = wave
-    else:
-        data[0, c] = prop_wave
-
-# Second batch is just a scaled version
-data[1] = data[0] * 0.5
-
-# Save a few samples
-for i in range(1, 4):
-    filename = os.path.join(output_dir, f"tensor_data_{i}.bin")
-    save_tensor_binary(data, filename)
-
+print(f"  Saved {data.numel()} float32 values to {output_path}")
+print(f"  Shape: {tuple(data.shape)}")
+print(f"  Data range: [{data.min().item():.4f}, {data.max().item():.4f}]")
+print(f"  File size: {os.path.getsize(output_path) / (1024**2):.2f} MB")

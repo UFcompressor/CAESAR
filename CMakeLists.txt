@@ -35,6 +35,10 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
         DESTINATION include/caesar
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/exported_model/
+        DESTINATION share/caesar/models
+        FILES_MATCHING PATTERN "*.bin" PATTERN "*.pt2")
+        
 add_library(caesar::caesar ALIAS caesar_lib)
 
 install(TARGETS caesar_lib
