@@ -85,8 +85,7 @@ void save_tensor_to_bin(const torch::Tensor& tensor , const std::string& filenam
     std::cout << "Saved tensor to " << filename << "\n";
 }
 
-// ** JL modified ** //
-// Compute metadata bytes //
+
 template<typename T>
 size_t get_vector_data_size(const std::vector<T>& vec) {
     if (vec.empty()) {
@@ -107,10 +106,10 @@ size_t get_2d_vector_data_size(const std::vector<std::vector<T>>& vec_2d) {
 size_t calculate_metadata_size(const CompressionResult& result) {
     size_t total_bytes = 0;
 
-  
-   
+
+
     total_bytes += get_vector_data_size(result.gae_comp_data);
- 
+
     total_bytes += sizeof(result.final_nrmse);
 
     total_bytes += sizeof(result.num_samples);
@@ -163,7 +162,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
 int main() {
     try {
-     
+
         torch::Device device(torch::kCPU);
         if (torch::cuda::is_available()) {
             std::cout << "CUDA available, using GPU\n";
@@ -172,14 +171,17 @@ int main() {
         else {
             std::cout << "Using CPU\n";
         }
-      
-       
+
+
 
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
         const std::string raw_path = "TCf48.bin.f32";
-        const std::string out_dir = "/home/adios/Programs/CAESAR_C/build/tests/output/";
+
+        const std::string out_dir = "./output/";
+
         std::filesystem::create_directories(out_dir);
+
         const int batch_size = 32;
         const int n_frame = 8;
 
@@ -229,11 +231,11 @@ int main() {
         for (auto d : shape) num_elements *= static_cast<uint64_t>(d);
         uint64_t uncompressed_bytes = num_elements * sizeof(float);
 
-        // ** JL modified ** //
+
         size_t comp_all_meta_size = calculate_metadata_size(comp);
 
         double CR = (compressed_bytes > 0) ? static_cast<double>(uncompressed_bytes) / (static_cast<double>(compressed_bytes) + static_cast<double>(comp_all_meta_size)) : 0.0;
-        // **** //
+
         std::cout << "\nCompression stats:\n";
         std::cout << "  - Uncompressed bytes: " << uncompressed_bytes << "\n";
         std::cout << "  - Compressed bytes:   " << compressed_bytes << "\n";
@@ -279,7 +281,6 @@ int main() {
             comp
         );
 
-        // Check if the tensor is empty
         if (!recon.defined() || recon.numel() == 0) {
             std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
             return 1;
@@ -338,6 +339,8 @@ int main() {
         std::cout << "Compression Ratio (CR): " << CR << std::endl;
 
         std::cout << "Decompression finished. Reconstructed data shape: " << recon_merged.sizes() << "\n";
+
+        std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
         return 0;
 
     }

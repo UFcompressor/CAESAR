@@ -1,0 +1,101 @@
+name: Cross-Platform Build and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
+          pip install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Install Windows deps
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install mingw -y
+          pip install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Install macOS deps
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install cmake zstd python
+          pip3 install torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip3 install -r requirements.txt
+
+      - name: Prepare CAESAR models (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 CAESAR_compressor.py cpu
+          python3 CAESAR_hyper_decompressor.py cpu
+          python3 CAESAR_decompressor.py cpu
+
+      - name: Prepare CAESAR models (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          python CAESAR_compressor.py cpu
+          python CAESAR_hyper_decompressor.py cpu
+          python CAESAR_decompressor.py cpu
+
+      - name: Prepare CAESAR models (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          python3 CAESAR_compressor.py cpu
+          python3 CAESAR_hyper_decompressor.py cpu
+          python3 CAESAR_decompressor.py cpu
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build project
+        run: |
+          cd build
+          cmake --build . --config Debug --parallel
+
+      - name: Generate dummy test data
+        run: |
+          python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
+
+      - name: Run test_caesarCD
+        run: |
+          echo "Running test_caesarCD executable..."
+          cd build/tests
+
+          # Create output directory if it doesn't exist
+          mkdir -p output
+
+          # Make executable (Unix-like systems)
+          chmod +x test_caesarCD || true
+
+          # Run the test
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ./test_caesarCD.exe
+          else
+            ./test_caesarCD
+          fi
+        shell: bash
+
+      - name: Check test results
+        run: |
+          echo "  Test completed successfully on ${{ matrix.os }}!"
