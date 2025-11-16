@@ -45,10 +45,14 @@ jobs:
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
         run: |
-          brew install cmake zstd python
+          brew install cmake zstd python gcc
           # Install all requirements except torch and comment lines
           grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
-          pip3 install --break-system-packages -r temp_requirements.txt || true
+          # Install packages one by one so one failure doesn't stop the rest
+          while read -r package; do
+            [ -z "$package" ] && continue
+            pip3 install --break-system-packages "$package" || echo "Failed to install $package, continuing..."
+          done < temp_requirements.txt
           # Then install correct torch version
           pip3 install --break-system-packages --ignore-installed torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
