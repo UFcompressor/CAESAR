@@ -21,26 +21,30 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
-          pip install numpy scipy || true
-          pip install -r requirements.txt || true
-          pip install --force-reinstall torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Install all requirements except torch
+          grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | xargs -r pip install || true
+          # Then install correct torch version
+          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install Windows deps
         if: matrix.os == 'windows-latest'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install mingw -y
-          pip install numpy scipy || true
-          pip install -r requirements.txt || true
-          pip install --force-reinstall torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Install all requirements except torch
+          findstr /V /B /C:"torch" /C:"--extra-index-url" requirements.txt > temp_requirements.txt
+          pip install -r temp_requirements.txt || true
+          # Then install correct torch version
+          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
         run: |
           brew install cmake zstd python
-          pip3 install --break-system-packages numpy scipy || true
-          pip3 install --break-system-packages -r requirements.txt || true
-          pip3 install --break-system-packages --force-reinstall --ignore-installed torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Install all requirements except torch
+          grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | xargs pip3 install --break-system-packages || true
+          # Then install correct torch version
+          pip3 install --break-system-packages --ignore-installed torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -101,4 +105,4 @@ jobs:
 
       - name: Check test results
         run: |
-          echo "  Test completed successfully on ${{ matrix.os }}!"
+          echo " Test completed successfully on ${{ matrix.os }}!"
