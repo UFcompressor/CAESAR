@@ -10,9 +10,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
-    # Increase timeout to 90 minutes
     timeout-minutes: 90
-
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -20,9 +18,8 @@ jobs:
         uses: actions/checkout@v3
 
       # -----------------------
-      # Free up disk space (Linux only)
+      # Free disk (Ubuntu only)
       # -----------------------
-
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         uses: jlumbroso/free-disk-space@main
@@ -36,135 +33,91 @@ jobs:
           swap-storage: true
 
       # -----------------------
-      # Setup Python version
+      # Setup Python
       # -----------------------
-
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       # -----------------------
-      # Install dependencies
+      # Install Linux deps
       # -----------------------
-
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
-        timeout-minutes: 30
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
-          # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Create filtered requirements without CUDA packages
-          echo "=== Creating filtered requirements ==="
-          grep -v "^torch==" requirements.txt | \
-            grep -v "^torchvision==" | \
+          grep -v "^torch" requirements.txt | \
+            grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
-            grep -v "^#" | \
             grep -v "^cupy" | \
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
-          echo "=== Packages to install ==="
-          cat temp_requirements.txt
-          echo "==========================="
-
-          # Install packages with no cache to save space
           pip install --no-cache-dir -r temp_requirements.txt
-
-          # Verify key packages were installed
-          echo "=== Verifying installations ==="
-          pip show compressai einops || echo "WARNING: Some packages not installed!"
-
-          # Install CPU-only torch (much smaller than CUDA version)
           pip install --no-cache-dir torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-          # Clean up
-          rm -rf ~/.cache/pip
           rm temp_requirements.txt
+          rm -rf ~/.cache/pip
 
+      # -----------------------
+      # Install Windows deps
+      # -----------------------
       - name: Install Windows deps
         if: matrix.os == 'windows-latest'
-        timeout-minutes: 30
-        shell: bash
+        shell: pwsh
         run: |
           choco install cmake -y
-          choco install mingw -y
-
-          # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Install torch FIRST (compressai needs it)
-          echo "=== Installing PyTorch ==="
+          Write-Host "=== Installing PyTorch CPU ==="
           pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-          # Install other packages
-          echo "=== Installing other packages ==="
-          pip install --no-cache-dir \
-            "numpy<2" \
-            scipy \
-            tqdm==4.67.1 \
-            einops==0.8.1 \
-            pyyaml==6.0.2 \
-            bsconv==0.4.0 \
-            einops-exts==0.0.4 \
-            rotary-embedding-torch==0.8.6 \
+          Write-Host "=== Installing packages without CUDA ==="
+          pip install --no-cache-dir `
+            "numpy<2" `
+            scipy `
+            tqdm==4.67.1 `
+            einops==0.8.1 `
+            pyyaml==6.0.2 `
+            bsconv==0.4.0 `
+            einops-exts==0.0.4 `
+            rotary-embedding-torch==0.8.6 `
             imageio==2.37.0
 
-          # Try to install compressai - prefer binary wheels to avoid compilation
-          echo "=== Installing compressai ==="
-          pip install --no-cache-dir --only-binary=:all: compressai==1.2.6 2>/dev/null || \
-          pip install --no-cache-dir --only-binary=:all: compressai 2>/dev/null || \
-          pip install --no-cache-dir compressai==1.2.6 || \
-          echo "WARNING: Could not install compressai, may need to skip Windows tests"
+          Write-Host "=== Installing compressai (binary only) ==="
+          pip install --no-cache-dir --only-binary=:all: compressai 2>$null
+          pip show compressai || Write-Host "WARNING: compressai not installed on Windows"
 
-          echo "=== Package list ==="
-          pip list
-          pip show compressai || echo "compressai not installed"
-
+      # -----------------------
+      # Install macOS deps
+      # -----------------------
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
-        timeout-minutes: 30
         shell: bash
         run: |
           brew install cmake zstd gcc
-          # Upgrade pip
           pip3 install --upgrade pip setuptools wheel
 
-          # Create filtered requirements
-          echo "=== Creating filtered requirements ==="
-          grep -v "^torch==" requirements.txt | \
-            grep -v "^torchvision==" | \
+          grep -v "^torch" requirements.txt | \
+            grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
-            grep -v "^#" | \
             grep -v "^cupy" | \
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
-          echo "=== Packages to install ==="
-          cat temp_requirements.txt
-          echo "==========================="
-
-          # Install packages with no cache
           pip3 install --no-cache-dir -r temp_requirements.txt
-
-          # Verify key packages were installed
-          echo "=== Verifying installations ==="
-          pip3 show compressai einops || echo "WARNING: Some packages not installed!"
-
-          # Install CPU-only torch
           pip3 install --no-cache-dir torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-          # Clean up
           rm temp_requirements.txt
 
       # -----------------------
-      # Download pretrained models
+      # Download models
       # -----------------------
-
       - name: Download pretrained models
         shell: bash
         run: |
@@ -172,11 +125,10 @@ jobs:
           ./download_models.sh
 
       # -----------------------
-      # Prepare models (compress/export)
+      # Prepare CAESAR models
       # -----------------------
-
-      - name: Prepare CAESAR models (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Prepare CAESAR models (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           python3 CAESAR_compressor.py cpu
@@ -185,43 +137,37 @@ jobs:
 
       - name: Prepare CAESAR models (Windows)
         if: matrix.os == 'windows-latest'
-        shell: powershell
+        shell: pwsh
         run: |
-          echo "=== Verifying Python and packages ==="
+          Write-Host "Python version:"
           python --version
-          python -c "import sys; print('Python path:', sys.executable)"
-          python -c "import compressai; print('CompressAI version:', compressai.__version__)"
 
-          echo "=== Running CAESAR scripts ==="
+          Write-Host "Checking compressai:"
+          python -c "import compressai; print('CompressAI version:', compressai.__version__)" 2>$null
+
           python CAESAR_compressor.py cpu
           python CAESAR_hyper_decompressor.py cpu
           python CAESAR_decompressor.py cpu
 
-      - name: Prepare CAESAR models (macOS)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          python3 CAESAR_compressor.py cpu
-          python3 CAESAR_hyper_decompressor.py cpu
-          python3 CAESAR_decompressor.py cpu
-
       # -----------------------
-      # Configure & Build
+      # Configure CMake
       # -----------------------
-
-      - name: Configure CMake
+      - name: Configure CMake (all OS)
         shell: bash
         run: |
           mkdir -p build
           cd build
-          # Find torch installation
-          TORCH_PATH=$(python -c "import torch; print(torch.utils.cmake_prefix_path)" 2>/dev/null || python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
+          TORCH_PATH=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
           echo "Torch CMake path: $TORCH_PATH"
+
           cmake .. \
             -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
             -DBUILD_TESTS=ON \
             -DCMAKE_BUILD_TYPE=Debug
 
+      # -----------------------
+      # Build
+      # -----------------------
       - name: Build project
         shell: bash
         run: |
@@ -229,42 +175,34 @@ jobs:
           cmake --build . --config Debug --parallel
 
       # -----------------------
-      # Generate dummy test data
+      # Generate test data
       # -----------------------
-
       - name: Generate dummy test data
         shell: bash
         run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
+          if [ "$RUNNER_OS" = "Windows" ]; then
             python tests/testDataSet2.py build/tests --filename TCf48.bin.f32
           else
             python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
           fi
 
       # -----------------------
-      # Run test executable
+      # Run tests
       # -----------------------
-
       - name: Run test_caesarCD
         shell: bash
         run: |
-          echo "Running test_caesarCD executable..."
           cd build/tests
-
-          # Create output directory if it doesn't exist
           mkdir -p output
 
-          # Make executable (Unix-like systems)
-          chmod +x test_caesarCD || true
-
-          # Run the test
-          if [ "$RUNNER_OS" == "Windows" ]; then
+          if [ "$RUNNER_OS" = "Windows" ]; then
             ./test_caesarCD.exe
           else
+            chmod +x test_caesarCD || true
             ./test_caesarCD
           fi
 
       - name: Check test results
         shell: bash
         run: |
-          echo "  Test completed successfully on ${{ matrix.os }}!"
+          echo "Test completed successfully on ${{ matrix.os }}!"
