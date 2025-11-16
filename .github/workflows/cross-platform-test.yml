@@ -83,39 +83,28 @@ jobs:
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Use bash/grep instead of Windows findstr for consistency
-          echo "=== Creating filtered requirements ==="
-          grep -v "^torch==" requirements.txt | \
-            grep -v "^torchvision==" | \
-            grep -v "^--extra-index-url" | \
-            grep -v "^#" | \
-            grep -v "^scipy" | \
-            grep -v "^cupy" | \
-            grep -v "^nvidia" | \
-            grep -v "^$" > temp_requirements.txt
-
-          echo "=== Packages to install ==="
-          cat temp_requirements.txt
-          echo "==========================="
-
-          # Check if file has content
-          if [ ! -s temp_requirements.txt ]; then
-            echo "ERROR: temp_requirements.txt is empty!"
-            exit 1
-          fi
-
-          pip install --no-cache-dir -r temp_requirements.txt
+          # Install packages explicitly to avoid grep issues on Windows
+          echo "=== Installing Python packages ==="
+          pip install --no-cache-dir numpy==1.26.4
+          pip install --no-cache-dir tqdm==4.67.1
+          pip install --no-cache-dir einops==0.8.1
+          pip install --no-cache-dir pyyaml==6.0.2
+          pip install --no-cache-dir bsconv==0.4.0
+          pip install --no-cache-dir einops-exts==0.0.4
+          pip install --no-cache-dir rotary-embedding-torch==0.8.6
+          pip install --no-cache-dir compressai==1.2.6
+          pip install --no-cache-dir imageio==2.37.0
+          pip install --no-cache-dir scipy
 
           # Verify key packages were installed
           echo "=== Verifying installations ==="
-          pip show compressai einops || echo "WARNING: Some packages not installed!"
-          pip list
-
-          # Install scipy (use latest available)
-          pip install --no-cache-dir scipy
+          pip show compressai einops tqdm pyyaml
 
           # Install CPU-only torch
           pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          echo "=== Final package list ==="
+          pip list
 
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
