@@ -10,6 +10,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
+    # Increase timeout to 90 minutes
     timeout-minutes: 90
 
     runs-on: ${{ matrix.os }}
@@ -17,6 +18,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      # -----------------------
+      # Free up disk space (Linux only)
+      # -----------------------
 
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -30,10 +35,18 @@ jobs:
           docker-images: true
           swap-storage: true
 
+      # -----------------------
+      # Setup Python version
+      # -----------------------
+
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
+
+      # -----------------------
+      # Install dependencies
+      # -----------------------
 
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
@@ -74,15 +87,27 @@ jobs:
       - name: Install Windows deps
         if: matrix.os == 'windows-latest'
         timeout-minutes: 30
+        shell: bash
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install mingw -y
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Install all requirements except torch, scipy, CUDA packages, and comment lines
-          findstr /V /B /C:"torch==" /C:"torchvision==" /C:"--extra-index-url" /C:"#" /C:"scipy" /C:"cupy" /C:"nvidia" requirements.txt > temp_requirements.txt
-          type temp_requirements.txt
+          # Use bash/grep instead of Windows findstr for consistency
+          grep -v "^torch==" requirements.txt | \
+            grep -v "^torchvision==" | \
+            grep -v "^--extra-index-url" | \
+            grep -v "^#" | \
+            grep -v "^scipy" | \
+            grep -v "^cupy" | \
+            grep -v "^nvidia" | \
+            grep -v "^$" > temp_requirements.txt
+
+          echo "=== Packages to install ==="
+          cat temp_requirements.txt
+          echo "==========================="
+
           pip install --no-cache-dir -r temp_requirements.txt
 
           # Verify compressai was installed
@@ -124,10 +149,18 @@ jobs:
           # Clean up
           rm temp_requirements.txt
 
+      # -----------------------
+      # Download pretrained models
+      # -----------------------
+
       - name: Download pretrained models
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
+
+      # -----------------------
+      # Prepare models (compress/export)
+      # -----------------------
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -150,6 +183,10 @@ jobs:
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
 
+      # -----------------------
+      # Configure & Build
+      # -----------------------
+
       - name: Configure CMake
         run: |
           mkdir -p build
@@ -168,9 +205,17 @@ jobs:
           cd build
           cmake --build . --config Debug --parallel
 
+      # -----------------------
+      # Generate dummy test data
+      # -----------------------
+
       - name: Generate dummy test data
         run: |
           python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
+
+      # -----------------------
+      # Run test executable
+      # -----------------------
 
       - name: Run test_caesarCD
         run: |
