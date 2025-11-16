@@ -18,6 +18,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Free Disk Space (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
@@ -31,17 +43,33 @@ jobs:
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
-          # Install all requirements except torch, CUDA packages, and comment lines
-          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" | grep -v "^cupy" | grep -v "^nvidia" > temp_requirements.txt
+
+          # Create filtered requirements without CUDA packages
+          echo "=== Creating filtered requirements ==="
+          grep -v "^torch==" requirements.txt | \
+            grep -v "^torchvision==" | \
+            grep -v "^--extra-index-url" | \
+            grep -v "^#" | \
+            grep -v "^cupy" | \
+            grep -v "^nvidia" | \
+            grep -v "^$" > temp_requirements.txt
+
           echo "=== Packages to install ==="
           cat temp_requirements.txt
           echo "==========================="
-          # Install packages from filtered list
-          pip install -r temp_requirements.txt
+
+          # Install packages with no cache to save space
+          pip install --no-cache-dir -r temp_requirements.txt
+
           # Verify compressai was installed
           pip show compressai || echo "WARNING: compressai not installed!"
-          # Then install correct torch version
-          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          # Install CPU-only torch (much smaller than CUDA version)
+          pip install --no-cache-dir torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          # Clean up
+          rm -rf ~/.cache/pip
+          rm temp_requirements.txt
 
       - name: Install Windows deps
         if: matrix.os == 'windows-latest'
@@ -51,16 +79,20 @@ jobs:
           choco install mingw -y
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
+
           # Install all requirements except torch, scipy, CUDA packages, and comment lines
           findstr /V /B /C:"torch==" /C:"torchvision==" /C:"--extra-index-url" /C:"#" /C:"scipy" /C:"cupy" /C:"nvidia" requirements.txt > temp_requirements.txt
           type temp_requirements.txt
-          pip install -r temp_requirements.txt
+          pip install --no-cache-dir -r temp_requirements.txt
+
           # Verify compressai was installed
           pip show compressai || echo "WARNING: compressai not installed!"
+
           # Install scipy (use latest available)
-          pip install scipy
-          # Then install correct torch version (2.8.0 is latest for Windows CPU)
-          pip install torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir scipy
+
+          # Install CPU-only torch
+          pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
@@ -69,15 +101,28 @@ jobs:
           brew install cmake zstd gcc
           # Upgrade pip
           pip3 install --upgrade pip setuptools wheel
-          # Install all requirements except torch, CUDA packages, and comment lines
-          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" | grep -v "^--extra-index-url" | grep -v "^#" | grep -v "^cupy" | grep -v "^nvidia" > temp_requirements.txt
+
+          # Create filtered requirements
+          grep -v "^torch==" requirements.txt | \
+            grep -v "^torchvision==" | \
+            grep -v "^--extra-index-url" | \
+            grep -v "^#" | \
+            grep -v "^cupy" | \
+            grep -v "^nvidia" | \
+            grep -v "^$" > temp_requirements.txt
           cat temp_requirements.txt
-          # Install packages from filtered list
-          pip3 install -r temp_requirements.txt
+
+          # Install packages with no cache
+          pip3 install --no-cache-dir -r temp_requirements.txt
+
           # Verify compressai was installed
           pip3 show compressai || echo "WARNING: compressai not installed!"
-          # Then install correct torch version (use 2.8.0 which is more stable)
-          pip3 install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          # Install CPU-only torch
+          pip3 install --no-cache-dir torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          # Clean up
+          rm temp_requirements.txt
 
       - name: Download pretrained models
         run: |
