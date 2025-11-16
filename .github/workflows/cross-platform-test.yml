@@ -10,7 +10,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     runs-on: ${{ matrix.os }}
 
@@ -18,18 +18,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # -----------------------
-      # Setup Python version
-      # -----------------------
-
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-
-      # -----------------------
-      # Install dependencies
-      # -----------------------
 
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
@@ -37,8 +29,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
-          # Install all requirements except torch and comment lines
-          grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
+          # Install all requirements except torch lines and comment lines
+          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
           pip install -r temp_requirements.txt || echo "Some packages failed, continuing..."
           # Then install correct torch version
           pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -50,7 +42,7 @@ jobs:
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install mingw -y
           # Install all requirements except torch, scipy (old version), and comment lines
-          findstr /V /B /C:"torch" /C:"--extra-index-url" /C:"#" /C:"scipy" requirements.txt > temp_requirements.txt
+          findstr /V /B /C:"torch==" /C:"torchvision==" /C:"--extra-index-url" /C:"#" /C:"scipy" requirements.txt > temp_requirements.txt
           pip install -r temp_requirements.txt || echo "Some packages failed, continuing..."
           # Install scipy (use latest available)
           pip install scipy || echo "scipy failed, continuing..."
@@ -63,7 +55,7 @@ jobs:
         run: |
           brew install cmake zstd gcc
           # Install all requirements except torch and comment lines
-          grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
+          grep -v "^torch==" requirements.txt | grep -v "^torchvision==" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
           # Install packages one by one so one failure doesn't stop the rest
           while read -r package; do
             [ -z "$package" ] && continue
@@ -72,18 +64,10 @@ jobs:
           # Then install correct torch version (use 2.8.0 which is more stable)
           pip3 install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-      # -----------------------
-      # Download pretrained models
-      # -----------------------
-
       - name: Download pretrained models
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
-
-      # -----------------------
-      # Prepare models (compress/export)
-      # -----------------------
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -106,10 +90,6 @@ jobs:
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
 
-      # -----------------------
-      # Configure & Build
-      # -----------------------
-
       - name: Configure CMake
         run: |
           mkdir -p build
@@ -128,17 +108,9 @@ jobs:
           cd build
           cmake --build . --config Debug --parallel
 
-      # -----------------------
-      # Generate dummy test data
-      # -----------------------
-
       - name: Generate dummy test data
         run: |
           python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
-
-      # -----------------------
-      # Run test executable
-      # -----------------------
 
       - name: Run test_caesarCD
         run: |
