@@ -16,10 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # -----------------------
-      # Install dependencies
-      # -----------------------
-
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -36,11 +32,13 @@ jobs:
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           choco install mingw -y
-          # Install all requirements except torch and comment lines
-          findstr /V /B /C:"torch" /C:"--extra-index-url" /C:"#" requirements.txt > temp_requirements.txt
-          pip install -r temp_requirements.txt || true
-          # Then install correct torch version
-          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Install all requirements except torch, scipy (old version), and comment lines
+          findstr /V /B /C:"torch" /C:"--extra-index-url" /C:"#" /C:"scipy" requirements.txt > temp_requirements.txt
+          pip install -r temp_requirements.txt || echo "Some packages failed, continuing..."
+          # Install scipy (use latest available)
+          pip install scipy || echo "scipy failed, continuing..."
+          # Then install correct torch version (2.8.0 is latest for Windows CPU)
+          pip install torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
@@ -55,10 +53,6 @@ jobs:
           done < temp_requirements.txt
           # Then install correct torch version
           pip3 install --break-system-packages --ignore-installed torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-      # -----------------------
-      # Prepare models (compress/export)
-      # -----------------------
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -81,10 +75,6 @@ jobs:
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
 
-      # -----------------------
-      # Configure & Build
-      # -----------------------
-
       - name: Configure CMake
         run: |
           mkdir -p build
@@ -98,17 +88,9 @@ jobs:
           cd build
           cmake --build . --config Debug --parallel
 
-      # -----------------------
-      # Generate dummy test data
-      # -----------------------
-
       - name: Generate dummy test data
         run: |
           python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
-
-      # -----------------------
-      # Run test executable
-      # -----------------------
 
       - name: Run test_caesarCD
         run: |
