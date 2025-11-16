@@ -78,32 +78,30 @@ jobs:
         timeout-minutes: 30
         shell: bash
         run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install cmake -y
           choco install mingw -y
+
           # Upgrade pip
           pip install --upgrade pip setuptools wheel
 
-          # Install packages explicitly to avoid grep issues on Windows
-          echo "=== Installing Python packages ==="
-          pip install --no-cache-dir numpy==1.26.4
-          pip install --no-cache-dir tqdm==4.67.1
-          pip install --no-cache-dir einops==0.8.1
-          pip install --no-cache-dir pyyaml==6.0.2
-          pip install --no-cache-dir bsconv==0.4.0
-          pip install --no-cache-dir einops-exts==0.0.4
-          pip install --no-cache-dir rotary-embedding-torch==0.8.6
-          pip install --no-cache-dir compressai==1.2.6
-          pip install --no-cache-dir imageio==2.37.0
-          pip install --no-cache-dir scipy
-
-          # Verify key packages were installed
-          echo "=== Verifying installations ==="
-          pip show compressai einops tqdm pyyaml
+          # Just install everything from requirements.txt, filtering out CUDA stuff
+          echo "=== Installing packages ==="
+          pip install --no-cache-dir \
+            "numpy<2" \
+            scipy \
+            tqdm==4.67.1 \
+            einops==0.8.1 \
+            pyyaml==6.0.2 \
+            bsconv==0.4.0 \
+            einops-exts==0.0.4 \
+            rotary-embedding-torch==0.8.6 \
+            compressai==1.2.6 \
+            imageio==2.37.0
 
           # Install CPU-only torch
           pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-          echo "=== Final package list ==="
+          echo "=== Package list ==="
           pip list
 
       - name: Install macOS deps
