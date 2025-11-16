@@ -12,5 +12,6 @@ nvidia-nvcomp-cu11==4.2.0.11
 bsconv==0.4.0
 einops-exts==0.0.4
 rotary-embedding-torch==0.8.6
+compressai==1.2.6
 imageio==2.37.0
 zstandard==0.23.0

@@ -8,7 +8,7 @@ jobs:
   build-test:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
 
     timeout-minutes: 90
     runs-on: ${{ matrix.os }}
@@ -17,6 +17,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # -----------------------
+      # Free disk (Ubuntu only)
+      # -----------------------
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         uses: jlumbroso/free-disk-space@main
@@ -29,11 +32,17 @@ jobs:
           docker-images: true
           swap-storage: true
 
+      # -----------------------
+      # Setup Python
+      # -----------------------
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # -----------------------
+      # Install Linux deps
+      # -----------------------
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         shell: bash
@@ -42,6 +51,7 @@ jobs:
           sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
           pip install --upgrade pip setuptools wheel
 
+          # Filter requirements (remove torch packages for CPU install)
           grep -v "^torch" requirements.txt | \
             grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
@@ -49,37 +59,17 @@ jobs:
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
+          # Install requirements and CPU-only torch
           pip install --no-cache-dir -r temp_requirements.txt
           pip install --no-cache-dir torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir compressai==1.2.6 imageio==2.37.0
 
           rm temp_requirements.txt
           rm -rf ~/.cache/pip
 
-      - name: Install Windows deps
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          choco install cmake -y
-          pip install --upgrade pip setuptools wheel
-
-          Write-Host "=== Installing PyTorch CPU ==="
-          pip install --no-cache-dir torch==2.8.0+cpu torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-          Write-Host "=== Installing packages without CUDA ==="
-          pip install --no-cache-dir `
-            "numpy<2" `
-            scipy `
-            tqdm==4.67.1 `
-            einops==0.8.1 `
-            pyyaml==6.0.2 `
-            bsconv==0.4.0 `
-            einops-exts==0.0.4 `
-            rotary-embedding-torch==0.8.6 `
-            imageio==2.37.0
-
-          Write-Host "=== Skipping compressai on Windows ==="
-          Write-Host "compressai removed — safe to continue"
-
+      # -----------------------
+      # Install macOS deps
+      # -----------------------
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -87,6 +77,7 @@ jobs:
           brew install cmake zstd gcc
           pip3 install --upgrade pip setuptools wheel
 
+          # Filter requirements
           grep -v "^torch" requirements.txt | \
             grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
@@ -94,42 +85,41 @@ jobs:
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
+          # Install requirements and CPU-only torch
           pip3 install --no-cache-dir -r temp_requirements.txt
           pip3 install --no-cache-dir torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip3 install --no-cache-dir compressai==1.2.6 imageio==2.37.0
 
           rm temp_requirements.txt
 
+      # -----------------------
+      # Download pretrained models
+      # -----------------------
       - name: Download pretrained models
         shell: bash
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
 
-      - name: Prepare CAESAR models (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+      # -----------------------
+      # Prepare CAESAR models
+      # -----------------------
+      - name: Prepare CAESAR models
         shell: bash
         run: |
           python3 CAESAR_compressor.py cpu
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
 
-      - name: Prepare CAESAR models (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          Write-Host "Python version:"
-          python --version
-
-          python CAESAR_compressor.py cpu
-          python CAESAR_hyper_decompressor.py cpu
-          python CAESAR_decompressor.py cpu
-
-      - name: Configure CMake (all OS)
+      # -----------------------
+      # Configure CMake
+      # -----------------------
+      - name: Configure CMake
         shell: bash
         run: |
           mkdir -p build
           cd build
-          TORCH_PATH=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
+          TORCH_PATH=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
           echo "Torch CMake path: $TORCH_PATH"
 
           cmake .. \
@@ -137,33 +127,33 @@ jobs:
             -DBUILD_TESTS=ON \
             -DCMAKE_BUILD_TYPE=Debug
 
+      # -----------------------
+      # Build
+      # -----------------------
       - name: Build project
         shell: bash
         run: |
           cd build
           cmake --build . --config Debug --parallel
 
+      # -----------------------
+      # Generate test data
+      # -----------------------
       - name: Generate dummy test data
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            python tests/testDataSet2.py build/tests --filename TCf48.bin.f32
-          else
-            python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
-          fi
+          python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
 
+      # -----------------------
+      # Run tests
+      # -----------------------
       - name: Run test_caesarCD
         shell: bash
         run: |
           cd build/tests
           mkdir -p output
-
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            ./test_caesarCD.exe
-          else
-            chmod +x test_caesarCD || true
-            ./test_caesarCD
-          fi
+          chmod +x test_caesarCD || true
+          ./test_caesarCD
 
       - name: Check test results
         shell: bash
