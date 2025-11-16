@@ -1,7 +1,6 @@
 import os
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
