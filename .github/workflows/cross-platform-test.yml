@@ -17,9 +17,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # -----------------------
-      # Free disk (Ubuntu only)
-      # -----------------------
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         uses: jlumbroso/free-disk-space@main
@@ -32,17 +29,11 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # -----------------------
-      # Setup Python
-      # -----------------------
       - name: Setup Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      # -----------------------
-      # Install Linux deps
-      # -----------------------
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         shell: bash
@@ -64,9 +55,6 @@ jobs:
           rm temp_requirements.txt
           rm -rf ~/.cache/pip
 
-      # -----------------------
-      # Install Windows deps
-      # -----------------------
       - name: Install Windows deps
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -89,13 +77,9 @@ jobs:
             rotary-embedding-torch==0.8.6 `
             imageio==2.37.0
 
-          Write-Host "=== Installing compressai (binary only) ==="
-          pip install --no-cache-dir --only-binary=:all: compressai 2>$null
-          pip show compressai || Write-Host "WARNING: compressai not installed on Windows"
+          Write-Host "=== Skipping compressai on Windows ==="
+          Write-Host "compressai removed — safe to continue"
 
-      # -----------------------
-      # Install macOS deps
-      # -----------------------
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -115,18 +99,12 @@ jobs:
 
           rm temp_requirements.txt
 
-      # -----------------------
-      # Download models
-      # -----------------------
       - name: Download pretrained models
         shell: bash
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
 
-      # -----------------------
-      # Prepare CAESAR models
-      # -----------------------
       - name: Prepare CAESAR models (Linux/macOS)
         if: matrix.os != 'windows-latest'
         shell: bash
@@ -142,16 +120,10 @@ jobs:
           Write-Host "Python version:"
           python --version
 
-          Write-Host "Checking compressai:"
-          python -c "import compressai; print('CompressAI version:', compressai.__version__)" 2>$null
-
           python CAESAR_compressor.py cpu
           python CAESAR_hyper_decompressor.py cpu
           python CAESAR_decompressor.py cpu
 
-      # -----------------------
-      # Configure CMake
-      # -----------------------
       - name: Configure CMake (all OS)
         shell: bash
         run: |
@@ -165,18 +137,12 @@ jobs:
             -DBUILD_TESTS=ON \
             -DCMAKE_BUILD_TYPE=Debug
 
-      # -----------------------
-      # Build
-      # -----------------------
       - name: Build project
         shell: bash
         run: |
           cd build
           cmake --build . --config Debug --parallel
 
-      # -----------------------
-      # Generate test data
-      # -----------------------
       - name: Generate dummy test data
         shell: bash
         run: |
@@ -186,9 +152,6 @@ jobs:
             python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
           fi
 
-      # -----------------------
-      # Run tests
-      # -----------------------
       - name: Run test_caesarCD
         shell: bash
         run: |

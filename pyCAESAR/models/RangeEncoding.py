@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-import compressai.entropy_models.entropy_models as entropy_models_lib
-import compressai.entropy_models.entropy_models_vbr as entropy_models_vbr_lib
+# import compressai.entropy_models.entropy_models as entropy_models_lib
+# import compressai.entropy_models.entropy_models_vbr as entropy_models_vbr_lib
 
 from compressai.ops.bound_ops import LowerBoundFunction  # modify
 class PatchedLowerBound(nn.Module):
@@ -32,8 +32,8 @@ class PatchedLowerBound(nn.Module):
         
 from compressai.ops import bound_ops
 bound_ops.LowerBound = PatchedLowerBound
-entropy_models_lib.LowerBound = PatchedLowerBound
-entropy_models_vbr_lib.LowerBound = PatchedLowerBound
+# entropy_models_lib.LowerBound = PatchedLowerBound
+# entropy_models_vbr_lib.LowerBound = PatchedLowerBound
 
 from compressai.entropy_models import GaussianConditional
 
