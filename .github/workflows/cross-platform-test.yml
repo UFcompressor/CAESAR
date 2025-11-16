@@ -10,11 +10,27 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
+    # Increase timeout to 60 minutes
+    timeout-minutes: 60
+
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      # -----------------------
+      # Setup Python version
+      # -----------------------
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # -----------------------
+      # Install dependencies
+      # -----------------------
 
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
@@ -43,21 +59,29 @@ jobs:
       - name: Install macOS deps
         if: matrix.os == 'macos-latest'
         run: |
-          brew install cmake zstd python gcc
+          brew install cmake zstd gcc
           # Install all requirements except torch and comment lines
           grep -v "^torch" requirements.txt | grep -v "^--extra-index-url" | grep -v "^#" > temp_requirements.txt
           # Install packages one by one so one failure doesn't stop the rest
           while read -r package; do
             [ -z "$package" ] && continue
-            pip3 install --break-system-packages "$package" || echo "Failed to install $package, continuing..."
+            pip3 install "$package" || echo "Failed to install $package, continuing..."
           done < temp_requirements.txt
-          # Then install correct torch version
-          pip3 install --break-system-packages --ignore-installed torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Then install correct torch version (use 2.8.0 which is more stable)
+          pip3 install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      # -----------------------
+      # Download pretrained models
+      # -----------------------
 
       - name: Download pretrained models
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
+
+      # -----------------------
+      # Prepare models (compress/export)
+      # -----------------------
 
       - name: Prepare CAESAR models (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -80,6 +104,10 @@ jobs:
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
 
+      # -----------------------
+      # Configure & Build
+      # -----------------------
+
       - name: Configure CMake
         run: |
           mkdir -p build
@@ -93,9 +121,17 @@ jobs:
           cd build
           cmake --build . --config Debug --parallel
 
+      # -----------------------
+      # Generate dummy test data
+      # -----------------------
+
       - name: Generate dummy test data
         run: |
           python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
+
+      # -----------------------
+      # Run test executable
+      # -----------------------
 
       - name: Run test_caesarCD
         run: |
