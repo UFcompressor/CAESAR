@@ -164,8 +164,14 @@ jobs:
 
       - name: Prepare CAESAR models (Windows)
         if: matrix.os == 'windows-latest'
-        shell: bash
+        shell: powershell
         run: |
+          echo "=== Verifying Python and packages ==="
+          python --version
+          python -c "import sys; print('Python path:', sys.executable)"
+          python -c "import compressai; print('CompressAI version:', compressai.__version__)"
+
+          echo "=== Running CAESAR scripts ==="
           python CAESAR_compressor.py cpu
           python CAESAR_hyper_decompressor.py cpu
           python CAESAR_decompressor.py cpu
