@@ -96,6 +96,7 @@ endif()
 target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Profile>:-O3 -g>
 )
 
 set_target_properties(caesar_lib PROPERTIES
