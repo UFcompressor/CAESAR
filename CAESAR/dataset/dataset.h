@@ -28,7 +28,6 @@ std::tuple<torch::Tensor , std::tuple<int64_t , int64_t , std::vector<int64_t>>>
 blockHW(const torch::Tensor& data ,
     std::pair<int64_t , int64_t> block_size = { 256, 256 });
 
-// for debuging i guess not used
 std::tuple<torch::Tensor , torch::Tensor , torch::Tensor>
 normalizeData(const torch::Tensor& data , const std::string& normType , torch::IntArrayRef axis);
 
@@ -37,16 +36,49 @@ dataFiltering(const torch::Tensor& data , int nFrame);
 
 std::unordered_map<int , int> buildReverseIdMap(int visableLen , const std::vector<int>& filteredLables);
 
-
-
 std::unordered_map<std::string , int> get_augment_type_arg(
     const std::unordered_map<std::string , torch::Tensor>& args);
 
-// Configuration struct to hold all dataset parameters
+
+struct BinaryFileConfig {
+    std::string file_path;
+    std::vector<int64_t> dimensions;
+    torch::ScalarType data_type;
+
+    void validate() const {
+        if (dimensions.size() != 5) {
+            throw std::invalid_argument(
+                "Binary file dimensions must be 5D [V, S, T, H, W], got " +
+                std::to_string(dimensions.size()) + "D");
+        }
+
+        if (dimensions[0] < 1) {
+            throw std::invalid_argument(
+                "First dimension (V) must be at least 1, got " +
+                std::to_string(dimensions[0]));
+        }
+
+        if (dimensions[2] < 1) {
+            throw std::invalid_argument(
+                "Third dimension (T/frames) must be at least 1, got " +
+                std::to_string(dimensions[2]));
+        }
+
+        for (size_t i = 0; i < dimensions.size(); ++i) {
+            if (dimensions[i] <= 0) {
+                throw std::invalid_argument(
+                    "Dimension " + std::to_string(i) + " must be positive, got " +
+                    std::to_string(dimensions[i]));
+            }
+        }
+    }
+};
+
+
 struct DatasetConfig {
-    // Data source - only one should be provided
-    std::optional<std::string> binary_path;      // Path to binary file
-    std::optional<torch::Tensor> memory_data;    // Pre-loaded tensor data
+    std::optional<BinaryFileConfig> binary_config;
+    std::optional<std::string> binary_path;
+    std::optional<torch::Tensor> memory_data;
 
     // Required parameters
     std::string dataset_name = "Customized Dataset";
@@ -118,25 +150,11 @@ public:
     torch::Tensor recons_data(const torch::Tensor& recons_data) const;
     torch::Tensor deblocking_hw(const torch::Tensor& data) const;
 
-    // ** JL modified ** //
-    /**
-     * @brief Returns the block info (nH, nW, padding).
-     */
-    std::tuple<int64_t, int64_t, std::vector<int64_t>> get_block_info() const;
-
-    /**
-     * @brief Returns the (const reference to) the final data_input tensor.
-     */
+    std::tuple<int64_t , int64_t , std::vector<int64_t>> get_block_info() const;
     const torch::Tensor& get_data_input() const;
-
-    /**
-     * @brief Returns the (const reference to) the vector of filtered blocks.
-     */
-    const std::vector<std::pair<int, float>>& get_filtered_blocks() const;
-
+    const std::vector<std::pair<int , float>>& get_filtered_blocks() const;
     const int64_t& get_pad_T() const;
     const std::vector<int64_t>& get_shape_info() const;
-    // **** //
 
 private:
     std::vector<int64_t> shape_org;
@@ -167,9 +185,10 @@ private:
         std::optional<std::pair<int , int>> frame_range = std::nullopt
     );
 
-    // Load from binary file
-    torch::Tensor loadDatasetFromBinary(
-        const std::string& bin_path ,
+    // Load from binary file with explicit configuration
+    torch::Tensor
+    (
+        const BinaryFileConfig& bin_config ,
         std::optional<int> variable_idx = std::nullopt ,
         std::optional<std::pair<int , int>> section_range = std::nullopt ,
         std::optional<std::pair<int , int>> frame_range = std::nullopt

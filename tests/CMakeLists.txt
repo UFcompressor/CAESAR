@@ -42,6 +42,8 @@ add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
+add_executable(test_load_bin testBinData.cpp)
+target_link_libraries(test_load_bin PRIVATE caesar_lib  "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 set(TEST_TARGETS
     test_runGaeCuda
     test_dataset
@@ -51,6 +53,7 @@ set(TEST_TARGETS
     test_datasetNRMSE
     test_rans
     test_caesarD
+    test_load_bin
 )
 
 
