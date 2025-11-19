@@ -115,7 +115,7 @@ jobs:
       - name: Generate dummy test data
         shell: bash
         run: |
-          python3 tests/testDataSet2.py build/tests --filename TCf48.bin.f32
+          python3 tests/gen_data.py build/tests --filename TCf48.bin.f32
 
       - name: Run test_caesarCD
         shell: bash
