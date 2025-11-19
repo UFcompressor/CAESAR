@@ -182,9 +182,12 @@ data_filtering(const torch::Tensor& data , int nFrame) {
 
                 torch::Tensor block = data.index({ v, s, torch::indexing::Slice(start, end) });
 
+                // Flatten the block
                 torch::Tensor flat = block.reshape({ -1 });
                 float first_val = flat[0].item<float>();
 
+                // Check if ALL values equal the first value (exact equality, like Python)
+                // This is much faster than allclose and matches Python behavior
                 torch::Tensor comparison = (flat == first_val);
                 bool all_equal = torch::all(comparison).item<bool>();
 
@@ -266,7 +269,7 @@ torch::Tensor BaseDataset::apply_augments(torch::Tensor data) {
     return data;
 }
 
-
+// BUG HERE ______________________________________________________________________________________
 torch::Tensor BaseDataset::apply_padding_or_crop(torch::Tensor data) {
     int cur_size = data.size(-1);
 
@@ -292,7 +295,7 @@ torch::Tensor BaseDataset::apply_padding_or_crop(torch::Tensor data) {
 
     return data;
 }
-
+// ______________________________________________________________________________________________
 
 torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data , bool return_norm) {
     if (return_norm) {
@@ -305,6 +308,7 @@ torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data , bool return_norm
     if (norm_type == "mean_range") {
         offset = torch::mean(data);
 
+        // Compute scale more carefully to avoid precision loss
         float data_max = data.max().item<float>();
         float data_min = data.min().item<float>();
         float scale_val = data_max - data_min;
@@ -411,6 +415,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
 
     torch::Tensor data;
 
+    // Decide where to load data from
     if (config.memory_data.has_value()) {
         data = loadDatasetInMemory(
             config.memory_data.value() ,
@@ -419,16 +424,16 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
             config.frame_range
         );
     }
-    else if (config.binary_config.has_value()) {
+    else if (config.binary_path.has_value()) {
         data = loadDatasetFromBinary(
-            config.binary_config.value() ,
+            config.binary_path.value() ,
             config.variable_idx ,
             config.section_range ,
             config.frame_range
         );
     }
     else {
-        throw std::runtime_error("No data source provided (memory_data or binary_config required).");
+        throw std::runtime_error("No data source provided (memory_data or binary_path required).");
     }
 
 
@@ -450,6 +455,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         data = torch::cat({ data, tail_frames } , 2);
     }
 
+    // Normalization comment it out ???????? ======================================================================
     if (!inst_norm) {
         if (norm_type == "mean_range_hw") throw std::runtime_error("mean_range_hw requires inst_norm=true");
 
@@ -475,6 +481,7 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         var_offset = offset.to(torch::kFloat);
         var_scale = scale.to(torch::kFloat);
     }
+            // =====================================================================================================
 
     data = data.to(torch::kFloat);
 
@@ -523,108 +530,43 @@ torch::Tensor ScientificDataset::loadDatasetInMemory(
     return data.to(torch::kFloat);
 }
 
-// ------------------- Load from binary  -------------------
+// NOTE: this function may be a bit buggy since it is hard to use when reading in binary files since they are just a blob of data it is better to load it in memory and then to use load from memory
+// ------------------- Load from binary -------------------
 torch::Tensor ScientificDataset::loadDatasetFromBinary(
-    const BinaryFileConfig& bin_config ,
+    const std::string& bin_path ,
     std::optional<int> variable_idx ,
     std::optional<std::pair<int , int>> section_range ,
     std::optional<std::pair<int , int>> frame_range)
 {
-    bin_config.validate();
+    std::ifstream file(bin_path , std::ios::binary);
+    if (!file.is_open()) throw std::runtime_error("Cannot open binary file: " + bin_path);
 
-    std::ifstream file(bin_config.file_path , std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open binary file: " + bin_config.file_path);
-    }
+    int64_t shape[5];
+    file.read(reinterpret_cast<char*>(shape) , 5 * sizeof(int64_t));
 
-    const auto& dims = bin_config.dimensions;
-
-    size_t num_elements = 1;
-    for (int64_t dim : dims) {
-        num_elements *= dim;
-    }
-
-    size_t element_size;
-    switch (bin_config.data_type) {
-    case torch::kFloat32:
-        element_size = sizeof(float);
-        break;
-    case torch::kFloat64:
-        element_size = sizeof(double);
-        break;
-    case torch::kInt32:
-        element_size = sizeof(int32_t);
-        break;
-    case torch::kInt64:
-        element_size = sizeof(int64_t);
-        break;
-    case torch::kUInt8:
-        element_size = sizeof(uint8_t);
-        break;
-    default:
-        throw std::runtime_error("Unsupported data type for binary file reading");
-    }
-
-    size_t expected_size = num_elements * element_size;
-
-    file.seekg(0 , std::ios::end);
-    size_t file_size = file.tellg();
-    file.seekg(0 , std::ios::beg);
-
-    if (file_size < expected_size) {
-        throw std::runtime_error(
-            "Binary file size (" + std::to_string(file_size) + " bytes) is smaller than expected (" +
-            std::to_string(expected_size) + " bytes) for dimensions [" +
-            std::to_string(dims[0]) + ", " + std::to_string(dims[1]) + ", " +
-            std::to_string(dims[2]) + ", " + std::to_string(dims[3]) + ", " +
-            std::to_string(dims[4]) + "] with data type size " +
-            std::to_string(element_size) + " bytes");
-    }
-
-    std::vector<uint8_t> buffer(expected_size);
-    file.read(reinterpret_cast<char*>(buffer.data()) , expected_size);
-
-    if (!file) {
-        throw std::runtime_error("Failed to read " + std::to_string(expected_size) + " bytes from binary file");
-    }
-
+    size_t num_elements = shape[0] * shape[1] * shape[2] * shape[3] * shape[4];
+    std::vector<float> buffer(num_elements);
+    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
     file.close();
 
+    // Create tensor directly as Float32, no conversion needed
     torch::Tensor data = torch::from_blob(
         buffer.data() ,
-        { dims[0], dims[1], dims[2], dims[3], dims[4] } ,
-        bin_config.data_type
+        { shape[0], shape[1], shape[2], shape[3], shape[4] } ,
+        torch::kFloat32  // Explicitly specify dtype
     ).clone();
 
-
-    data = data.to(torch::kFloat);
-
     if (variable_idx.has_value()) {
-        if (variable_idx.value() >= dims[0]) {
-            throw std::out_of_range(
-                "variable_idx " + std::to_string(variable_idx.value()) +
-                " is out of range for dimension size " + std::to_string(dims[0]));
-        }
         data = data.index({ variable_idx.value() }).unsqueeze(0);
     }
 
     if (section_range.has_value()) {
         auto r = section_range.value();
-        if (r.second > (variable_idx.has_value() ? 1 : dims[1])) {
-            throw std::out_of_range(
-                "section_range end " + std::to_string(r.second) +
-                " exceeds dimension size");
-        }
         data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
     }
 
     if (frame_range.has_value()) {
         auto r = frame_range.value();
-        if (r.second > dims[2]) {
-            throw std::out_of_range(
-                "frame_range end " + std::to_string(r.second) +
-                " exceeds time dimension size " + std::to_string(dims[2]));
-        }
         data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
     }
 
@@ -643,10 +585,12 @@ size_t ScientificDataset::size() const {
 torch::Tensor ScientificDataset::original_data() const {
     torch::Tensor data = data_input.clone();
 
+
     if (!train_mode) {
         data = deblockHW(data , std::get<0>(block_info) ,
             std::get<1>(block_info) , std::get<2>(block_info));
     }
+
 
     if (!inst_norm) {
         data = data * var_scale + var_offset;
@@ -719,7 +663,8 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
         torch::indexing::Slice(start_t, end_t)
         });
 
-    data = data.unsqueeze(0);
+        // ADD THIS LINE - Add channel dimension!
+    data = data.unsqueeze(0);  // Now shape is [1, 8, 256, 256]
 
     auto data_dict = post_processing(data , static_cast<int>(idx0) , train_mode);
     torch::Tensor index_tensor = torch::tensor({ idx0, idx1, start_t, end_t } , torch::kLong);
@@ -727,15 +672,27 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
     return data_dict;
 }
 
-std::tuple<int64_t , int64_t , std::vector<int64_t>> ScientificDataset::get_block_info() const {
+// ** JL modified ** //
+/**
+* @brief Public getter for the private 'block_info' member.
+*/
+std::tuple<int64_t, int64_t, std::vector<int64_t>> ScientificDataset::get_block_info() const {
     return block_info;
 }
 
+/**
+* @brief Public getter for the private 'data_input' tensor.
+* Returns by const reference to avoid a deep copy.
+*/
 const torch::Tensor& ScientificDataset::get_data_input() const {
     return data_input;
 }
 
-const std::vector<std::pair<int , float>>& ScientificDataset::get_filtered_blocks() const {
+/**
+* @brief Public getter for the private 'filtered_blocks' vector.
+* Returns by const reference to avoid a large vector copy.
+*/
+const std::vector<std::pair<int, float>>& ScientificDataset::get_filtered_blocks() const {
     return filtered_blocks;
 }
 
@@ -746,3 +703,4 @@ const int64_t& ScientificDataset::get_pad_T() const {
 const std::vector<int64_t>& ScientificDataset::get_shape_info() const {
     return shape;
 }
+// **** //
