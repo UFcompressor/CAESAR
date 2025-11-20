@@ -15,12 +15,6 @@ else()
     set(FILESYSTEM_LIB "")
 endif()
 
-if(CUDA_SUPPORT_ENABLED AND NVCOMP_FOUND)
-    add_executable(test_runGaeCuda testRunGaeCuda.cpp)
-    target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
-    target_include_directories(test_runGaeCuda PRIVATE ${NVCOMP_INCLUDE_DIR})
-endif()
-
 # CPU-safe tests
 add_executable(test_dataset testDataSet.cpp)
 target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
@@ -43,6 +37,18 @@ target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FIL
 add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
+# test_runGaeCuda - ALWAYS builds, works on both CPU and GPU
+add_executable(test_runGaeCuda testRunGaeCuda.cpp)
+target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+# If USE_CUDA is enabled, add the CUDA and nvcomp include paths
+if(USE_CUDA)
+    target_include_directories(test_runGaeCuda PRIVATE ${NVCOMP_INCLUDE_DIR} ${CUDA_INCLUDE_DIRS})
+    message(STATUS "Building test_runGaeCuda with CUDA and NVCOMP support")
+else()
+    message(STATUS "Building test_runGaeCuda in CPU-only mode")
+endif()
+
 set(TEST_TARGETS
     test_dataset
     test_dataset2
@@ -51,11 +57,8 @@ set(TEST_TARGETS
     test_datasetNRMSE
     test_rans
     test_caesarD
+    test_runGaeCuda
 )
-
-if(USE_CUDA)
-    list(APPEND TEST_TARGETS test_runGaeCuda)
-endif()
 
 if(MSVC)
     file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
@@ -65,4 +68,3 @@ if(MSVC)
             ${TORCH_DLLS} $<TARGET_FILE_DIR:${test_exe}>)
     endforeach()
 endif()
-
