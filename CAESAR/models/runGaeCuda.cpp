@@ -931,6 +931,7 @@ torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes
     return tensor;
 }
 
+#ifdef USE_CUDA
 void PCACompressor::cleanupGPUMemory() {
 #ifdef USE_CUDA
     if (device_.is_cuda()) {
@@ -939,3 +940,4 @@ void PCACompressor::cleanupGPUMemory() {
 #else
 #endif
 }
+#endif
