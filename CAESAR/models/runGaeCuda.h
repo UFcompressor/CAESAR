@@ -135,6 +135,7 @@ private:
     torch::Tensor deserializeTensor(const std::vector<uint8_t>& bytes ,
         const std::vector<int64_t>& shape ,
         torch::ScalarType dtype);
-
+#ifdef USE_CUDA
     void cleanupGPUMemory();
+#endif
 };
