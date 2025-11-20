@@ -21,6 +21,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
     add_compile_definitions(NDEBUG PROFILE_MODE)
 else()
     message(WARNING "Unknown build type: ${CMAKE_BUILD_TYPE}")
+    message(FATAL_ERROR "Please Choose a Build Type: Ex: Release, Debug, Profile")
 endif()
 
 find_package(Torch REQUIRED)
