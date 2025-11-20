@@ -39,7 +39,9 @@ if(CUDA_FOUND)
         message(STATUS "nvcomp include dir: ${NVCOMP_INCLUDE_DIR}")
         set(CUDA_SUPPORT_ENABLED TRUE)
     else()
-        message(WARNING "CUDA found but nvcomp NOT found. Building WITHOUT CUDA support.")
+        message(WARNING "CUDA found but nvcomp NOT found. Building WITHOUT nvcomp compression.")
+        # CUDA is present, so we still enable CUDA anyway
+        set(CUDA_SUPPORT_ENABLED TRUE)
     endif()
 else()
     message(STATUS "CUDA not found, building without CUDA support")
@@ -52,12 +54,19 @@ add_library(caesar_lib SHARED
     models/range_coder/rans_coder.cpp
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
-    models/model_utils.cpp 
+    models/model_utils.cpp
 )
 
-target_compile_definitions(caesar_lib PRIVATE 
+target_compile_definitions(caesar_lib PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
+
+
+
+
+target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+message(STATUS "Forcing USE_CUDA enabled (manual override)")
+
 
 target_include_directories(caesar_lib
     PUBLIC
@@ -71,8 +80,7 @@ target_include_directories(caesar_lib
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
 
 if(CUDA_SUPPORT_ENABLED)
-    message(STATUS "Enabling CUDA support with nvcomp")
-    target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+    message(STATUS "Enabling CUDA support")
     target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS} ${NVCOMP_INCLUDE_DIR})
     target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES} ${NVCOMP_LIBRARY})
 endif()
@@ -104,3 +112,4 @@ set_target_properties(caesar_lib PROPERTIES
     SOVERSION 1
     EXPORT_NAME caesar_lib
 )
+

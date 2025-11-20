@@ -7,40 +7,54 @@ else()
     set(MPI_LIB "")
 endif()
 
-
 if(APPLE)
-    set(FILESYSTEM_LIB "")  
+    set(FILESYSTEM_LIB "")
 elseif(UNIX AND NOT APPLE)
-    set(FILESYSTEM_LIB "stdc++fs")  
+    set(FILESYSTEM_LIB "stdc++fs")
 else()
-    set(FILESYSTEM_LIB "") 
+    set(FILESYSTEM_LIB "")
 endif()
+
+
+function(add_nvcomp_include target)
+    if(NVCOMP_INCLUDE_DIR)
+        target_include_directories(${target} PRIVATE ${NVCOMP_INCLUDE_DIR})
+    endif()
+endfunction()
+
 
 
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_runGaeCuda)
 
 add_executable(test_dataset testDataSet.cpp)
 target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_dataset)
 
 add_executable(test_dataset2 testDataSet2.cpp)
 target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB} ${MPI_LIB})
+add_nvcomp_include(test_dataset2)
 
 add_executable(test_caesarCD test_caesarCD.cpp)
 target_link_libraries(test_caesarCD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_caesarCD)
 
 add_executable(test_rans test_range_coder_consistency.cpp)
 target_link_libraries(test_rans PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_rans)
 
 add_executable(test_caesarC test_caesarC.cpp)
 target_link_libraries(test_caesarC PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_caesarC)
 
 add_executable(test_caesarD test_decompress_consistency.cpp)
 target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_nvcomp_include(test_caesarD)
 
 add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
-
+add_nvcomp_include(test_datasetNRMSE)
 
 set(TEST_TARGETS
     test_runGaeCuda
@@ -53,7 +67,6 @@ set(TEST_TARGETS
     test_caesarD
 )
 
-
 if(MSVC)
     file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
     foreach(test_exe ${TEST_TARGETS})
@@ -62,3 +75,4 @@ if(MSVC)
             ${TORCH_DLLS} $<TARGET_FILE_DIR:${test_exe}>)
     endforeach()
 endif()
+
