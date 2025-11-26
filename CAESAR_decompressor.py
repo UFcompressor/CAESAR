@@ -387,6 +387,11 @@ def remove_module_prefix(state_dict):
 device = sys.argv[1] # Setting device (cuda or cpu for now)
 if not torch.cuda.is_available(): # If GPU is not avaiable
     device = 'cpu'    
+
+if device == 'cpu':
+    model_name = f'caesar_decompressor_cpu'
+else:
+    model_name = f'caesar_decompressor_gpu'
     
 model = CompressorMix(
     dim=16,
@@ -429,7 +434,7 @@ with torch.no_grad():
         exported,
         # [Optional] Specify the generated shared library path. If not specified,
         # the generated artifact is stored in your system temp directory.
-        package_path=os.path.join(os.getcwd(), "exported_model/caesar_decompressor.pt2"),
+        package_path=os.path.join(os.getcwd(), f"exported_model/{model_name}.pt2"),
     )
 
 file_path = "exported_model/caesar_decompressor.pt2"

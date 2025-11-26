@@ -164,6 +164,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
     try {
         // device
+        /*
         torch::Device device(torch::kCPU);
         if (torch::cuda::is_available()) {
             std::cout << "CUDA available, using GPU\n";
@@ -172,6 +173,7 @@ int main() {
         else {
             std::cout << "Using CPU\n";
         }
+        */
         //device = torch::Device(torch::kCPU);
         //std::cout << "Device: " << device << std::endl;
 
@@ -185,9 +187,12 @@ int main() {
 
         torch::Tensor raw = loadRawBinary(raw_path , shape);
 
+        // Device setting
+        torch::Device compression_device = torch::Device(torch::kCPU);
+        torch::Device decompression_device = torch::Device(torch::kCUDA);
 
-        std::cout << "\n===== COMPRESSION =====\n";
-        Compressor compressor(device);
+        std::cout << "\n===== COMPRESSION =====\n";        
+        Compressor compressor(compression_device);
 
         DatasetConfig config;
         config.memory_data = raw;
@@ -204,7 +209,7 @@ int main() {
         config.test_size = { 256, 256 };
         config.augment_type = {};
 
-        float rel_eb = 0.1f;
+        float rel_eb = 1.0f;
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
 
 
@@ -254,23 +259,23 @@ int main() {
             indexes.reserve(meta.indexes.size());
 
             for (float v : meta.offsets)
-                offsets.push_back(torch::tensor({ v } , torch::kFloat32).to(device));
+                offsets.push_back(torch::tensor({ v } , torch::kFloat32).to(decompression_device));
 
             for (float v : meta.scales)
-                scales.push_back(torch::tensor({ v } , torch::kFloat32).to(device));
+                scales.push_back(torch::tensor({ v } , torch::kFloat32).to(decompression_device));
 
             for (const auto& idx_vec : meta.indexes) {
                 torch::Tensor idx_tensor = torch::from_blob(
                     const_cast<int32_t*>(idx_vec.data()) ,
                     { (int64_t)idx_vec.size() } ,
                     torch::kInt32
-                ).clone().to(device);
+                ).clone().to(decompression_device);
                 indexes.push_back(idx_tensor);
             }
         }
 
 
-        Decompressor decompressor(device);
+        Decompressor decompressor(decompression_device);
         torch::Tensor recon = decompressor.decompress(
             loaded_latents ,
             loaded_hyper ,
@@ -338,6 +343,8 @@ int main() {
         std::cout << "Compression Ratio (CR): " << CR << std::endl;
 
         std::cout << "Decompression finished. Reconstructed data shape: " << recon_merged.sizes() << "\n";
+        std::cout << "Original data max min: " << raw.max().item<float>() << ", " << raw.min().item<float>() << std::endl;
+        std::cout << "Reconstructed data max min: " << recon_merged.max().item<float>() << ", " << recon_merged.min().item<float>() << std::endl;
         return 0;
 
     }

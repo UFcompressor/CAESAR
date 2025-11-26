@@ -262,17 +262,30 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 }
 
 void Compressor::load_models() {
+    std::cout << "Loading models for compression based on device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
+
+    std::string compressor_path;
+    std::string hyper_decompressor_path;
+    std::string decompressor_path;
+
+    if (device_.is_cpu()) {
+        std::cout << "Selecting CPU models..." << std::endl;
+        compressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor_cpu.pt2";
+        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_cpu.pt2";
+        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_cpu.pt2";
+    } else {
+        std::cout << "Selecting GPU models..." << std::endl;
+        compressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor_gpu.pt2"; 
+        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_gpu.pt2";
+        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_gpu.pt2";
+    }
+
     std::cout << "Loading compressor model..." << std::endl;
-    compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor.pt2"
-    );
+    compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(compressor_path);
+    
     std::cout << "Loading decompressor models..." << std::endl;
-    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
-    );
-    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
-    );
+    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(hyper_decompressor_path);
+    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(decompressor_path);
     std::cout << "Model loaded successfully." << std::endl;
 }
 
@@ -425,13 +438,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor batched_indexes = torch::cat(batch_indexes , 0).to(device_);
 
 
-            std::vector<torch::Tensor> inputs = { batched_input };
+            std::vector<torch::Tensor> inputs = { batched_input.to(torch::kDouble) };
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
 
-            torch::Tensor q_latent = outputs[0];
-            torch::Tensor latent_indexes = outputs[1];
-            torch::Tensor q_hyper_latent = outputs[2];
-            torch::Tensor hyper_indexes = outputs[3];
+            torch::Tensor q_latent = outputs[0].to(torch::kInt32);
+            torch::Tensor latent_indexes = outputs[1].to(torch::kInt32);
+            torch::Tensor q_hyper_latent = outputs[2].to(torch::kInt32);
+            torch::Tensor hyper_indexes = outputs[3].to(torch::kInt32);
 
 
             int64_t num_input_samples = batch_inputs.size();
@@ -477,11 +490,16 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             batch_max = 0.0;
             batch_min = 1000000.0;
 
-            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kFloat32) });
+            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
 
-            torch::Tensor mean = hyper_outputs[0];
-            torch::Tensor latent_indexes_recon = hyper_outputs[1];
+            torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+            torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
+
+            std::cout << "\n[DEBUG] mean max min: " << mean.max().item<float>() << ", " << mean.min().item<float>() << std::endl;
+            std::cout << "[DEBUG] latent_indexes_recon max min: " << latent_indexes_recon.max().item<float>() << ", " << latent_indexes_recon.min().item<float>() << std::endl;
+            std::cout << "[DEBUG] latent_indexes_recon size: " << latent_indexes_recon.sizes() << std::endl;
+            std::cout << "[DEBUG] q_latent (decoded_latents_before_offset) max min: " << q_latent.max().item<float>() << ", " << q_latent.min().item<float>() << std::endl;            
 
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
 
@@ -493,6 +511,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
 
             torch::Tensor raw_output = decompressor_outputs[0];
+            std::cout << "[DEBUG] raw_output max min: " << raw_output.max().item<float>() << ", " << raw_output.min().item<float>() << std::endl;
             torch::Tensor norm_output = reshape_batch_2d_3d(
                 raw_output ,
                 num_input_samples

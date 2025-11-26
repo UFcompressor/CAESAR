@@ -85,13 +85,24 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 }
 
 void Decompressor::load_models() {
+    std::cout << "Loading models for decompression based on device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
+
+    std::string hyper_decompressor_path;
+    std::string decompressor_path;
+
+    if (device_.is_cpu()) {
+        std::cout << "Selecting CPU models..." << std::endl;
+        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_cpu.pt2";
+        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_cpu.pt2";
+    } else {
+        std::cout << "Selecting GPU models..." << std::endl;
+        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_gpu.pt2";
+        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_gpu.pt2";
+    }
+    
     std::cout << "Loading decompressor models..." << std::endl;
-    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor.pt2"
-    );
-    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor.pt2"
-    );
+    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(hyper_decompressor_path);
+    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(decompressor_path);
     std::cout << "Models loaded successfully." << std::endl;
 }
 
@@ -206,12 +217,16 @@ torch::Tensor Decompressor::decompress(
             torch::Tensor hyper_tensor = torch::tensor(hyper_decoded).reshape({ 64, 4, 4 });
             decoded_hyper_latents.select(0 , (long)i).copy_(hyper_tensor);
         }
+        
+        std::cout << "\n[DEBUG] decoded_hyper_latents max min: " << decoded_hyper_latents.max().item<float>() << ", " << decoded_hyper_latents.min().item<float>() << std::endl;
+        
+        std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ decoded_hyper_latents.to(torch::kDouble).to(device_) });
 
-        std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ decoded_hyper_latents.to(torch::kFloat32).to(device_) });
+        torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+        torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
 
-        torch::Tensor mean = hyper_outputs[0];
-        torch::Tensor latent_indexes_recon = hyper_outputs[1];
-       
+        std::cout << "[DEBUG] mean max min: " << mean.max().item<float>() << ", " << mean.min().item<float>() << std::endl;
+        std::cout << "[DEBUG] latent_indexes_recon max min: " << latent_indexes_recon.max().item<float>() << ", " << latent_indexes_recon.min().item<float>() << std::endl;
 
         torch::Tensor decoded_latents_before_offset = torch::zeros({ (long)cur_latents, 64, 16, 16 }).to(torch::kInt32);
         for (size_t i = 0; i < cur_latents; i++) {
@@ -227,6 +242,8 @@ torch::Tensor Decompressor::decompress(
             decoded_latents_before_offset.select(0, (long)i).copy_(latent_tensor);
         }
 
+        std::cout << "[DEBUG] decoded_latents_before_offset max min: " << decoded_latents_before_offset.max().item<float>() << ", " << decoded_latents_before_offset.min().item<float>() << std::endl;
+
         torch::Tensor q_latent_with_offset = decoded_latents_before_offset.to(torch::kFloat32).to(device_) + mean;
         auto decoded_latents_sizes = q_latent_with_offset.sizes();
         std::vector<int64_t> new_shape = { -1, 2 };
@@ -235,6 +252,7 @@ torch::Tensor Decompressor::decompress(
 
         std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
         torch::Tensor raw_output = decompressor_outputs[0];
+        std::cout << "[DEBUG] raw_output max min: " << raw_output.max().item<float>() << ", " << raw_output.min().item<float>() << std::endl;
 
         torch::Tensor norm_output = reshape_batch_2d_3d(raw_output, (long)cur_samples, n_frame);
 
