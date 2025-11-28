@@ -164,7 +164,7 @@ int main() {
     try {
 
 
-        const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
+        const std::vector<int64_t> shape = { 1, 1, 20, 256, 256 };
         const std::string raw_path = "TCf48.bin.f32";
 
         const std::string out_dir = "./output/";
@@ -280,9 +280,9 @@ int main() {
 
         std::cout << "Reconstructed tensor shape: " << recon.sizes() << std::endl;
 
-        int full_frames = 100;
-        int full_h = 500;
-        int full_w = 500;
+        int full_frames = 20;
+        int full_h = 256;
+        int full_w = 256;
         int n_patches = recon.size(0);
         int frames_per_patch = recon.size(2);
 
