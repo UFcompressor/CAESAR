@@ -386,10 +386,10 @@ def remove_module_prefix(state_dict):
         return new_state_dict
 
 device = sys.argv[1] # Setting device (cuda or cpu for now)
-if not torch.cuda.is_available(): # If GPU is not avaiable
+if device == 'cpu': # If GPU is not avaiable
     device = 'cpu'
 else: 
-    device = 'gpu'    
+    device = 'cuda'    
 model_name =f'caesar_hyper_decompressor'
 
 model = CompressorMix(
