@@ -87,6 +87,10 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 }
 
 void Decompressor::load_models() {
+    std::cout << "Loading models for decompression based on device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
+
+    std::string hyper_decompressor_path;
+    std::string decompressor_path;
     std::cout << "Loading decompressor models..." << std::endl;
     hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
         get_model_file("caesar_hyper_decompressor.pt2").string()
@@ -212,11 +216,9 @@ torch::Tensor Decompressor::decompress(
             decoded_hyper_latents.select(0 , (long)i).copy_(hyper_tensor);
         }
 
-        std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ decoded_hyper_latents.to(torch::kFloat32).to(device_) });
-
-        torch::Tensor mean = hyper_outputs[0];
-        torch::Tensor latent_indexes_recon = hyper_outputs[1];
-
+        std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ decoded_hyper_latents.to(torch::kDouble).to(device_) });
+        torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+        torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
 
         torch::Tensor decoded_latents_before_offset = torch::zeros({ (long)cur_latents, 64, 16, 16 }).to(torch::kInt32);
         for (size_t i = 0; i < cur_latents; i++) {
@@ -231,6 +233,7 @@ torch::Tensor Decompressor::decompress(
             torch::Tensor latent_tensor = torch::tensor(latent_decoded).reshape({ 64, 16, 16 });
             decoded_latents_before_offset.select(0 , (long)i).copy_(latent_tensor);
         }
+
 
         torch::Tensor q_latent_with_offset = decoded_latents_before_offset.to(torch::kFloat32).to(device_) + mean;
         auto decoded_latents_sizes = q_latent_with_offset.sizes();

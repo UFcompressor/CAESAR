@@ -163,17 +163,6 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
     try {
 
-        torch::Device device(torch::kCPU);
-        if (torch::cuda::is_available()) {
-            std::cout << "CUDA available, using GPU\n";
-            device = torch::Device(torch::kCUDA);
-        }
-        else {
-            std::cout << "Using CPU\n";
-        }
-
-
-
 
         const std::vector<int64_t> shape = { 1, 1, 100, 500, 500 };
         const std::string raw_path = "TCf48.bin.f32";
@@ -187,9 +176,12 @@ int main() {
 
         torch::Tensor raw = loadRawBinary(raw_path , shape);
 
+        // Device setting
+        torch::Device compression_device = torch::Device(torch::kCPU);
+        torch::Device decompression_device = torch::Device(torch::kCPU);
 
         std::cout << "\n===== COMPRESSION =====\n";
-        Compressor compressor(device);
+        Compressor compressor(compression_device);
 
         DatasetConfig config;
         config.memory_data = raw;
@@ -256,23 +248,23 @@ int main() {
             indexes.reserve(meta.indexes.size());
 
             for (float v : meta.offsets)
-                offsets.push_back(torch::tensor({ v } , torch::kFloat32).to(device));
+                offsets.push_back(torch::tensor({ v } , torch::kFloat32).to(decompression_device));
 
             for (float v : meta.scales)
-                scales.push_back(torch::tensor({ v } , torch::kFloat32).to(device));
+                scales.push_back(torch::tensor({ v } , torch::kFloat32).to(decompression_device));
 
             for (const auto& idx_vec : meta.indexes) {
                 torch::Tensor idx_tensor = torch::from_blob(
                     const_cast<int32_t*>(idx_vec.data()) ,
                     { (int64_t)idx_vec.size() } ,
                     torch::kInt32
-                ).clone().to(device);
+                ).clone().to(decompression_device);
                 indexes.push_back(idx_tensor);
             }
         }
 
 
-        Decompressor decompressor(device);
+        Decompressor decompressor(decompression_device);
         torch::Tensor recon = decompressor.decompress(
             loaded_latents ,
             loaded_hyper ,

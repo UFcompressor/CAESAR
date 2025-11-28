@@ -263,6 +263,7 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 }
 
 void Compressor::load_models() {
+
     std::cout << "Loading compressor model..." << std::endl;
     compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
         get_model_file("caesar_compressor.pt2").string()
@@ -299,7 +300,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
     std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
-    std::cout << "N_frame: " << config.n_frame << std::endl;
 
     ScientificDataset dataset(config);
     torch::Tensor original_data = dataset.original_data();
@@ -424,13 +424,15 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor batched_indexes = torch::cat(batch_indexes , 0).to(device_);
 
 
-            std::vector<torch::Tensor> inputs = { batched_input };
+            std::vector<torch::Tensor> inputs = { batched_input.to(torch::kDouble) };
+            std::cout << "here" << std::endl;
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
-
-            torch::Tensor q_latent = outputs[0];
-            torch::Tensor latent_indexes = outputs[1];
-            torch::Tensor q_hyper_latent = outputs[2];
-            torch::Tensor hyper_indexes = outputs[3];
+            std::cout << "\n[DEBUG] Compressor model output tensors:" << std::endl;
+            std::cout << "done" << std::endl;
+            torch::Tensor q_latent = outputs[0].to(torch::kInt32);
+            torch::Tensor latent_indexes = outputs[1].to(torch::kInt32);
+            torch::Tensor q_hyper_latent = outputs[2].to(torch::kInt32);
+            torch::Tensor hyper_indexes = outputs[3].to(torch::kInt32);
 
 
             int64_t num_input_samples = batch_inputs.size();
@@ -476,12 +478,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             batch_max = 0.0;
             batch_min = 1000000.0;
 
-            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kFloat32) });
-
-            torch::Tensor mean = hyper_outputs[0];
-            torch::Tensor latent_indexes_recon = hyper_outputs[1];
+            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
+            std::cout << "passed hyperout" << std::endl;
+            torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+            torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
-
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
 
             std::vector<int64_t> new_shape = { -1, 2 };
@@ -490,6 +491,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
             torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
             std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
+            std::cout << "[DEBUG] reshaped_latents shape: " << reshaped_latents.sizes() << std::endl;
 
             torch::Tensor raw_output = decompressor_outputs[0];
             torch::Tensor norm_output = reshape_batch_2d_3d(
@@ -655,18 +657,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         result.final_nrmse = final_nrmse;
     }
 
-    /*
-    {
-        const auto& padding_vec = std::get<2>(result.compressionMetaData.block_info);
-        for (size_t i = 0; i < padding_vec.size(); ++i) {
-            std::cout << padding_vec[i];
-            if (i < padding_vec.size() - 1) {
-                std::cout << ", ";
-            }
-        }
-        std::cout << "]" << std::endl;
-    }
-    */
 
     if (!result.compressionMetaData.indexes.empty()) {
         std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)

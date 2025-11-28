@@ -386,9 +386,12 @@ def remove_module_prefix(state_dict):
         return new_state_dict
 
 device = sys.argv[1] # Setting device (cuda or cpu for now)
-if not torch.cuda.is_available(): # If GPU is not avaiable
-    device = 'cpu'    
-    
+if device == 'cpu': # If GPU is not avaiable
+    device = 'cpu'
+else: 
+    device = 'cuda'    
+model_name =f'caesar_hyper_decompressor'
+
 model = CompressorMix(
     dim=16,
     dim_mults=[1, 2, 3, 4],
@@ -403,6 +406,7 @@ model = CompressorMix(
 
 state_dict = remove_module_prefix(torch.load('./pretrained/caesar_v.pt', map_location=device))
 model.load_state_dict(state_dict)
+model = model.double()
 
 quantized_cdf, cdf_length, offset = model.entropy_model.prior._update(30)
 medians = model.entropy_model.prior.medians.detach()
@@ -417,7 +421,7 @@ model.eval()
 with torch.no_grad():
     print('device: ', device)
     model = model.to(device)
-    example_inputs=(torch.randn(8, 64, 4, 4, device=device),)
+    example_inputs=(torch.randn(8, 64, 4, 4, device=device).double(),)
     batch_dim = torch.export.Dim("batch", min=1, max=1024)
     # [Optional] Specify the first dimension of the input x as dynamic.
     exported = torch.export.export(model, example_inputs, dynamic_shapes={"x": {0: batch_dim}})
@@ -429,12 +433,7 @@ with torch.no_grad():
         exported,
         # [Optional] Specify the generated shared library path. If not specified,
         # the generated artifact is stored in your system temp directory.
-        package_path=os.path.join(os.getcwd(), "exported_model/caesar_hyper_decompressor.pt2"),
+        package_path=os.path.join(os.getcwd(), f"exported_model/{model_name}.pt2"),
     )
+    print(f"Hyper Decompress model saved to exported_model/{model_name}.pt2")
 
-file_path = "exported_model/caesar_hyper_decompressor.pt2"
-
-if os.path.isfile(file_path):
-    print('Exporting hyper decompressor is COMPLETED')
-else:
-    print('Exporting hyper decompressor is NOT completed')

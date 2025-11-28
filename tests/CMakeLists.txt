@@ -15,7 +15,6 @@ else()
     set(FILESYSTEM_LIB "")
 endif()
 
-# CPU-safe tests
 add_executable(test_dataset testDataSet.cpp)
 target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
@@ -37,11 +36,11 @@ target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FIL
 add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-# test_runGaeCuda - ALWAYS builds, works on both CPU and GPU
+
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-# If USE_CUDA is enabled, add the CUDA and nvcomp include paths
+
 if(USE_CUDA)
     target_include_directories(test_runGaeCuda PRIVATE ${NVCOMP_INCLUDE_DIR} ${CUDA_INCLUDE_DIRS})
     message(STATUS "Building test_runGaeCuda with CUDA and NVCOMP support")
