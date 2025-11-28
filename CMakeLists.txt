@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type (Debug or Release)" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type (Debug, Release, or Profile)" FORCE)
 endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -16,6 +16,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     message(STATUS ">> Release mode enabled")
     add_compile_definitions(NDEBUG)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
+    message(STATUS ">> Profile mode enabled")
+    add_compile_definitions(NDEBUG PROFILE_MODE)
+else()
+    message(WARNING "Unknown build type: ${CMAKE_BUILD_TYPE}")
+    message(FATAL_ERROR "Please Choose a Build Type: Ex: Release, Debug, Profile")
 endif()
 
 find_package(Torch REQUIRED)
@@ -35,6 +41,10 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
         DESTINATION include/caesar
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/exported_model/
+        DESTINATION share/caesar/models
+        FILES_MATCHING PATTERN "*.bin" PATTERN "*.pt2")
+        
 add_library(caesar::caesar ALIAS caesar_lib)
 
 install(TARGETS caesar_lib

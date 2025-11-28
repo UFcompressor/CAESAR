@@ -7,47 +7,48 @@ else()
     set(MPI_LIB "")
 endif()
 
+if(APPLE)
+    set(FILESYSTEM_LIB "")
+elseif(UNIX AND NOT APPLE)
+    set(FILESYSTEM_LIB "stdc++fs")
+else()
+    set(FILESYSTEM_LIB "")
+endif()
+
+add_executable(test_dataset testDataSet.cpp)
+target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+add_executable(test_dataset2 testDataSet2.cpp)
+target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB} ${MPI_LIB})
+
+add_executable(test_caesarCD test_caesarCD.cpp)
+target_link_libraries(test_caesarCD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+add_executable(test_rans test_range_coder_consistency.cpp)
+target_link_libraries(test_rans PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+add_executable(test_caesarC test_caesarC.cpp)
+target_link_libraries(test_caesarC PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+add_executable(test_caesarD test_decompress_consistency.cpp)
+target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
+target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
-target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
+target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
-add_executable(test_dataset testDataSet.cpp)
-target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
-
-add_executable(test_dataset2 testDataSet2.cpp)
-target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs ${MPI_LIB})
-
-
-
-add_executable(test_caesarCD test_caesarCD.cpp)
-target_link_libraries(test_caesarCD
-   PRIVATE
-   caesar_lib
-   "${TORCH_LIBRARIES}"
-   stdc++fs
-)
-
-add_executable(test_rans test_range_coder_consistency.cpp)
-target_link_libraries(test_rans PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
-
-add_executable(test_caesarC test_caesarC.cpp)
-target_link_libraries(test_caesarC
-    PRIVATE
-    caesar_lib
-    "${TORCH_LIBRARIES}"
-    stdc++fs
-)
-
-add_executable(test_caesarD test_decompress_consistency.cpp)
-target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
-
-add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
-target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" stdc++fs )
+if(USE_CUDA)
+    target_include_directories(test_runGaeCuda PRIVATE ${NVCOMP_INCLUDE_DIR} ${CUDA_INCLUDE_DIRS})
+    message(STATUS "Building test_runGaeCuda with CUDA and NVCOMP support")
+else()
+    message(STATUS "Building test_runGaeCuda in CPU-only mode")
+endif()
 
 set(TEST_TARGETS
-    test_runGaeCuda
     test_dataset
     test_dataset2
     test_caesarC
@@ -55,9 +56,9 @@ set(TEST_TARGETS
     test_datasetNRMSE
     test_rans
     test_caesarD
+    test_runGaeCuda
 )
 
-# Copy DLLs on MSVC if needed
 if(MSVC)
     file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
     foreach(test_exe ${TEST_TARGETS})
@@ -66,4 +67,3 @@ if(MSVC)
             ${TORCH_DLLS} $<TARGET_FILE_DIR:${test_exe}>)
     endforeach()
 endif()
-

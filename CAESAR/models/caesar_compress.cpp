@@ -1,6 +1,7 @@
 #include "caesar_compress.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h" 
+#include "model_utils.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -262,46 +263,32 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 }
 
 void Compressor::load_models() {
-    std::cout << "Loading models for compression based on device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
-
-    std::string compressor_path;
-    std::string hyper_decompressor_path;
-    std::string decompressor_path;
-
-    if (device_.is_cpu()) {
-        std::cout << "Selecting CPU models..." << std::endl;
-        compressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor_cpu.pt2";
-        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_cpu.pt2";
-        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_cpu.pt2";
-    } else {
-        std::cout << "Selecting GPU models..." << std::endl;
-        compressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_compressor_gpu.pt2"; 
-        hyper_decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_hyper_decompressor_gpu.pt2";
-        decompressor_path = "/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/caesar_decompressor_gpu.pt2";
-    }
 
     std::cout << "Loading compressor model..." << std::endl;
-    compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(compressor_path);
-    
+    compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
+        get_model_file("caesar_compressor.pt2").string()
+    );
     std::cout << "Loading decompressor models..." << std::endl;
-    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(hyper_decompressor_path);
-    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(decompressor_path);
+    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
+        get_model_file("caesar_hyper_decompressor.pt2").string()
+    );
+    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
+        get_model_file("caesar_decompressor.pt2").string()
+    );
     std::cout << "Model loaded successfully." << std::endl;
 }
 
 void Compressor::load_probability_tables() {
     std::cout << "Loading probability tables..." << std::endl;
 
-    // Load VBR tables
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_quantized_cdf.bin");
-    vbr_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_cdf_length.bin");
-    vbr_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/vbr_offset.bin");
+    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("vbr_quantized_cdf.bin"));
+    vbr_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("vbr_cdf_length.bin"));
+    vbr_offset_ = load_array_from_bin<int32_t>(get_model_file("vbr_offset.bin"));
     vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
 
-    // Load GS tables
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_quantized_cdf.bin");
-    gs_cdf_length_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_cdf_length.bin");
-    gs_offset_ = load_array_from_bin<int32_t>("/home/jlx/Projects/CAESAR_ALL/CAESAR_C/exported_model/gs_offset.bin");
+    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("gs_quantized_cdf.bin"));
+    gs_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("gs_cdf_length.bin"));
+    gs_offset_ = load_array_from_bin<int32_t>(get_model_file("gs_offset.bin"));
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
     std::cout << "Probability tables loaded successfully." << std::endl;
@@ -313,7 +300,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
     std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
-    std::cout << "N_frame: " << config.n_frame << std::endl;
 
     ScientificDataset dataset(config);
     torch::Tensor original_data = dataset.original_data();
@@ -439,8 +425,10 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
 
             std::vector<torch::Tensor> inputs = { batched_input.to(torch::kDouble) };
+            std::cout << "here" << std::endl;
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
-
+            std::cout << "\n[DEBUG] Compressor model output tensors:" << std::endl;
+            std::cout << "done" << std::endl;
             torch::Tensor q_latent = outputs[0].to(torch::kInt32);
             torch::Tensor latent_indexes = outputs[1].to(torch::kInt32);
             torch::Tensor q_hyper_latent = outputs[2].to(torch::kInt32);
@@ -491,16 +479,10 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             batch_min = 1000000.0;
 
             std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
-
+            std::cout << "passed hyperout" << std::endl;
             torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
             torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
-
-            std::cout << "\n[DEBUG] mean max min: " << mean.max().item<float>() << ", " << mean.min().item<float>() << std::endl;
-            std::cout << "[DEBUG] latent_indexes_recon max min: " << latent_indexes_recon.max().item<float>() << ", " << latent_indexes_recon.min().item<float>() << std::endl;
-            std::cout << "[DEBUG] latent_indexes_recon size: " << latent_indexes_recon.sizes() << std::endl;
-            std::cout << "[DEBUG] q_latent (decoded_latents_before_offset) max min: " << q_latent.max().item<float>() << ", " << q_latent.min().item<float>() << std::endl;            
-
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
 
             std::vector<int64_t> new_shape = { -1, 2 };
@@ -509,9 +491,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
             torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
             std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
+            std::cout << "[DEBUG] reshaped_latents shape: " << reshaped_latents.sizes() << std::endl;
 
             torch::Tensor raw_output = decompressor_outputs[0];
-            std::cout << "[DEBUG] raw_output max min: " << raw_output.max().item<float>() << ", " << raw_output.min().item<float>() << std::endl;
             torch::Tensor norm_output = reshape_batch_2d_3d(
                 raw_output ,
                 num_input_samples
@@ -629,64 +611,52 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     if (result.gaeMetaData.GAE_correction_occur) {
         result.gaeMetaData.pcaBasis = tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
         result.gaeMetaData.uniqueVals = tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
-        
+
         int64_t pca_rows = result.gaeMetaData.pcaBasis.size();
         int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size();
-        
+
         std::vector<float> pca_vec;
         pca_vec.reserve(pca_rows * pca_cols);
-        
+
         for (const auto& row_vec : result.gaeMetaData.pcaBasis) {
             pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
         }
         torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
         torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
-        
+
         gae_record_metaData.pcaBasis = pcaBasis.to(device_);
         gae_record_metaData.uniqueVals = torch::tensor(result.gaeMetaData.uniqueVals).to(device_);
         gae_record_metaData.quanBin = result.gaeMetaData.quanBin;
         gae_record_metaData.nVec = result.gaeMetaData.nVec;
         gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
         gae_record_metaData.dataBytes = result.gaeMetaData.dataBytes;
-        
+
         gae_record_compressedData.data = result.gae_comp_data;
         gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
         gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
-        
+
         torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
             gae_record_metaData ,
             gae_record_compressedData);
 
-        
+
         torch::Tensor recons_gae_unpadded = unpadding(recons_gae , result.gaeMetaData.padding_recon_info);
         torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
         torch::Tensor final_recon = final_recon_norm * result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
-        
+
         double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
         result.final_nrmse = final_nrmse;
     }
-    
+
     else {
         std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
         // 'result.gaeMetaData.pcaBasis' and 'uniqueVals' are already emtpy. Skip record these.
-        
+
         torch::Tensor final_recon = recons_data(recon_tensor_deblock , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
         double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
         result.final_nrmse = final_nrmse;
     }
 
-    /*
-    {
-        const auto& padding_vec = std::get<2>(result.compressionMetaData.block_info);
-        for (size_t i = 0; i < padding_vec.size(); ++i) {
-            std::cout << padding_vec[i];
-            if (i < padding_vec.size() - 1) {
-                std::cout << ", ";
-            }
-        }
-        std::cout << "]" << std::endl;
-    }
-    */
 
     if (!result.compressionMetaData.indexes.empty()) {
         std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)

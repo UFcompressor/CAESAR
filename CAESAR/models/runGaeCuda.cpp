@@ -252,7 +252,9 @@ PCACompressor::PCACompressor(double nrmse ,
 }
 
 PCACompressor::~PCACompressor() {
+#ifdef USE_CUDA
     cleanupGPUMemory();
+#endif
 }
 
 GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
@@ -354,8 +356,9 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     originalDataDevice = torch::Tensor();
     reconsDataDevice = torch::Tensor();
     residualPca = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     torch::Tensor allCoeffPower = allCoeff.pow(2);
     torch::Tensor sortIndex = torch::argsort(allCoeffPower , 1 , true);
 
@@ -364,8 +367,9 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     torch::Tensor resCoeffSorted = allCoeffSorted - quanCoeffSorted;
 
     allCoeffSorted = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower , 1 , sortIndex) - resCoeffSorted.pow(2);
     torch::Tensor stepErrors = torch::ones_like(allCoeffPowerDesc);
     torch::Tensor remainErrors = torch::sum(allCoeffPower , 1);
@@ -377,13 +381,15 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     allCoeffPowerDesc = torch::Tensor();
     remainErrors = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
 
     stepErrors = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt) , 1);
     auto batchIndices = torch::arange(mask.size(0) , torch::TensorOptions().device(device_));
     mask.index_put_({ batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1) } , true);
@@ -391,16 +397,18 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     torch::Tensor selectedCoeffQ = quanCoeffSorted * mask;
 
     quanCoeffSorted = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     torch::Tensor selectedCoeffUnsortQ = torch::zeros_like(selectedCoeffQ);
     auto idx = torch::arange(selectedCoeffQ.size(0) , torch::TensorOptions().device(device_)).unsqueeze(1);
     selectedCoeffUnsortQ.scatter_(1 , sortIndex , selectedCoeffQ);
 
     selectedCoeffQ = torch::Tensor();
     sortIndex = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     mask = selectedCoeffUnsortQ != 0;
 
     torch::Tensor coeffIntFlatten = torch::round(
@@ -409,22 +417,24 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     selectedCoeffUnsortQ = torch::Tensor();
     allCoeff = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     auto uniqueResult = at::_unique(coeffIntFlatten , true , true);
     torch::Tensor uniqueVals = std::get<0>(uniqueResult);
     torch::Tensor inverseIndices = std::get<1>(uniqueResult);
     coeffIntFlatten = inverseIndices;
-
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     auto prefixResult = indexMaskPrefix(mask);
     torch::Tensor prefixMaskFlatten = prefixResult.first;
     torch::Tensor maskLength = prefixResult.second;
 
     mask = torch::Tensor();
+#ifdef USE_CUDA
     cleanupGPUMemory();
-
+#endif
     MetaData metaData;
     metaData.pcaBasis = pcaBasis;
     metaData.uniqueVals = uniqueVals;
@@ -931,6 +941,7 @@ torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes
     return tensor;
 }
 
+#ifdef USE_CUDA
 void PCACompressor::cleanupGPUMemory() {
 #ifdef USE_CUDA
     if (device_.is_cuda()) {
@@ -939,3 +950,4 @@ void PCACompressor::cleanupGPUMemory() {
 #else
 #endif
 }
+#endif

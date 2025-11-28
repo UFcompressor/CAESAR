@@ -1,0 +1,131 @@
+name: Cross-Platform Build and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    timeout-minutes: 90
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Free Disk Space (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
+          pip install --upgrade pip setuptools wheel
+
+          # Filter requirements (remove torch packages for CPU install)
+          grep -v "^torch" requirements.txt | \
+            grep -v "^torchvision" | \
+            grep -v "^--extra-index-url" | \
+            grep -v "^cupy" | \
+            grep -v "^nvidia" | \
+            grep -v "^$" > temp_requirements.txt
+
+          # Install requirements and CPU-only torch
+          pip install --no-cache-dir -r temp_requirements.txt
+          pip install --no-cache-dir torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir compressai==1.2.6 imageio==2.37.0
+
+          rm temp_requirements.txt
+          rm -rf ~/.cache/pip
+
+      - name: Install macOS deps
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          brew install cmake zstd gcc
+          pip3 install --upgrade pip setuptools wheel
+
+          # Filter requirements
+          grep -v "^torch" requirements.txt | \
+            grep -v "^torchvision" | \
+            grep -v "^--extra-index-url" | \
+            grep -v "^cupy" | \
+            grep -v "^nvidia" | \
+            grep -v "^$" > temp_requirements.txt
+
+          # Install requirements and CPU-only torch
+          pip3 install --no-cache-dir -r temp_requirements.txt
+          pip3 install --no-cache-dir torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip3 install --no-cache-dir compressai==1.2.6 imageio==2.37.0
+
+          rm temp_requirements.txt
+
+      - name: Download pretrained models
+        shell: bash
+        run: |
+          chmod +x download_models.sh || true
+          ./download_models.sh
+
+      - name: Prepare CAESAR models
+        shell: bash
+        run: |
+          python3 CAESAR_compressor.py cpu
+          python3 CAESAR_hyper_decompressor.py cpu
+          python3 CAESAR_decompressor.py cpu
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          mkdir -p build
+          cd build
+          TORCH_PATH=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
+          echo "Torch CMake path: $TORCH_PATH"
+
+          cmake .. \
+            -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build project
+        shell: bash
+        run: |
+          cd build
+          cmake --build . --config Debug --parallel
+
+      - name: Generate dummy test data
+        shell: bash
+        run: |
+          python3 tests/gen_data.py build/tests --filename TCf48.bin.f32
+
+      - name: Run test_caesarCD
+        shell: bash
+        run: |
+          cd build/tests
+          mkdir -p output
+          chmod +x test_caesarCD || true
+          ./test_caesarCD
+
+      - name: Check test results
+        shell: bash
+        run: |
+          echo "Test completed successfully on ${{ matrix.os }}!"

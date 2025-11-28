@@ -1,7 +1,6 @@
 import os
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
@@ -387,12 +386,8 @@ def remove_module_prefix(state_dict):
 device = sys.argv[1] # Setting device (cuda or cpu for now)
 if not torch.cuda.is_available(): # If GPU is not avaiable
     device = 'cpu'    
+model_name =f'caesar_decompressor'
 
-if device == 'cpu':
-    model_name = f'caesar_decompressor_cpu'
-else:
-    model_name = f'caesar_decompressor_gpu'
-    
 model = CompressorMix(
     dim=16,
     dim_mults=[1, 2, 3, 4],
@@ -436,10 +431,5 @@ with torch.no_grad():
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), f"exported_model/{model_name}.pt2"),
     )
+    print(f"Compres model saved to exported_model/{model_name}.pt2")
 
-file_path = "exported_model/caesar_decompressor.pt2"
-
-if os.path.isfile(file_path):
-    print('Exporting decompressor is COMPLETED')
-else:
-    print('Exporting decompressor is NOT completed')

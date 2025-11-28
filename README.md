@@ -104,3 +104,21 @@ Model compression requires Python environment to be set up correctly
 
 build with adios2: cmake ..   -DCMAKE_INSTALL_PREFIX=~/Programs/CAESAR_C/install   -DTorch_DIR=/home/adios/.local/lib/python3.11/site-packages/torch/share/cmake/Torch
 
+
+
+
+CAESAR automatically finds model files in the following order:
+
+1. **Custom location** (if set): `export CAESAR_MODEL_DIR=/path/to/your/models`
+2. **Development build**: Automatically finds `../exported_model/` relative to executable
+3. **After installation**: Automatically finds models at `/usr/local/share/caesar/models`
+
+
+
+If you have multiple model versions or want to use models from a different location:
+```bash
+export CAESAR_MODEL_DIR=/path/to/custom/models
+./your_program
+```
+
+For most users, no configuration is needed - CAESAR will find the models automatically.

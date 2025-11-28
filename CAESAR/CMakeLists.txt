@@ -2,6 +2,7 @@ find_package(MPI)
 find_package(CUDA)
 find_package(PkgConfig)
 
+
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
 endif()
@@ -17,7 +18,8 @@ if(NOT ZSTD_FOUND)
     endif()
 endif()
 
-set(CUDA_SUPPORT_ENABLED FALSE)
+set(USE_CUDA OFF)
+
 if(CUDA_FOUND)
     message(STATUS "CUDA found, checking for nvcomp...")
 
@@ -37,22 +39,42 @@ if(CUDA_FOUND)
         set(NVCOMP_FOUND TRUE)
         message(STATUS "Found nvcomp: ${NVCOMP_LIBRARY}")
         message(STATUS "nvcomp include dir: ${NVCOMP_INCLUDE_DIR}")
-        set(CUDA_SUPPORT_ENABLED TRUE)
+        set(USE_CUDA ON)
     else()
-        message(WARNING "CUDA found but nvcomp NOT found. Building WITHOUT CUDA support.")
+        message(WARNING "CUDA found but nvcomp NOT found → CUDA DISABLED")
     endif()
 else()
-    message(STATUS "CUDA not found, building without CUDA support")
+    message(STATUS "CUDA NOT found → CPU ONLY BUILD")
 endif()
 
-add_library(caesar_lib SHARED
+set(CAESAR_SRC
     CAESAR.cpp
     dataset/dataset.cpp
-    models/runGaeCuda.cpp
     models/range_coder/rans_coder.cpp
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
+    models/model_utils.cpp
+     models/runGaeCuda.cpp  
 )
+
+
+if(USE_CUDA)
+    list(APPEND CAESAR_SRC models/runGaeCuda.cpp)
+endif()
+
+add_library(caesar_lib SHARED ${CAESAR_SRC})
+
+target_compile_definitions(caesar_lib PRIVATE
+    DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
+)
+
+
+if(USE_CUDA)
+    target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+    message(STATUS "USE_CUDA ENABLED")
+else()
+    message(STATUS "USE_CUDA DISABLED")
+endif()
 
 target_include_directories(caesar_lib
     PUBLIC
@@ -65,9 +87,8 @@ target_include_directories(caesar_lib
 
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
 
-if(CUDA_SUPPORT_ENABLED)
-    message(STATUS "Enabling CUDA support with nvcomp")
-    target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+if(USE_CUDA)
+    message(STATUS "Enabling CUDA support (CUDA + nvcomp detected)")
     target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS} ${NVCOMP_INCLUDE_DIR})
     target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES} ${NVCOMP_LIBRARY})
 endif()
@@ -91,10 +112,10 @@ endif()
 target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Profile>:-O3 -g>
 )
 
 set_target_properties(caesar_lib PROPERTIES
     VERSION 1.0.0
     SOVERSION 1
-    EXPORT_NAME caesar_lib
 )
