@@ -12,7 +12,7 @@ output_dir = args.output_dir
 os.makedirs(output_dir, exist_ok=True)
 
 
-shape = (1, 1, 100, 500, 500)
+shape = (1, 1, 20, 256, 256)
 
 print(f"Generating dummy data with shape: {shape}")
 
