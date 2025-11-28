@@ -361,6 +361,8 @@ class CompressorMix(nn.Module):
 device = sys.argv[1] # Setting device (cuda or cpu for now)
 if not torch.cuda.is_available(): # If GPU is not avaiable
     device = 'cpu'
+else: 
+    device = 'gpu'
 model_name =f'caesar_compressor'
 
 def remove_module_prefix(state_dict):
