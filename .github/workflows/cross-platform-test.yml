@@ -95,7 +95,7 @@ jobs:
         run: |
           source venv/bin/activate
           chmod +x download_models.sh || true
-          ./download_models.shell
+          ./download_models.sh
           python3 -c "import torch; print(torch.__version__)"
 
       - name: Prepare CAESAR models
