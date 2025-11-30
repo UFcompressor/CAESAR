@@ -9,7 +9,7 @@
 #include "../CAESAR/models/caesar_compress.h"
 #include "../CAESAR/models/caesar_decompress.h"
 #include "../CAESAR/dataset/dataset.h"
-
+#include "../CAESAR/data_utils.h"
 
 bool save_encoded_streams(const std::vector<std::string>& streams , const std::string& filename) {
     std::ofstream file(filename , std::ios::binary);
@@ -175,7 +175,7 @@ int main() {
         const int n_frame = 8;
 
         torch::Tensor raw = loadRawBinary(raw_path , shape);
-
+        auto [raw_5d , padding_info] = to_5d_and_pad(raw , 256 , 256);
         // Device setting
         torch::Device compression_device = torch::Device(torch::kCPU);
         torch::Device decompression_device = torch::Device(torch::kCPU);
@@ -184,7 +184,7 @@ int main() {
         Compressor compressor(compression_device);
 
         DatasetConfig config;
-        config.memory_data = raw;
+        config.memory_data = raw_5d;
         config.variable_idx = 0;
         config.n_frame = n_frame;
         config.dataset_name = "TCf48 Dataset";
@@ -280,47 +280,10 @@ int main() {
 
         std::cout << "Reconstructed tensor shape: " << recon.sizes() << std::endl;
 
-        int full_frames = 20;
-        int full_h = 256;
-        int full_w = 256;
-        int n_patches = recon.size(0);
-        int frames_per_patch = recon.size(2);
 
-        torch::Tensor recon_merged = torch::zeros({ 1, 1, full_frames, full_h, full_w } , recon.options());
-
-        int frame_idx = 0;
-        for (int i = 0; i < n_patches && frame_idx < full_frames; ++i) {
-            torch::Tensor patch = recon[i];
-            int frames_to_copy = std::min(frames_per_patch , full_frames - frame_idx);
-
-            torch::Tensor patch_padded = torch::nn::functional::pad(
-                patch ,
-                torch::nn::functional::PadFuncOptions({ 0, full_w - 256, 0, full_h - 256 })
-            );
-
-            recon_merged.index_put_(
-                {
-                    0, 0,
-                    torch::indexing::Slice(frame_idx, frame_idx + frames_to_copy),
-                    torch::indexing::Slice(0, full_h),
-                    torch::indexing::Slice(0, full_w)
-                } ,
-                patch_padded.index({
-                    0,
-                    torch::indexing::Slice(0, frames_to_copy),
-                    torch::indexing::Slice(0, full_h),
-                    torch::indexing::Slice(0, full_w)
-                    })
-            );
-
-            frame_idx += frames_to_copy;
-        }
-
-        std::cout << "Stitched reconstructed tensor to shape: "
-            << recon_merged.sizes() << std::endl;
-
+        torch::Tensor restored = restore_from_5d(recon , padding_info);
         torch::Tensor raw_cpu = raw.to(torch::kCPU);
-        torch::Tensor recon_cpu = recon_merged.to(torch::kCPU);
+        torch::Tensor recon_cpu = restored.to(torch::kCPU);
         torch::Tensor diff = recon_cpu - raw_cpu;
         double mse = diff.pow(2).mean().item<double>();
         double rmse = std::sqrt(mse);
@@ -330,7 +293,7 @@ int main() {
         std::cout << "NRMSE: " << nrmse << std::endl;
         std::cout << "Compression Ratio (CR): " << CR << std::endl;
 
-        std::cout << "Decompression finished. Reconstructed data shape: " << recon_merged.sizes() << "\n";
+        std::cout << "Decompression finished. Reconstructed data shape: " << restored.sizes() << "\n";
 
         std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
         return 0;

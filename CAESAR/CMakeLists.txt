@@ -54,7 +54,8 @@ set(CAESAR_SRC
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
     models/model_utils.cpp
-     models/runGaeCuda.cpp  
+    models/runGaeCuda.cpp  
+    data_utils.cpp
 )
 
 
