@@ -34,15 +34,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Linux deps
+      - name: Create virtual environment
+        shell: bash
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          python3 -V
+          pip install --upgrade pip wheel setuptools
+
+      - name: Install Linux deps (inside venv)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake g++ zstd libzstd-dev python3 python3-pip
-          pip install --upgrade pip setuptools wheel
+          sudo apt-get install -y cmake g++ zstd libzstd-dev
 
-          # Filter requirements (remove torch packages for CPU install)
+          source venv/bin/activate
+
+          # Filter requirements (remove CUDA/torch/vision)
           grep -v "^torch" requirements.txt | \
             grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
@@ -50,22 +59,22 @@ jobs:
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
-          # Install requirements and CPU-only torch
           pip install --no-cache-dir -r temp_requirements.txt
-          pip install --no-cache-dir torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install --no-cache-dir compressai==1.2.6 imageio==2.37.0
 
+          # Install CPU-only PyTorch (YOU CONTROL THE VERSION HERE)
+          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          pip install compressai==1.2.6 imageio==2.37.0
           rm temp_requirements.txt
-          rm -rf ~/.cache/pip
 
-      - name: Install macOS deps
+      - name: Install macOS deps (inside venv)
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           brew install cmake zstd gcc
-          pip3 install --upgrade pip setuptools wheel
 
-          # Filter requirements
+          source venv/bin/activate
+
           grep -v "^torch" requirements.txt | \
             grep -v "^torchvision" | \
             grep -v "^--extra-index-url" | \
@@ -73,22 +82,26 @@ jobs:
             grep -v "^nvidia" | \
             grep -v "^$" > temp_requirements.txt
 
-          # Install requirements and CPU-only torch
-          pip3 install --no-cache-dir -r temp_requirements.txt
-          pip3 install --no-cache-dir torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip3 install --no-cache-dir compressai==1.2.6 imageio==2.37.0
+          pip install -r temp_requirements.txt
 
+          # macOS CPU wheels lag behind → torch 2.8 is most recent
+          pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+          pip install compressai==1.2.6 imageio==2.37.0
           rm temp_requirements.txt
 
       - name: Download pretrained models
         shell: bash
         run: |
+          source venv/bin/activate
           chmod +x download_models.sh || true
-          ./download_models.sh
+          ./download_models.shell
+          python3 -c "import torch; print(torch.__version__)"
 
       - name: Prepare CAESAR models
         shell: bash
         run: |
+          source venv/bin/activate
           python3 CAESAR_compressor.py cpu
           python3 CAESAR_hyper_decompressor.py cpu
           python3 CAESAR_decompressor.py cpu
@@ -96,6 +109,7 @@ jobs:
       - name: Configure CMake
         shell: bash
         run: |
+          source venv/bin/activate
           mkdir -p build
           cd build
           TORCH_PATH=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
@@ -115,6 +129,7 @@ jobs:
       - name: Generate dummy test data
         shell: bash
         run: |
+          source venv/bin/activate
           python3 tests/gen_data.py build/tests --filename TCf48.bin.f32
 
       - name: Run test_caesarCD
