@@ -1,7 +1,7 @@
 find_package(MPI)
 find_package(CUDA)
 find_package(PkgConfig)
-
+find_package(Torch REQUIRED)
 
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
@@ -44,7 +44,7 @@ if(CUDA_FOUND)
         message(WARNING "CUDA found but nvcomp NOT found → CUDA DISABLED")
     endif()
 else()
-    message(STATUS "CUDA NOT found → CPU ONLY BUILD")
+    message(STATUS "CUDA NOT found using CPU ONLY BUILD")
 endif()
 
 set(CAESAR_SRC
@@ -84,6 +84,7 @@ target_include_directories(caesar_lib
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/range_coder>
         $<INSTALL_INTERFACE:include/caesar>
+        ${TORCH_INCLUDE_DIRS}  
 )
 
 target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
