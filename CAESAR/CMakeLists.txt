@@ -84,10 +84,9 @@ target_include_directories(caesar_lib
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/range_coder>
         $<INSTALL_INTERFACE:include/caesar>
-        ${TORCH_INCLUDE_DIRS}  
 )
 
-target_link_libraries(caesar_lib PUBLIC ${TORCH_LIBRARIES})
+target_link_libraries(caesar_lib PUBLIC torch)
 
 if(USE_CUDA)
     message(STATUS "Enabling CUDA support (CUDA + nvcomp detected)")
