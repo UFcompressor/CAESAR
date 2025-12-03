@@ -163,7 +163,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
     try {
 
-
+//  for ci test must be 1x1x20x256x256 cpu
         const std::vector<int64_t> shape = { 1, 1, 20, 256, 256 };
         const std::string raw_path = "TCf48.bin.f32";
 
@@ -175,15 +175,16 @@ int main() {
         const int n_frame = 8;
         torch::Tensor raw = loadRawBinary(raw_path , shape);
 
+        torch::Tensor raw_5d;
+        PaddingInfo padding_info;
         // to fix it not doing this and taking out
         // 256*256*8 = 524288 
-        if (shape[3] >= 256 && shape[4] >= 256) {
 
-            auto [raw_5d , padding_info] = to_5d_and_pad(raw , shape[3] , shape[4]);
-        }
-        else {
-            auto [raw_5d , padding_info] = to_5d_and_pad(raw , 256 , 256);
-        }
+if (shape[3] >= 256 && shape[4] >= 256) {
+    std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, shape[3], shape[4]);
+} else {
+    std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, 256, 256);
+}
 
         // Device setting
         torch::Device compression_device = torch::Device(torch::kCPU);
