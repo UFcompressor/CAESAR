@@ -173,9 +173,18 @@ int main() {
 
         const int batch_size = 32;
         const int n_frame = 8;
-
         torch::Tensor raw = loadRawBinary(raw_path , shape);
-        auto [raw_5d , padding_info] = to_5d_and_pad(raw , 256 , 256);
+
+        // to fix it not doing this and taking out
+        // 256*256*8 = 524288 
+        if (shape[3] >= 256 && shape[4] >= 256) {
+
+            auto [raw_5d , padding_info] = to_5d_and_pad(raw , shape[3] , shape[4]);
+        }
+        else {
+            auto [raw_5d , padding_info] = to_5d_and_pad(raw , 256 , 256);
+        }
+
         // Device setting
         torch::Device compression_device = torch::Device(torch::kCPU);
         torch::Device decompression_device = torch::Device(torch::kCPU);
