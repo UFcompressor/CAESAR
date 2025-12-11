@@ -115,10 +115,24 @@ jobs:
           TORCH_PATH=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
           echo "Torch CMake path: $TORCH_PATH"
 
-          cmake .. \
-            -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
-            -DBUILD_TESTS=ON \
-            -DCMAKE_BUILD_TYPE=Debug
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export OpenMP_ROOT=$(brew --prefix libomp)
+            echo "OpenMP_ROOT set to: $OpenMP_ROOT"
+            cmake .. \
+              -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
+              -DBUILD_TESTS=ON \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
+              -DOpenMP_C_LIB_NAMES="omp" \
+              -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
+              -DOpenMP_CXX_LIB_NAMES="omp" \
+              -DOpenMP_omp_LIBRARY="$OpenMP_ROOT/lib/libomp.dylib"
+          else
+            cmake .. \
+              -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
+              -DBUILD_TESTS=ON \
+              -DCMAKE_BUILD_TYPE=Debug
+          fi
 
       - name: Build project
         shell: bash
