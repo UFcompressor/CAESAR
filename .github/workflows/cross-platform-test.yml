@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake g++ zstd libzstd-dev
+          sudo apt-get install -y cmake g++ zstd libzstd-dev libomp-dev
 
           source venv/bin/activate
 
@@ -71,7 +71,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          brew install cmake zstd gcc
+          brew install cmake zstd gcc libomp
 
           source venv/bin/activate
 
