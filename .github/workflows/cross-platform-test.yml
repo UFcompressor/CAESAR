@@ -140,6 +140,13 @@ jobs:
           chmod +x test_caesarCD || true
           ./test_caesarCD
 
+      - name: Run test_runGaeCuda
+        shell: bash
+        run: |
+          cd build/tests
+          chmod +x test_runGaeCuda || true
+          ./test_runGaeCuda
+
       - name: Check test results
         shell: bash
         run: |
