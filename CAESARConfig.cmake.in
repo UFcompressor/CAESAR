@@ -2,6 +2,8 @@
 
 include(CMakeFindDependencyMacro)
 find_dependency(Torch REQUIRED)
+find_dependency(PkgConfig)
+pkg_check_modules(ZSTD REQUIRED libzstd IMPORTED_TARGET)
 
 include("${CMAKE_CURRENT_LIST_DIR}/CAESARTargets.cmake")
 

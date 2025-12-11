@@ -2,6 +2,7 @@ find_package(MPI)
 find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
+find_package(OpenMP REQUIRED)
 
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
@@ -108,6 +109,11 @@ if(MPI_FOUND)
     target_include_directories(caesar_lib PRIVATE ${MPI_INCLUDE_PATH})
     target_link_libraries(caesar_lib PUBLIC MPI::MPI_CXX)
     target_compile_definitions(caesar_lib PUBLIC USE_MPI)
+endif()
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(caesar_lib PRIVATE OpenMP::OpenMP_CXX)
+    message(STATUS "OpenMP enabled for caesar_lib")
 endif()
 
 target_compile_options(caesar_lib PRIVATE

@@ -1,4 +1,5 @@
 #include "dataset.h"
+#include <omp.h>
 
 torch::Tensor centerCrop(const torch::Tensor& x , std::pair<int64_t , int64_t> tShape) {
     auto sizes = x.sizes();
@@ -171,34 +172,59 @@ data_filtering(const torch::Tensor& data , int nFrame) {
     }
 
     int samples = T / nFrame;
-    std::vector<std::pair<int , float>> filteredBlocks;
+    // Thread-safe containers
+    std::vector<std::pair<int, float>> filteredBlocks;
     std::vector<int> filteredLabels;
+    
+    // Total number of blocks to check
+    int64_t total_blocks = (int64_t)V * S * samples;
 
-    for (int v = 0; v < V; v++) {
-        for (int s = 0; s < S; s++) {
-            for (int blk_idx = 0; blk_idx < samples; blk_idx++) {
-                int start = blk_idx * nFrame;
-                int end = (blk_idx + 1) * nFrame;
+    // Use OpenMP to parallelize the loop
+    #pragma omp parallel
+    {
+        // Each thread collects its own results to avoid locking overhead
+        std::vector<std::pair<int, float>> local_blocks;
+        std::vector<int> local_labels;
 
-                torch::Tensor block = data.index({ v, s, torch::indexing::Slice(start, end) });
+        #pragma omp for nowait
+        for (int64_t i = 0; i < total_blocks; ++i) {
+            // Decode flat index 'i' back to v, s, blk_idx
+            int64_t temp = i;
+            int blk_idx = temp % samples;
+            temp /= samples;
+            int s = temp % S;
+            int v = temp / S;
 
-                // Flatten the block
-                torch::Tensor flat = block.reshape({ -1 });
-                float first_val = flat[0].item<float>();
+            int start = blk_idx * nFrame;
+            int end = (blk_idx + 1) * nFrame;
 
-                // Check if ALL values equal the first value (exact equality, like Python)
-                // This is much faster than allclose and matches Python behavior
-                torch::Tensor comparison = (flat == first_val);
-                bool all_equal = torch::all(comparison).item<bool>();
+            // Avoid creating new Tensor object overhead if possible, or just slice
+            torch::Tensor block = data.index({ v, s, torch::indexing::Slice(start, end) });
+            
+            // Fast check: check min and max. If min == max, all values are equal.
+            // This is often faster on CPU than creating a comparison tensor.
+            float min_val = block.min().item<float>();
+            float max_val = block.max().item<float>();
 
-                if (all_equal) {
-                    int label = v * (S * samples) + s * samples + blk_idx;
-                    filteredBlocks.push_back({ label, first_val });
-                    filteredLabels.push_back(label);
-                }
+            if (min_val == max_val) {
+                int label = v * (S * samples) + s * samples + blk_idx;
+                local_blocks.push_back({ label, min_val });
+                local_labels.push_back(label);
             }
         }
+
+        // Merge local results into global results within a critical section
+        #pragma omp critical
+        {
+            filteredBlocks.insert(filteredBlocks.end(), local_blocks.begin(), local_blocks.end());
+            filteredLabels.insert(filteredLabels.end(), local_labels.begin(), local_labels.end());
+        }
     }
+    
+    // Sort to maintain deterministic order (OpenMP doesn't guarantee order)
+    std::sort(filteredLabels.begin(), filteredLabels.end());
+    std::sort(filteredBlocks.begin(), filteredBlocks.end(), 
+        [](const auto& a, const auto& b) { return a.first < b.first; });
 
     return { filteredBlocks, filteredLabels };
 }
