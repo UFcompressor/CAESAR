@@ -8,26 +8,43 @@ std::pair<torch::Tensor , PaddingInfo> to_5d_and_pad(
     int64_t H ,
     int64_t W
 ) {
-    // if (H <= 0 || W <= 0) {
-    //     throw std::invalid_argument("H and W must be positive");
-    // }
-
     // Store original shape
     std::vector<int64_t> original_shape;
     for (int64_t i = 0; i < arr.dim(); ++i) {
         original_shape.push_back(arr.size(i));
     }
 
-    // Flatten the tensor
-    torch::Tensor flat = arr.flatten();
-    int64_t N = flat.numel();
+    int64_t N = arr.numel();
+    int64_t patch_area = H * W;
 
-    // Calculate number of slices (D) needed
-    int64_t D = static_cast<int64_t>(std::ceil(static_cast<double>(N) / (H * W)));
+    // Calculate D
+    int64_t D = (N + patch_area - 1) / patch_area; // Ceil division
+
+    // Check if padding is actually needed
+    if (N % patch_area == 0) {
+        // [Optimization] No copy needed, just reshape (view)
+        // This avoids copying 16GB of data when dimensions align perfectly.
+        torch::Tensor padded_5d = arr.view({ 1, 1, D, H, W });
+
+        PaddingInfo info;
+        info.original_shape = original_shape;
+        info.original_length = N;
+        info.padded_shape = { 1, 1, D, H, W };
+        info.H = H;
+        info.W = W;
+        
+        // std::cout << "Direct reshape to 5D without padding.\n";
+        return { padded_5d, info };
+    }
+    
+    // Fallback: Copy needed for padding
     int64_t padded_length = D * H * W;
 
     // Create padded tensor
     torch::Tensor padded = torch::zeros({ padded_length } , arr.options());
+
+    // Flatten the tensor
+    torch::Tensor flat = arr.flatten();
     padded.index_put_({ torch::indexing::Slice(0, N) } , flat);
 
     // Reshape to 5D
