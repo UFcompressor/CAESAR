@@ -118,9 +118,18 @@ endif()
 
 target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:Profile>:-O3 -g>
+    $<$<CONFIG:Release>:-O3 -march=native -mtune=native -fprefetch-loop-arrays>
+    $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
 )
+
+if(USE_CUDA)
+    target_compile_options(caesar_lib PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            -Xptxas -O3
+            --maxrregcount=64
+        >
+    )
+endif()
 
 set_target_properties(caesar_lib PROPERTIES
     VERSION 1.0.0

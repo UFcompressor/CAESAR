@@ -334,7 +334,7 @@ torch::Tensor BaseDataset::apply_inst_norm(torch::Tensor data , bool return_norm
     if (norm_type == "mean_range") {
         offset = torch::mean(data);
 
-        // Compute scale more carefully to avoid precision loss
+
         float data_max = data.max().item<float>();
         float data_min = data.min().item<float>();
         float scale_val = data_max - data_min;
@@ -575,11 +575,10 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
     file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
     file.close();
 
-    // Create tensor directly as Float32, no conversion needed
     torch::Tensor data = torch::from_blob(
         buffer.data() ,
         { shape[0], shape[1], shape[2], shape[3], shape[4] } ,
-        torch::kFloat32  // Explicitly specify dtype
+        torch::kFloat32  
     ).clone();
 
     if (variable_idx.has_value()) {
@@ -689,8 +688,8 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
         torch::indexing::Slice(start_t, end_t)
         });
 
-        // ADD THIS LINE - Add channel dimension!
-    data = data.unsqueeze(0);  // Now shape is [1, 8, 256, 256]
+
+    data = data.unsqueeze(0); 
 
     auto data_dict = post_processing(data , static_cast<int>(idx0) , train_mode);
     torch::Tensor index_tensor = torch::tensor({ idx0, idx1, start_t, end_t } , torch::kLong);
@@ -698,26 +697,14 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
     return data_dict;
 }
 
-// ** JL modified ** //
-/**
-* @brief Public getter for the private 'block_info' member.
-*/
 std::tuple<int64_t, int64_t, std::vector<int64_t>> ScientificDataset::get_block_info() const {
     return block_info;
 }
 
-/**
-* @brief Public getter for the private 'data_input' tensor.
-* Returns by const reference to avoid a deep copy.
-*/
 const torch::Tensor& ScientificDataset::get_data_input() const {
     return data_input;
 }
 
-/**
-* @brief Public getter for the private 'filtered_blocks' vector.
-* Returns by const reference to avoid a large vector copy.
-*/
 const std::vector<std::pair<int, float>>& ScientificDataset::get_filtered_blocks() const {
     return filtered_blocks;
 }
@@ -729,4 +716,3 @@ const int64_t& ScientificDataset::get_pad_T() const {
 const std::vector<int64_t>& ScientificDataset::get_shape_info() const {
     return shape;
 }
-// **** //
