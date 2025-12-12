@@ -110,7 +110,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
     total_bytes += get_vector_data_size(result.gae_comp_data);
 
-    total_bytes += sizeof(result.final_nrmse);
+  
 
     total_bytes += sizeof(result.num_samples);
 
@@ -163,7 +163,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
     try {
 
-//  for ci test must be 1x1x20x256x256 cpu
+//  for ci test must be 1x1x20x256x256 cpu 
         const std::vector<int64_t> shape = { 1, 1, 20, 256, 256 };
         const std::string raw_path = "TCf48.bin.f32";
 
