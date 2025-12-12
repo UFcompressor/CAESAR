@@ -214,11 +214,11 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
     for (size_t i = 0; i < leading_dims.size() - 2; ++i)
         leading_size *= leading_dims[i];
     auto data_reshaped = data.view({ leading_size, H, W });
-auto data_padded = torch::nn::functional::pad(
-    data_reshaped,
+    auto data_padded = torch::nn::functional::pad(
+    data_reshaped.cpu(),
     torch::nn::functional::PadFuncOptions({left, right, top, down})
-        .mode(torch::kConstant) 
-        .value(0.0));          
+        .mode(torch::kReflect))
+    .to(data_reshaped.device());  
     auto new_shape = leading_dims;
     new_shape[new_shape.size() - 2] = data_padded.size(-2);
     new_shape[new_shape.size() - 1] = data_padded.size(-1);
