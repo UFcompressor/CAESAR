@@ -187,8 +187,8 @@ if (shape[3] >= 256 && shape[4] >= 256) {
 }
 
         // Device setting
-        torch::Device compression_device = torch::Device(torch::kCUDA);
-        torch::Device decompression_device = torch::Device(torch::kCUDA);
+        torch::Device compression_device = torch::Device(torch::kCPU);
+        torch::Device decompression_device = torch::Device(torch::kCPU);
 
         std::cout << "\n===== COMPRESSION =====\n";
         Compressor compressor(compression_device);
