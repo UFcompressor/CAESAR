@@ -8,7 +8,6 @@ std::pair<torch::Tensor , PaddingInfo> to_5d_and_pad(
     int64_t H ,
     int64_t W
 ) {
-    // Store original shape
     std::vector<int64_t> original_shape;
     for (int64_t i = 0; i < arr.dim(); ++i) {
         original_shape.push_back(arr.size(i));
@@ -17,13 +16,9 @@ std::pair<torch::Tensor , PaddingInfo> to_5d_and_pad(
     int64_t N = arr.numel();
     int64_t patch_area = H * W;
 
-    // Calculate D
-    int64_t D = (N + patch_area - 1) / patch_area; // Ceil division
+    int64_t D = (N + patch_area - 1) / patch_area; 
 
-    // Check if padding is actually needed
     if (N % patch_area == 0) {
-        // [Optimization] No copy needed, just reshape (view)
-        // This avoids copying 16GB of data when dimensions align perfectly.
         torch::Tensor padded_5d = arr.view({ 1, 1, D, H, W });
 
         PaddingInfo info;
@@ -33,21 +28,15 @@ std::pair<torch::Tensor , PaddingInfo> to_5d_and_pad(
         info.H = H;
         info.W = W;
         
-        // std::cout << "Direct reshape to 5D without padding.\n";
         return { padded_5d, info };
     }
     
-    // Fallback: Copy needed for padding
     int64_t padded_length = D * H * W;
-
-    // Create padded tensor
     torch::Tensor padded = torch::zeros({ padded_length } , arr.options());
 
-    // Flatten the tensor
     torch::Tensor flat = arr.flatten();
     padded.index_put_({ torch::indexing::Slice(0, N) } , flat);
 
-    // Reshape to 5D
     torch::Tensor padded_5d = padded.reshape({ 1, 1, D, H, W });
 
     // Create metadata
@@ -77,13 +66,5 @@ torch::Tensor restore_from_5d(
     torch::Tensor trimmed = flat.index({ torch::indexing::Slice(0, info.original_length) });
 
     torch::Tensor restored = trimmed.reshape(torch::IntArrayRef(info.original_shape));
-    // remove later 
-    std::cout << "Restored tensor from 5D to original shape [";
-    for (size_t i = 0; i < info.original_shape.size(); ++i) {
-        std::cout << info.original_shape[i];
-        if (i < info.original_shape.size() - 1) std::cout << ", ";
-    }
-    std::cout << "]\n";
-
     return restored;
 }

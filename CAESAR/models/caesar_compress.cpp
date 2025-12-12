@@ -214,11 +214,11 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
     for (size_t i = 0; i < leading_dims.size() - 2; ++i)
         leading_size *= leading_dims[i];
     auto data_reshaped = data.view({ leading_size, H, W });
-
-    auto data_padded = torch::nn::functional::pad(
-        data_reshaped ,
-        torch::nn::functional::PadFuncOptions({ left, right, top, down }).mode(torch::kReflect));
-
+auto data_padded = torch::nn::functional::pad(
+    data_reshaped,
+    torch::nn::functional::PadFuncOptions({left, right, top, down})
+        .mode(torch::kConstant)  // ← Change this
+        .value(0.0));            // ← Add this
     auto new_shape = leading_dims;
     new_shape[new_shape.size() - 2] = data_padded.size(-2);
     new_shape[new_shape.size() - 1] = data_padded.size(-1);
@@ -303,7 +303,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
     ScientificDataset dataset(config);
     torch::Tensor original_data = dataset.original_data();
-    torch::Tensor input_data = dataset.input_data();
 
     CompressionResult result;
     result.num_samples = 0;
@@ -425,15 +424,15 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
 
             std::vector<torch::Tensor> inputs = { batched_input.to(torch::kDouble) };
-            std::cout << "here" << std::endl;
+            std::cout << "running model compres here" << std::endl;
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
-            std::cout << "\n[DEBUG] Compressor model output tensors:" << std::endl;
-            std::cout << "done" << std::endl;
+            std::cout << "done runnidng compress" << std::endl;
             torch::Tensor q_latent = outputs[0].to(torch::kInt32);
             torch::Tensor latent_indexes = outputs[1].to(torch::kInt32);
             torch::Tensor q_hyper_latent = outputs[2].to(torch::kInt32);
             torch::Tensor hyper_indexes = outputs[3].to(torch::kInt32);
-
+            outputs.clear();
+            outputs.shrink_to_fit();
 
             int64_t num_input_samples = batch_inputs.size();
             int64_t num_latent_codes = q_latent.sizes()[0];
@@ -479,9 +478,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             batch_min = 1000000.0;
 
             std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
-            std::cout << "passed hyperout" << std::endl;
+          
             torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
             torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
+            hyper_outputs.clear();
+            hyper_outputs.shrink_to_fit();
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
 
@@ -491,7 +492,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
             torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
             std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
-            std::cout << "[DEBUG] reshaped_latents shape: " << reshaped_latents.sizes() << std::endl;
+         
 
             torch::Tensor raw_output = decompressor_outputs[0];
             torch::Tensor norm_output = reshape_batch_2d_3d(
@@ -508,7 +509,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
                 int64_t start_t = index_row[2].item<int64_t>();
                 int64_t end_t = index_row[3].item<int64_t>();
 
-                torch::Tensor source_slice_3d = denorm_output.select(0 , i).squeeze(0);
+                torch::Tensor source_slice_3d = denorm_output.select(0, i).squeeze(0).cpu();
                 torch::Tensor dest_slice = recon_tensor.select(0 , idx0).select(0 , idx1).slice(0 , start_t , end_t);
 
                 dest_slice.copy_(source_slice_3d);
@@ -642,19 +643,19 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
         torch::Tensor recons_gae_unpadded = unpadding(recons_gae , result.gaeMetaData.padding_recon_info);
         torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
-        torch::Tensor final_recon = final_recon_norm * result.compressionMetaData.global_scale + result.compressionMetaData.global_offset;
+     
 
-        double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
-        result.final_nrmse = final_nrmse;
+  
+ 
     }
 
     else {
         std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
         // 'result.gaeMetaData.pcaBasis' and 'uniqueVals' are already emtpy. Skip record these.
 
-        torch::Tensor final_recon = recons_data(recon_tensor_deblock , result.compressionMetaData.data_input_shape , result.compressionMetaData.pad_T);
-        double final_nrmse = relative_rmse_error(input_data.to(device_) , final_recon.to(device_));
-        result.final_nrmse = final_nrmse;
+   
+    
+     
     }
 
 
