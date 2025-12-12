@@ -217,8 +217,8 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
 auto data_padded = torch::nn::functional::pad(
     data_reshaped,
     torch::nn::functional::PadFuncOptions({left, right, top, down})
-        .mode(torch::kConstant)  // ← Change this
-        .value(0.0));            // ← Add this
+        .mode(torch::kConstant) 
+        .value(0.0));          
     auto new_shape = leading_dims;
     new_shape[new_shape.size() - 2] = data_padded.size(-2);
     new_shape[new_shape.size() - 1] = data_padded.size(-1);

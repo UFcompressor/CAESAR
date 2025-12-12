@@ -110,7 +110,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
     total_bytes += get_vector_data_size(result.gae_comp_data);
 
-    total_bytes += sizeof(result.final_nrmse);
+  
 
     total_bytes += sizeof(result.num_samples);
 
@@ -163,7 +163,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
     try {
 
-//  for ci test must be 1x1x20x256x256 cpu
+//  for ci test must be 1x1x20x256x256 cpu 
         const std::vector<int64_t> shape = { 1, 1, 20, 256, 256 };
         const std::string raw_path = "TCf48.bin.f32";
 
@@ -187,8 +187,8 @@ if (shape[3] >= 256 && shape[4] >= 256) {
 }
 
         // Device setting
-        torch::Device compression_device = torch::Device(torch::kCPU);
-        torch::Device decompression_device = torch::Device(torch::kCPU);
+        torch::Device compression_device = torch::Device(torch::kCUDA);
+        torch::Device decompression_device = torch::Device(torch::kCUDA);
 
         std::cout << "\n===== COMPRESSION =====\n";
         Compressor compressor(compression_device);
