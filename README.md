@@ -99,6 +99,7 @@ Notes
 
 GPU support currently tested only with NVIDIA GPUs
 MPI support is optional and not required for basic use
+OpenMP is required
 Model compression requires Python environment to be set up correctly
 
 
