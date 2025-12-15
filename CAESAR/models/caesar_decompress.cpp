@@ -13,7 +13,6 @@ torch::Tensor deblockHW(const torch::Tensor& data ,
     int64_t nH ,
     int64_t nW ,
     const std::vector<int64_t>& padding);
-double relative_rmse_error(const torch::Tensor& x , const torch::Tensor& y);
 
 std::tuple<torch::Tensor , std::vector<int>> padding(
     const torch::Tensor& data ,
@@ -87,7 +86,6 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 }
 
 void Decompressor::load_models() {
-    std::cout << "Loading models for decompression based on device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
 
     std::string hyper_decompressor_path;
     std::string decompressor_path;
@@ -98,11 +96,9 @@ void Decompressor::load_models() {
     decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
         get_model_file("caesar_decompressor.pt2").string()
     );
-    std::cout << "Models loaded successfully." << std::endl;
 }
 
 void Decompressor::load_probability_tables() {
-    std::cout << "Loading probability tables..." << std::endl;
 
     auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("vbr_quantized_cdf.bin"));
     vbr_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("vbr_cdf_length.bin"));
@@ -114,7 +110,6 @@ void Decompressor::load_probability_tables() {
     gs_offset_ = load_array_from_bin<int32_t>(get_model_file("gs_offset.bin"));
     gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
 
-    std::cout << "Probability tables loaded successfully." << std::endl;
 }
 
 torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data , int64_t batch_size , int64_t n_frame) {
@@ -163,10 +158,7 @@ torch::Tensor Decompressor::decompress(
         idx_opts_cpu
     ).clone().to(device_);
 
-       // === Debug info ===
-    std::cout << "\n[DEBUG] offsets_tensor shape: " << offsets_tensor.sizes() << std::endl;
-    std::cout << "[DEBUG] scales_tensor shape:  " << scales_tensor.sizes() << std::endl;
-    std::cout << "[DEBUG] indexes_tensor shape: " << indexes_tensor.sizes() << std::endl;
+
 
     if (indexes_tensor.numel() > 0) {  // 判断是否为空
         std::cout << "[DEBUG] indexes_tensor shape: " << indexes_tensor.sizes() << std::endl;
@@ -195,9 +187,6 @@ torch::Tensor Decompressor::decompress(
         size_t cur_samples = cur_latents / 2;
         size_t sample_start = lat_start / 2;
 
-        std::cout << "========================================" << std::endl;
-        std::cout << "--- Decompressing Batch " << result.num_batches
-            << " (latents=" << cur_latents << ", samples=" << cur_samples << ") ---" << std::endl;
 
         std::vector<int32_t> hyper_size = { (int32_t)cur_latents, 64, 4, 4 };
         torch::Tensor hyper_index_tensor = build_indexes_tensor(hyper_size);

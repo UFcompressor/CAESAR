@@ -455,45 +455,45 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     return { metaData, std::move(compressResult.first), compressResult.second };
 }
 
-
-torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
-    const MetaData& metaData ,
+torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData, 
+    const MetaData& metaData, 
     const CompressedData& compressedData) {
-
+    
     if (metaData.dataBytes == 0 || metaData.pcaBasis.numel() == 0) {
         return reconsData.clone();
     }
+    
     auto inputShape = reconsData.sizes();
+   
     torch::Tensor reconsDevice = reconsData.clone().to(device_);
-
+    
     bool needsReshape = (inputShape.size() != 2);
     if (needsReshape) {
-        reconsDevice = block2Vector(reconsDevice , patchSize_);
+        reconsDevice = block2Vector(reconsDevice, patchSize_);
     }
-    MainData mainData = decompressLossless(metaData , compressedData);
-
-    torch::Tensor indexMask = indexMaskReverse(mainData.prefixMask ,
-        mainData.maskLength ,
+    
+    MainData mainData = decompressLossless(metaData, compressedData);
+    
+    torch::Tensor indexMask = indexMaskReverse(mainData.prefixMask,
+        mainData.maskLength,
         metaData.pcaBasis.size(0));
-
+    
     torch::Tensor coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
-
-    torch::Tensor coeff = torch::zeros(indexMask.sizes() ,
+    
+    torch::Tensor coeff = torch::zeros(indexMask.sizes(),
         torch::TensorOptions().dtype(metaData.pcaBasis.dtype()).device(device_));
-
-    coeff.masked_scatter_(indexMask , coeffInt * metaData.quanBin);
-
-    torch::Tensor pcaReconstruction = torch::matmul(coeff , metaData.pcaBasis);
-
-    torch::Tensor reconsSubset = reconsDevice.index({ mainData.processMask });
-    reconsSubset = reconsSubset + pcaReconstruction;
-
-    reconsDevice.index_put_({ mainData.processMask } , reconsSubset);
-
+    
+    coeff.masked_scatter_(indexMask, coeffInt * metaData.quanBin);
+    
+    torch::Tensor pcaReconstruction = torch::matmul(coeff, metaData.pcaBasis);
+    
+    reconsDevice.index_put_({ mainData.processMask }, 
+                            reconsDevice.index({ mainData.processMask }) + pcaReconstruction);
+    
     if (needsReshape) {
-        reconsDevice = vector2Block(reconsDevice , inputShape.vec() , patchSize_);
+        reconsDevice = vector2Block(reconsDevice, inputShape.vec(), patchSize_);
     }
-
+    
     return reconsDevice.cpu();
 }
 

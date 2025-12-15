@@ -608,7 +608,7 @@ size_t ScientificDataset::size() const {
 }
 
 torch::Tensor ScientificDataset::original_data() const {
-    torch::Tensor data = data_input.clone();
+    torch::Tensor data = data_input;
 
 
     if (!train_mode) {
@@ -645,7 +645,7 @@ torch::Tensor ScientificDataset::deblocking_hw(const torch::Tensor& data) const 
 
 std::unordered_map<std::string , torch::Tensor> ScientificDataset::post_processing(
     const torch::Tensor& data , int var_idx , bool is_training) {
-    torch::Tensor processed_data = data.clone();
+    torch::Tensor processed_data = data; // changing to shallow copy note this data is const
     if (is_training) {
         processed_data = apply_augments(processed_data);
         processed_data = apply_padding_or_crop(processed_data);
