@@ -4,15 +4,16 @@
 
 
 // Helper function to compute NRMSE (Normalized Root Mean Square Error)
-double computeNRMSE(const torch::Tensor& original , const torch::Tensor& reconstructed) {
-    auto diff = original - reconstructed;
+double computeNRMSE(const torch::Tensor& original, const torch::Tensor& reconstructed) {
+    auto orig_cpu = original.cpu();
+    auto recons_cpu = reconstructed.cpu();
+    
+    auto diff = orig_cpu - recons_cpu;
     auto mse = torch::mean(diff * diff).item<double>();
     auto rmse = std::sqrt(mse);
-
-    auto data_range = original.max().item<double>() - original.min().item<double>();
+    auto data_range = orig_cpu.max().item<double>() - orig_cpu.min().item<double>();
     return rmse / data_range;
 }
-
 // Helper function to normalize data like in Python code
 std::tuple<torch::Tensor , double , double , double> normalizeData(const torch::Tensor& data) {
     double x_min = data.min().item<double>();
@@ -88,6 +89,7 @@ void testPCACompressor2() {
         double quan_factor = 2.0;
 #ifdef USE_CUDA
         std::string device = torch::cuda::is_available() ? "cuda" : "cpu";
+        std::cout<<"using cuda"<<std::endl;
 #else
         std::string device = "cpu";
 #endif
@@ -159,7 +161,7 @@ void testPCACompressor2() {
         }
 
         // Check element-wise differences
-        auto diff = torch::abs(original_denorm - recons_gae_denorm);
+        auto diff = torch::abs(original_denorm.cpu() - recons_gae_denorm.cpu());
         double max_diff = diff.max().item<double>();
         double mean_diff = diff.mean().item<double>();
 

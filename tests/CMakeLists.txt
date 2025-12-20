@@ -15,6 +15,30 @@ else()
     set(FILESYSTEM_LIB "")
 endif()
 
+
+find_package(CUDA)
+set(USE_CUDA OFF)
+
+if(CUDA_FOUND)
+    find_path(NVCOMP_INCLUDE_DIR
+        NAMES nvcomp.h nvcomp/nvcomp.h
+        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
+        PATH_SUFFIXES include
+    )
+
+    find_library(NVCOMP_LIBRARY
+        NAMES nvcomp
+        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
+        PATH_SUFFIXES lib lib64
+    )
+
+    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
+        set(USE_CUDA ON)
+        message(STATUS "CUDA + nvcomp found for tests")
+    endif()
+endif()
+
+
 add_executable(test_dataset testDataSet.cpp)
 target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
@@ -36,12 +60,11 @@ target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FIL
 add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
 target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-
 if(USE_CUDA)
+    target_compile_definitions(test_runGaeCuda PRIVATE USE_CUDA)
     target_include_directories(test_runGaeCuda PRIVATE ${NVCOMP_INCLUDE_DIR} ${CUDA_INCLUDE_DIRS})
     message(STATUS "Building test_runGaeCuda with CUDA and NVCOMP support")
 else()

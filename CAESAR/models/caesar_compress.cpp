@@ -193,10 +193,10 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
         leading_size *= leading_dims[i];
     auto data_reshaped = data.view({ leading_size, H, W });
     auto data_padded = torch::nn::functional::pad(
-    data_reshaped.cpu(),
+    data_reshaped,
     torch::nn::functional::PadFuncOptions({left, right, top, down})
-        .mode(torch::kReflect))
-    .to(data_reshaped.device());  
+        .mode(torch::kConstant)
+        .value(0));
     auto new_shape = leading_dims;
     new_shape[new_shape.size() - 2] = data_padded.size(-2);
     new_shape[new_shape.size() - 1] = data_padded.size(-1);
@@ -306,14 +306,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     {
         auto block_info = dataset.get_block_info();
         const auto& padding_vec = std::get<2>(block_info);
-        for (size_t i = 0; i < padding_vec.size(); ++i) {
-            std::cout << padding_vec[i];
-            if (i < padding_vec.size() - 1) {
-                std::cout << ", ";
-            }
-        }
-        std::cout << "]" << std::endl;
-
         int32_t nH_i32 = static_cast<int32_t>(std::get<0>(block_info));
         int32_t nW_i32 = static_cast<int32_t>(std::get<1>(block_info));
         const std::vector<int64_t>& padding_i64 = std::get<2>(block_info);
@@ -432,11 +424,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
                 result.encoded_latents.push_back(latent_encoded);
                 result.encoded_hyper_latents.push_back(hyper_encoded);
 
-                if (j < 3 || j == num_latent_codes - 1) {
-                    std::cout << "  Encoded latent " << j << ": "
-                        << latent_encoded.size() << " bytes (latent), "
-                        << hyper_encoded.size() << " bytes (hyper)" << std::endl;
-                }
             }
 
             result.num_samples += num_input_samples;
