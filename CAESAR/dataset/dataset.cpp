@@ -716,3 +716,30 @@ const int64_t& ScientificDataset::get_pad_T() const {
 const std::vector<int64_t>& ScientificDataset::get_shape_info() const {
     return shape;
 }
+
+void ScientificDataset::clear() {
+    // Free all the big tensors
+    data_input = torch::Tensor();
+    var_offset = torch::Tensor();
+    var_scale = torch::Tensor();
+
+    // Clear vectors
+    filtered_blocks.clear();
+    filtered_blocks.shrink_to_fit();
+
+    filtered_labels.clear();
+    filtered_labels.shrink_to_fit();
+
+    reverse_id_map.clear();
+
+    shape_org.clear();
+    shape_org.shrink_to_fit();
+
+    shape.clear();
+    shape.shrink_to_fit();
+
+}
+
+ScientificDataset::~ScientificDataset() {
+    clear();
+}

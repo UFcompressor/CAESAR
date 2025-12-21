@@ -26,6 +26,7 @@
 #include <nvcomp/cascaded.h>
 #include <nvcomp/zstd.h>   
 #endif
+#include "model_utils.h"
 #include <zstd.h> 
 class PCA {
 public:

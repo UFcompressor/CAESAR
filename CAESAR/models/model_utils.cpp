@@ -1,7 +1,7 @@
 #include "model_utils.h"
 #include <cstdlib>
 #include <stdexcept>
-#include <iostream>
+#include <unistd.h> 
 
 #ifdef _WIN32
 #include <windows.h>
@@ -90,3 +90,27 @@ fs::path get_model_file(const std::string& filename) {
         "\nPlease set CAESAR_MODEL_DIR to point to your exported_model directory."
     );
 }
+
+
+
+
+
+// for memory debuging
+double rss_gb() {
+    std::ifstream statm("/proc/self/statm");
+    long dummy = 0, rss_pages = 0;
+    statm >> dummy >> rss_pages;
+
+    return (double)rss_pages * sysconf(_SC_PAGESIZE)
+           / (1024.0 * 1024 * 1024);
+}
+
+// for gpu memory 
+#ifdef USE_CUDA
+double gpu_free_gb() {
+    size_t free_bytes, total_bytes;
+    cudaMemGetInfo(&free_bytes, &total_bytes);
+    return free_bytes / (1024.0 * 1024 * 1024);
+}
+#endif
+

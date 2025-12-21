@@ -1,7 +1,12 @@
 #pragma once
 #include <string>
 #include <filesystem>
-
+#include <cstddef>
+#include <fstream>
+#include <iostream>
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#endif
 namespace fs = std::filesystem;
 
 /**
@@ -17,3 +22,10 @@ namespace fs = std::filesystem;
  * @throws std::runtime_error if the file cannot be found
  */
 fs::path get_model_file(const std::string& filename);
+
+
+double rss_gb(); 
+
+#ifdef USE_CUDA
+double gpu_free_gb();
+#endif

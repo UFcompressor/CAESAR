@@ -6,8 +6,6 @@
 #include <string>
 #include "../dataset/dataset.h"
 
-#include <cstddef> // for testing remove later
-double rss_mb(); // for testing remove later
 
 // ** JL modified ** //
 struct GAEMetaData {

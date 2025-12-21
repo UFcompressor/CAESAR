@@ -109,6 +109,8 @@ private:
 class ScientificDataset : public BaseDataset {
 public:
     explicit ScientificDataset(const DatasetConfig& config);
+       void clear(); 
+    ~ScientificDataset();  
 
     size_t size() const;
     std::unordered_map<std::string , torch::Tensor> get_item(size_t idx);
