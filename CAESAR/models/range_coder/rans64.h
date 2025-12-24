@@ -32,16 +32,16 @@
 
 #include <intrin.h>
 
-static inline uint64_t Rans64MulHi(uint64_t a, uint64_t b)
+static inline uint64_t Rans64MulHi(uint64_t a , uint64_t b)
 {
-    return __umulh(a, b);
+    return __umulh(a , b);
 }
 
 #elif defined(__GNUC__)
 
-static inline uint64_t Rans64MulHi(uint64_t a, uint64_t b)
+static inline uint64_t Rans64MulHi(uint64_t a , uint64_t b)
 {
-    return (uint64_t) (((unsigned __int128)a * b) >> 64);
+    return (uint64_t)(((unsigned __int128)a * b) >> 64);
 }
 
 #else
@@ -74,7 +74,7 @@ static inline void Rans64EncInit(Rans64State* r)
 // NOTE: With rANS, you need to encode symbols in *reverse order*, i.e. from
 // beginning to end! Likewise, the output bytestream is written *backwards*:
 // ptr starts pointing at the end of the output buffer and keeps decrementing.
-static inline void Rans64EncPut(Rans64State* r, uint32_t** pptr, uint32_t start, uint32_t freq, uint32_t scale_bits)
+static inline void Rans64EncPut(Rans64State* r , uint32_t** pptr , uint32_t start , uint32_t freq , uint32_t scale_bits)
 {
     Rans64Assert(freq != 0);
 
@@ -83,7 +83,7 @@ static inline void Rans64EncPut(Rans64State* r, uint32_t** pptr, uint32_t start,
     uint64_t x_max = ((RANS64_L >> scale_bits) << 32) * freq; // this turns into a shift.
     if (x >= x_max) {
         *pptr -= 1;
-        **pptr = (uint32_t) x;
+        **pptr = (uint32_t)x;
         x >>= 32;
         Rans64Assert(x < x_max);
     }
@@ -93,29 +93,29 @@ static inline void Rans64EncPut(Rans64State* r, uint32_t** pptr, uint32_t start,
 }
 
 // Flushes the rANS encoder.
-static inline void Rans64EncFlush(Rans64State* r, uint32_t** pptr)
+static inline void Rans64EncFlush(Rans64State* r , uint32_t** pptr)
 {
     uint64_t x = *r;
 
     *pptr -= 2;
-    (*pptr)[0] = (uint32_t) (x >> 0);
-    (*pptr)[1] = (uint32_t) (x >> 32);
+    (*pptr)[0] = (uint32_t)(x >> 0);
+    (*pptr)[1] = (uint32_t)(x >> 32);
 }
 
 // Initializes a rANS decoder.
 // Unlike the encoder, the decoder works forwards as you'd expect.
-static inline void Rans64DecInit(Rans64State* r, uint32_t** pptr)
+static inline void Rans64DecInit(Rans64State* r , uint32_t** pptr)
 {
     uint64_t x;
 
-    x  = (uint64_t) ((*pptr)[0]) << 0;
-    x |= (uint64_t) ((*pptr)[1]) << 32;
+    x = (uint64_t)((*pptr)[0]) << 0;
+    x |= (uint64_t)((*pptr)[1]) << 32;
     *pptr += 2;
     *r = x;
 }
 
 // Returns the current cumulative frequency (map it to a symbol yourself!)
-static inline uint32_t Rans64DecGet(Rans64State* r, uint32_t scale_bits)
+static inline uint32_t Rans64DecGet(Rans64State* r , uint32_t scale_bits)
 {
     return *r & ((1u << scale_bits) - 1);
 }
@@ -123,7 +123,7 @@ static inline uint32_t Rans64DecGet(Rans64State* r, uint32_t scale_bits)
 // Advances in the bit stream by "popping" a single symbol with range start
 // "start" and frequency "freq". All frequencies are assumed to sum to "1 << scale_bits",
 // and the resulting bytes get written to ptr (which is updated).
-static inline void Rans64DecAdvance(Rans64State* r, uint32_t** pptr, uint32_t start, uint32_t freq, uint32_t scale_bits)
+static inline void Rans64DecAdvance(Rans64State* r , uint32_t** pptr , uint32_t start , uint32_t freq , uint32_t scale_bits)
 {
     uint64_t mask = (1ull << scale_bits) - 1;
 
@@ -164,7 +164,7 @@ typedef struct {
 } Rans64DecSymbol;
 
 // Initializes an encoder symbol to start "start" and frequency "freq"
-static inline void Rans64EncSymbolInit(Rans64EncSymbol* s, uint32_t start, uint32_t freq, uint32_t scale_bits)
+static inline void Rans64EncSymbolInit(Rans64EncSymbol* s , uint32_t start , uint32_t freq , uint32_t scale_bits)
 {
     Rans64Assert(scale_bits <= 31);
     Rans64Assert(start <= (1u << scale_bits));
@@ -219,11 +219,12 @@ static inline void Rans64EncSymbolInit(Rans64EncSymbol* s, uint32_t start, uint3
         s->rcp_freq = ~0ull;
         s->rcp_shift = 0;
         s->bias = start + (1 << scale_bits) - 1;
-    } else {
-        // Alverson, "Integer Division using reciprocals"
-        // shift=ceil(log2(freq))
+    }
+    else {
+     // Alverson, "Integer Division using reciprocals"
+     // shift=ceil(log2(freq))
         uint32_t shift = 0;
-        uint64_t x0, x1, t0, t1;
+        uint64_t x0 , x1 , t0 , t1;
         while (freq > (1u << shift))
             shift++;
 
@@ -247,7 +248,7 @@ static inline void Rans64EncSymbolInit(Rans64EncSymbol* s, uint32_t start, uint3
 }
 
 // Initialize a decoder symbol to start "start" and frequency "freq"
-static inline void Rans64DecSymbolInit(Rans64DecSymbol* s, uint32_t start, uint32_t freq)
+static inline void Rans64DecSymbolInit(Rans64DecSymbol* s , uint32_t start , uint32_t freq)
 {
     Rans64Assert(start <= (1 << 31));
     Rans64Assert(freq <= (1 << 31) - start);
@@ -259,7 +260,7 @@ static inline void Rans64DecSymbolInit(Rans64DecSymbol* s, uint32_t start, uint3
 // multiplications instead of a divide.
 //
 // See RansEncSymbolInit for a description of how this works.
-static inline void Rans64EncPutSymbol(Rans64State* r, uint32_t** pptr, Rans64EncSymbol const* sym, uint32_t scale_bits)
+static inline void Rans64EncPutSymbol(Rans64State* r , uint32_t** pptr , Rans64EncSymbol const* sym , uint32_t scale_bits)
 {
     Rans64Assert(sym->freq != 0); // can't encode symbol with freq=0
 
@@ -268,25 +269,25 @@ static inline void Rans64EncPutSymbol(Rans64State* r, uint32_t** pptr, Rans64Enc
     uint64_t x_max = ((RANS64_L >> scale_bits) << 32) * sym->freq; // turns into a shift
     if (x >= x_max) {
         *pptr -= 1;
-        **pptr = (uint32_t) x;
+        **pptr = (uint32_t)x;
         x >>= 32;
     }
 
     // x = C(s,x)
-    uint64_t q = Rans64MulHi(x, sym->rcp_freq) >> sym->rcp_shift;
+    uint64_t q = Rans64MulHi(x , sym->rcp_freq) >> sym->rcp_shift;
     *r = x + sym->bias + q * sym->cmpl_freq;
 }
 
 // Equivalent to RansDecAdvance that takes a symbol.
-static inline void Rans64DecAdvanceSymbol(Rans64State* r, uint32_t** pptr, Rans64DecSymbol const* sym, uint32_t scale_bits)
+static inline void Rans64DecAdvanceSymbol(Rans64State* r , uint32_t** pptr , Rans64DecSymbol const* sym , uint32_t scale_bits)
 {
-    Rans64DecAdvance(r, pptr, sym->start, sym->freq, scale_bits);
+    Rans64DecAdvance(r , pptr , sym->start , sym->freq , scale_bits);
 }
 
 // Advances in the bit stream by "popping" a single symbol with range start
 // "start" and frequency "freq". All frequencies are assumed to sum to "1 << scale_bits".
 // No renormalization or output happens.
-static inline void Rans64DecAdvanceStep(Rans64State* r, uint32_t start, uint32_t freq, uint32_t scale_bits)
+static inline void Rans64DecAdvanceStep(Rans64State* r , uint32_t start , uint32_t freq , uint32_t scale_bits)
 {
     uint64_t mask = (1u << scale_bits) - 1;
 
@@ -296,13 +297,13 @@ static inline void Rans64DecAdvanceStep(Rans64State* r, uint32_t start, uint32_t
 }
 
 // Equivalent to RansDecAdvanceStep that takes a symbol.
-static inline void Rans64DecAdvanceSymbolStep(Rans64State* r, Rans64DecSymbol const* sym, uint32_t scale_bits)
+static inline void Rans64DecAdvanceSymbolStep(Rans64State* r , Rans64DecSymbol const* sym , uint32_t scale_bits)
 {
-    Rans64DecAdvanceStep(r, sym->start, sym->freq, scale_bits);
+    Rans64DecAdvanceStep(r , sym->start , sym->freq , scale_bits);
 }
 
 // Renormalize.
-static inline void Rans64DecRenorm(Rans64State* r, uint32_t** pptr)
+static inline void Rans64DecRenorm(Rans64State* r , uint32_t** pptr)
 {
     // renormalize
     uint64_t x = *r;

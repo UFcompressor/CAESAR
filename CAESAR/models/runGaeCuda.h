@@ -105,12 +105,12 @@ public:
     torch::Tensor decompress(const torch::Tensor& reconsData ,
         const MetaData& metaData ,
         const CompressedData& compressedData);
-    std::pair<std::unique_ptr<CompressedData>, int64_t> compressLossless(
-        const MetaData& metaData,
+    std::pair<std::unique_ptr<CompressedData> , int64_t> compressLossless(
+        const MetaData& metaData ,
         const MainData& mainData);
 
     MainData decompressLossless(
-        const MetaData& metaData,
+        const MetaData& metaData ,
         const CompressedData& compressedData);
 private:
     double quanBin_;

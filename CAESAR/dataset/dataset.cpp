@@ -173,20 +173,20 @@ data_filtering(const torch::Tensor& data , int nFrame) {
 
     int samples = T / nFrame;
     // Thread-safe containers
-    std::vector<std::pair<int, float>> filteredBlocks;
+    std::vector<std::pair<int , float>> filteredBlocks;
     std::vector<int> filteredLabels;
-    
+
     // Total number of blocks to check
     int64_t total_blocks = (int64_t)V * S * samples;
 
     // Use OpenMP to parallelize the loop
-    #pragma omp parallel
+#pragma omp parallel
     {
         // Each thread collects its own results to avoid locking overhead
-        std::vector<std::pair<int, float>> local_blocks;
+        std::vector<std::pair<int , float>> local_blocks;
         std::vector<int> local_labels;
 
-        #pragma omp for nowait
+#pragma omp for nowait
         for (int64_t i = 0; i < total_blocks; ++i) {
             // Decode flat index 'i' back to v, s, blk_idx
             int64_t temp = i;
@@ -200,7 +200,7 @@ data_filtering(const torch::Tensor& data , int nFrame) {
 
             // Avoid creating new Tensor object overhead if possible, or just slice
             torch::Tensor block = data.index({ v, s, torch::indexing::Slice(start, end) });
-            
+
             // Fast check: check min and max. If min == max, all values are equal.
             // This is often faster on CPU than creating a comparison tensor.
             float min_val = block.min().item<float>();
@@ -214,17 +214,17 @@ data_filtering(const torch::Tensor& data , int nFrame) {
         }
 
         // Merge local results into global results within a critical section
-        #pragma omp critical
+#pragma omp critical
         {
-            filteredBlocks.insert(filteredBlocks.end(), local_blocks.begin(), local_blocks.end());
-            filteredLabels.insert(filteredLabels.end(), local_labels.begin(), local_labels.end());
+            filteredBlocks.insert(filteredBlocks.end() , local_blocks.begin() , local_blocks.end());
+            filteredLabels.insert(filteredLabels.end() , local_labels.begin() , local_labels.end());
         }
     }
-    
+
     // Sort to maintain deterministic order (OpenMP doesn't guarantee order)
-    std::sort(filteredLabels.begin(), filteredLabels.end());
-    std::sort(filteredBlocks.begin(), filteredBlocks.end(), 
-        [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::sort(filteredLabels.begin() , filteredLabels.end());
+    std::sort(filteredBlocks.begin() , filteredBlocks.end() ,
+        [](const auto& a , const auto& b) { return a.first < b.first; });
 
     return { filteredBlocks, filteredLabels };
 }
@@ -578,7 +578,7 @@ torch::Tensor ScientificDataset::loadDatasetFromBinary(
     torch::Tensor data = torch::from_blob(
         buffer.data() ,
         { shape[0], shape[1], shape[2], shape[3], shape[4] } ,
-        torch::kFloat32  
+        torch::kFloat32
     ).clone();
 
     if (variable_idx.has_value()) {
@@ -689,15 +689,17 @@ std::unordered_map<std::string , torch::Tensor> ScientificDataset::get_item(size
         });
 
 
-    data = data.unsqueeze(0); 
+    data = data.unsqueeze(0);
 
     auto data_dict = post_processing(data , static_cast<int>(idx0) , train_mode);
+    data = torch::Tensor();
     torch::Tensor index_tensor = torch::tensor({ idx0, idx1, start_t, end_t } , torch::kLong);
     data_dict["index"] = index_tensor;
+    index_tensor = torch::Tensor();
     return data_dict;
 }
 
-std::tuple<int64_t, int64_t, std::vector<int64_t>> ScientificDataset::get_block_info() const {
+std::tuple<int64_t , int64_t , std::vector<int64_t>> ScientificDataset::get_block_info() const {
     return block_info;
 }
 
@@ -705,7 +707,7 @@ const torch::Tensor& ScientificDataset::get_data_input() const {
     return data_input;
 }
 
-const std::vector<std::pair<int, float>>& ScientificDataset::get_filtered_blocks() const {
+const std::vector<std::pair<int , float>>& ScientificDataset::get_filtered_blocks() const {
     return filtered_blocks;
 }
 
@@ -718,12 +720,10 @@ const std::vector<int64_t>& ScientificDataset::get_shape_info() const {
 }
 
 void ScientificDataset::clear() {
-    // Free all the big tensors
     data_input = torch::Tensor();
     var_offset = torch::Tensor();
     var_scale = torch::Tensor();
 
-    // Clear vectors
     filtered_blocks.clear();
     filtered_blocks.shrink_to_fit();
 

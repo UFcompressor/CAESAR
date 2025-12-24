@@ -43,7 +43,7 @@ struct CompressionResult {
     CompressionMetaData compressionMetaData;
     GAEMetaData gaeMetaData;
 
-  
+
     // **** //
     int num_samples;
     int num_batches;

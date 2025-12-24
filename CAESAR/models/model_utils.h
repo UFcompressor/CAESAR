@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 fs::path get_model_file(const std::string& filename);
 
 
-double rss_gb(); 
+double rss_gb();
 
 #ifdef USE_CUDA
 double gpu_free_gb();
