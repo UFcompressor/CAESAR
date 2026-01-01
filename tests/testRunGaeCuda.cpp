@@ -169,7 +169,7 @@ void testPCACompressor2() {
         std::cout << "  Mean Element Diff: " << mean_diff << std::endl;
 
         // Clean up
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
         if (torch::cuda::is_available()) {
             c10::cuda::CUDACachingAllocator::emptyCache();
         }

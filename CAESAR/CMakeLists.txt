@@ -4,48 +4,58 @@ find_package(PkgConfig)
 find_package(Torch REQUIRED)
 find_package(OpenMP REQUIRED)
 
+# ZSTD Detection Logic
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
 endif()
 
 if(NOT ZSTD_FOUND)
     find_path(ZSTD_INCLUDE_DIR zstd.h)
-    find_library(ZSTD_LIBRARY NAMES zstd)
+    find_library(ZSTD_LIBRARY NAMES aocl_compression zstd)
+    
     if(ZSTD_INCLUDE_DIR AND ZSTD_LIBRARY)
         set(ZSTD_FOUND TRUE)
         message(STATUS "Found Zstd: ${ZSTD_LIBRARY}")
+        
+        add_library(zstd_target UNKNOWN IMPORTED)
+        set_target_properties(zstd_target PROPERTIES
+            IMPORTED_LOCATION "${ZSTD_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}"
+        )
     else()
-        message(FATAL_ERROR "Zstd library not found. Please install libzstd-dev")
-    endif()
-endif()
-
-set(USE_CUDA OFF)
-
-if(CUDA_FOUND)
-    message(STATUS "CUDA found, checking for nvcomp...")
-
-    find_path(NVCOMP_INCLUDE_DIR
-        NAMES nvcomp.h nvcomp/nvcomp.h
-        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
-        PATH_SUFFIXES include
-    )
-
-    find_library(NVCOMP_LIBRARY
-        NAMES nvcomp
-        HINTS ENV NVCOMP_ROOT ENV NVCOMP_DIR
-        PATH_SUFFIXES lib lib64
-    )
-
-    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
-        set(NVCOMP_FOUND TRUE)
-        message(STATUS "Found nvcomp: ${NVCOMP_LIBRARY}")
-        message(STATUS "nvcomp include dir: ${NVCOMP_INCLUDE_DIR}")
-        set(USE_CUDA ON)
-    else()
-        message(WARNING "CUDA found but nvcomp NOT found → CUDA DISABLED")
+        message(FATAL_ERROR "Zstd library not found. Please install libzstd-dev or set CMAKE_PREFIX_PATH")
     endif()
 else()
-    message(STATUS "CUDA NOT found using CPU ONLY BUILD")
+    message(STATUS "Found Zstd via pkg-config: ${ZSTD_LIBRARIES}")
+    add_library(zstd_target ALIAS PkgConfig::ZSTD)
+endif()
+
+if(TORCH_CUDA_ARCH_LIST OR CUDA_FOUND OR HIP_FOUND)
+    set(USE_CUDA ON)
+    message(STATUS "GPU Support Enabled (Torch/CUDA/HIP detected)")
+    
+    if(HIP_FOUND)
+        message(STATUS ">>> ROCm (HIP) Environment Detected")
+    endif()
+else()
+    set(USE_CUDA OFF)
+    message(STATUS "GPU Support Disabled (Using CPU Only)")
+endif()
+
+set(NVCOMP_FOUND OFF)
+
+if(USE_CUDA)
+    message(STATUS "Checking for nvcomp (NVIDIA specific)...")
+    
+    find_path(NVCOMP_INCLUDE_DIR NAMES nvcomp.h nvcomp/nvcomp.h)
+    find_library(NVCOMP_LIBRARY NAMES nvcomp)
+    
+    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
+        set(NVCOMP_FOUND TRUE)
+        message(STATUS ">>> Found nvcomp: ${NVCOMP_LIBRARY}")
+    else()
+        message(STATUS ">>> nvcomp NOT found. Will use Hybrid Mode (GPU PCA + CPU ZSTD)")
+    endif()
 endif()
 
 set(CAESAR_SRC
@@ -59,23 +69,24 @@ set(CAESAR_SRC
     data_utils.cpp
 )
 
-
-if(USE_CUDA)
-    list(APPEND CAESAR_SRC models/runGaeCuda.cpp)
-endif()
-
 add_library(caesar_lib SHARED ${CAESAR_SRC})
 
 target_compile_definitions(caesar_lib PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
-
 if(USE_CUDA)
     target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
-    message(STATUS "USE_CUDA ENABLED")
-else()
-    message(STATUS "USE_CUDA DISABLED")
+    message(STATUS "Build defined with USE_CUDA")
+    
+    if(HIP_FOUND)
+        target_compile_definitions(caesar_lib PUBLIC USE_ROCM)
+    endif()
+endif()
+
+if(NVCOMP_FOUND)
+    target_compile_definitions(caesar_lib PRIVATE ENABLE_NVCOMP)
+    message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
 target_include_directories(caesar_lib
@@ -87,22 +98,18 @@ target_include_directories(caesar_lib
         $<INSTALL_INTERFACE:include/caesar>
 )
 
-target_link_libraries(caesar_lib PUBLIC torch)
+target_link_libraries(caesar_lib PUBLIC zstd_target torch)
 
 if(USE_CUDA)
-    message(STATUS "Enabling CUDA support (CUDA + nvcomp detected)")
-    target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS} ${NVCOMP_INCLUDE_DIR})
-    target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES} ${NVCOMP_LIBRARY})
-endif()
-
-if(ZSTD_FOUND)
-    if(TARGET PkgConfig::ZSTD)
-        target_link_libraries(caesar_lib PUBLIC PkgConfig::ZSTD)
-    else()
-        target_include_directories(caesar_lib PRIVATE ${ZSTD_INCLUDE_DIR})
-        target_link_libraries(caesar_lib PUBLIC ${ZSTD_LIBRARY})
+    if(CUDA_FOUND)
+        target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS})
+        target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES})
     endif()
-    message(STATUS "Zstd support enabled")
+    
+    if(NVCOMP_FOUND)
+        target_include_directories(caesar_lib PRIVATE ${NVCOMP_INCLUDE_DIR})
+        target_link_libraries(caesar_lib PUBLIC ${NVCOMP_LIBRARY})
+    endif()
 endif()
 
 if(MPI_FOUND)
@@ -113,7 +120,6 @@ endif()
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(caesar_lib PRIVATE OpenMP::OpenMP_CXX)
-    message(STATUS "OpenMP enabled for caesar_lib")
 endif()
 
 target_compile_options(caesar_lib PRIVATE
@@ -124,10 +130,7 @@ target_compile_options(caesar_lib PRIVATE
 
 if(USE_CUDA)
     target_compile_options(caesar_lib PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:
-            -Xptxas -O3
-            --maxrregcount=64
-        >
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -O3 --maxrregcount=64>
     )
 endif()
 

@@ -4,8 +4,13 @@
 #include <cstddef>
 #include <fstream>
 #include <iostream>
+//** JL modified **//
 #ifdef USE_CUDA
-#include <cuda_runtime.h>
+    #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
+        #include <hip/hip_runtime.h>
+    #else
+        #include <cuda_runtime.h>
+    #endif
 #endif
 namespace fs = std::filesystem;
 

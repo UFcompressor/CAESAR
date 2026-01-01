@@ -109,8 +109,13 @@ double rss_gb() {
 #ifdef USE_CUDA
 double gpu_free_gb() {
     size_t free_bytes , total_bytes;
-    cudaMemGetInfo(&free_bytes , &total_bytes);
-    return free_bytes / (1024.0 * 1024 * 1024);
+    #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
+        (void)hipMemGetInfo(&free_bytes, &total_bytes);
+    #else
+        cudaMemGetInfo(&free_bytes, &total_bytes);
+    #endif
+    
+    return (double)free_bytes / (1024.0 * 1024 * 1024);
 }
 #endif
 

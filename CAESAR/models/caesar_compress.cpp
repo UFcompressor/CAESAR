@@ -372,32 +372,45 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor batched_indexes = torch::cat(batch_indexes , 0).to(device_);
 
 
-            std::vector<torch::Tensor> inputs = { batched_input.to(torch::kDouble) };
+            std::vector<torch::Tensor> inputs = { batched_input };
 
             std::vector<torch::Tensor> outputs = compressor_model_->run(inputs);
 
-            torch::Tensor q_latent = outputs[0].to(torch::kInt32);
-            torch::Tensor latent_indexes = outputs[1].to(torch::kInt32);
-            torch::Tensor q_hyper_latent = outputs[2].to(torch::kInt32);
-            torch::Tensor hyper_indexes = outputs[3].to(torch::kInt32);
+            torch::Tensor latent = outputs[0];
+            torch::Tensor q_hyper_latent = outputs[1];
+            torch::Tensor hyper_indexes = outputs[2];
             outputs.clear();
             outputs.shrink_to_fit();
+
+            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
+            torch::Tensor mean = hyper_outputs[0];
+            torch::Tensor latent_indexes_recon = hyper_outputs[1];
+            hyper_outputs.clear();
+            hyper_outputs.shrink_to_fit();
+
+            torch::Tensor q_latent = (latent - mean).to(torch::kInt32);;
+
+            torch::Tensor q_latent_cpu = q_latent.cpu().contiguous();
+            torch::Tensor latent_indexes_cpu = latent_indexes_recon.to(torch::kInt32).cpu().contiguous();
+            torch::Tensor q_hyper_latent_cpu = q_hyper_latent.to(torch::kInt32).cpu().contiguous();
+            torch::Tensor hyper_indexes_cpu = hyper_indexes.to(torch::kInt32).cpu().contiguous();
 
             int64_t num_input_samples = batch_inputs.size();
             int64_t num_latent_codes = q_latent.sizes()[0];
 
             for (int64_t j = 0; j < num_latent_codes; j++) {
+
                 std::vector<int32_t> latent_symbol = tensor_to_vector<int32_t>(
-                    q_latent.select(0 , j).reshape(-1)
+                    q_latent_cpu.select(0 , j).reshape(-1)
                 );
                 std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-                    latent_indexes.select(0 , j).reshape(-1)
+                    latent_indexes_cpu.select(0 , j).reshape(-1)
                 );
                 std::vector<int32_t> hyper_symbol = tensor_to_vector<int32_t>(
-                    q_hyper_latent.select(0 , j).reshape(-1)
+                    q_hyper_latent_cpu.select(0 , j).reshape(-1)
                 );
                 std::vector<int32_t> hyper_index = tensor_to_vector<int32_t>(
-                    hyper_indexes.select(0 , j).reshape(-1)
+                    hyper_indexes_cpu.select(0 , j).reshape(-1)
                 );
 
                 std::string latent_encoded = range_encoder.encode_with_indexes(
@@ -422,14 +435,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             batch_max = 0.0;
             batch_min = 1000000.0;
 
-            std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ q_hyper_latent.to(torch::kDouble) });
-
-
-
-            torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
-            torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
-            hyper_outputs.clear();
-            hyper_outputs.shrink_to_fit();
             torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
             auto decoded_latents_sizes = q_latent_with_offset.sizes();
 
@@ -450,9 +455,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
             torch::Tensor indexes_cpu = batched_indexes.to(torch::kCPU);
 
-
-
-
             for (int64_t i = 0; i < num_input_samples; ++i) {
 
                 torch::Tensor index_row = indexes_cpu.select(0 , i);
@@ -461,7 +463,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
                 int64_t start_t = index_row[2].item<int64_t>();
                 int64_t end_t = index_row[3].item<int64_t>();
 
-                torch::Tensor source_slice_3d = denorm_output.select(0 , i).squeeze(0).cpu();
+                torch::Tensor source_slice_3d = denorm_output.select(0 , i).squeeze(0);
                 torch::Tensor dest_slice = recon_tensor.select(0 , idx0).select(0 , idx1).slice(0 , start_t , end_t);
 
                 dest_slice.copy_(source_slice_3d);
@@ -590,20 +592,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         result.gaeMetaData.pcaBasis = tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
         result.gaeMetaData.uniqueVals = tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
 
-        int64_t pca_rows = result.gaeMetaData.pcaBasis.size();
-        int64_t pca_cols = result.gaeMetaData.pcaBasis[0].size();
-
-        std::vector<float> pca_vec;
-        pca_vec.reserve(pca_rows * pca_cols);
-
-        for (const auto& row_vec : result.gaeMetaData.pcaBasis) {
-            pca_vec.insert(pca_vec.end() , row_vec.begin() , row_vec.end());
-        }
-        torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
-        torch::Tensor pcaBasis = pca_vec_1d.reshape({ pca_rows, pca_cols });
-
-        gae_record_metaData.pcaBasis = pcaBasis.to(device_);
-        gae_record_metaData.uniqueVals = torch::tensor(result.gaeMetaData.uniqueVals).to(device_);
+        gae_record_metaData.pcaBasis = gae_compression_result.metaData.pcaBasis.to(device_);
+        gae_record_metaData.uniqueVals = gae_compression_result.metaData.uniqueVals.to(device_);
         gae_record_metaData.quanBin = result.gaeMetaData.quanBin;
         gae_record_metaData.nVec = result.gaeMetaData.nVec;
         gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
@@ -622,8 +612,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
 
     else {
         std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
-        // 'result.gaeMetaData.pcaBasis' and 'uniqueVals' are already emtpy. Skip record these.
-
     }
 
     if (!result.compressionMetaData.indexes.empty()) {

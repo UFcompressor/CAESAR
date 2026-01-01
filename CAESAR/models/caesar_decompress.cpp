@@ -122,7 +122,6 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data 
     return permuted_data;
 }
 
-
 torch::Tensor Decompressor::decompress(
     const std::vector<std::string>& encoded_latents ,
     const std::vector<std::string>& encoded_hyper_latents ,
@@ -161,17 +160,15 @@ torch::Tensor Decompressor::decompress(
     flat_indexes.clear();
     flat_indexes.shrink_to_fit();
 
-
-
-    if (indexes_tensor.numel() > 0) {  // 判断是否为空
+    if (indexes_tensor.numel() > 0) {
         std::cout << "[DEBUG] indexes_tensor shape: " << indexes_tensor.sizes() << std::endl;
 
-        int64_t rows_to_print = std::min((int64_t)3 , indexes_tensor.size(0)); // 第0维行数
-        int64_t cols = indexes_tensor.size(1);                                // 第1维列数
+        int64_t rows_to_print = std::min((int64_t)3 , indexes_tensor.size(0));
+        int64_t cols = indexes_tensor.size(1);
 
         for (int64_t i = 0; i < rows_to_print; ++i) {
             auto row = indexes_tensor[i];
-            auto row_cpu = row.to(torch::kCPU); // 如果在CUDA上，先拷贝回来
+            auto row_cpu = row.to(torch::kCPU);
             auto acc = row_cpu.accessor<int32_t , 1>();
             for (int64_t j = 0; j < cols; ++j) {
                 std::cout << acc[j] << " ";
@@ -190,13 +187,15 @@ torch::Tensor Decompressor::decompress(
         size_t cur_samples = cur_latents / 2;
         size_t sample_start = lat_start / 2;
 
-
         std::vector<int32_t> hyper_size = { (int32_t)cur_latents, 64, 4, 4 };
-        torch::Tensor hyper_index_tensor = build_indexes_tensor(hyper_size);
+
+        torch::Tensor hyper_index_tensor = build_indexes_tensor(hyper_size).contiguous();
+
         torch::Tensor decoded_hyper_latents = torch::zeros({ (long)cur_latents, 64, 4, 4 }).to(torch::kInt32);
 
         for (size_t i = 0; i < cur_latents; i++) {
             std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(hyper_index_tensor.select(0 , (long)i).reshape(-1));
+
             std::vector<int32_t> hyper_decoded = range_decoder.decode_with_indexes(
                 encoded_hyper_latents[lat_start + i] ,
                 hyper_index_vec ,
@@ -210,11 +209,16 @@ torch::Tensor Decompressor::decompress(
 
         std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run({ decoded_hyper_latents.to(torch::kDouble).to(device_) });
         torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+
         torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
 
+        torch::Tensor latent_indexes_cpu = latent_indexes_recon.cpu().contiguous();
+
         torch::Tensor decoded_latents_before_offset = torch::zeros({ (long)cur_latents, 64, 16, 16 }).to(torch::kInt32);
+
         for (size_t i = 0; i < cur_latents; i++) {
             std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(latent_indexes_recon.select(0 , (long)i).reshape(-1));
+
             std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
                 encoded_latents[lat_start + i] ,
                 latent_index ,
@@ -225,7 +229,6 @@ torch::Tensor Decompressor::decompress(
             torch::Tensor latent_tensor = torch::tensor(latent_decoded).reshape({ 64, 16, 16 });
             decoded_latents_before_offset.select(0 , (long)i).copy_(latent_tensor);
         }
-
 
         torch::Tensor q_latent_with_offset = decoded_latents_before_offset.to(torch::kFloat32).to(device_) + mean;
         auto decoded_latents_sizes = q_latent_with_offset.sizes();
@@ -244,7 +247,6 @@ torch::Tensor Decompressor::decompress(
             .view({ -1, 1, 1, 1, 1 });
         torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
 
-
         torch::Tensor indexes_cpu = indexes_tensor.narrow(0 , (long)sample_start , (long)cur_samples).to(torch::kCPU);
         for (int64_t i = 0; i < (int64_t)cur_samples; ++i) {
             torch::Tensor index_row = indexes_cpu.select(0 , i);
@@ -261,7 +263,6 @@ torch::Tensor Decompressor::decompress(
         result.num_samples += cur_samples;
         result.num_batches++;
     }
-
 
     auto [b1_i32 , b2_i32 , pad_i32] = meta.block_info;
 
