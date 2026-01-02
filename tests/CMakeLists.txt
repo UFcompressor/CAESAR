@@ -39,9 +39,6 @@ endif()
 add_executable(test_dataset testDataSet.cpp)
 target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-add_executable(test_dataset2 testDataSet2.cpp)
-target_link_libraries(test_dataset2 PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB} ${MPI_LIB})
-
 add_executable(test_caesarCD test_caesarCD.cpp)
 target_link_libraries(test_caesarCD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
@@ -83,7 +80,6 @@ endif()
 
 set(TEST_TARGETS
     test_dataset
-    test_dataset2
     test_caesarC
     test_caesarCD
     test_datasetNRMSE

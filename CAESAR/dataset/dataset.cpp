@@ -450,16 +450,8 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
             config.frame_range
         );
     }
-    else if (config.binary_path.has_value()) {
-        data = loadDatasetFromBinary(
-            config.binary_path.value() ,
-            config.variable_idx ,
-            config.section_range ,
-            config.frame_range
-        );
-    }
     else {
-        throw std::runtime_error("No data source provided (memory_data or binary_path required).");
+        throw std::runtime_error("No data provided");
     }
 
 
@@ -556,47 +548,6 @@ torch::Tensor ScientificDataset::loadDatasetInMemory(
     return data.to(torch::kFloat);
 }
 
-// NOTE: this function may be a bit buggy since it is hard to use when reading in binary files since they are just a blob of data it is better to load it in memory and then to use load from memory
-// ------------------- Load from binary -------------------
-torch::Tensor ScientificDataset::loadDatasetFromBinary(
-    const std::string& bin_path ,
-    std::optional<int> variable_idx ,
-    std::optional<std::pair<int , int>> section_range ,
-    std::optional<std::pair<int , int>> frame_range)
-{
-    std::ifstream file(bin_path , std::ios::binary);
-    if (!file.is_open()) throw std::runtime_error("Cannot open binary file: " + bin_path);
-
-    int64_t shape[5];
-    file.read(reinterpret_cast<char*>(shape) , 5 * sizeof(int64_t));
-
-    size_t num_elements = shape[0] * shape[1] * shape[2] * shape[3] * shape[4];
-    std::vector<float> buffer(num_elements);
-    file.read(reinterpret_cast<char*>(buffer.data()) , num_elements * sizeof(float));
-    file.close();
-
-    torch::Tensor data = torch::from_blob(
-        buffer.data() ,
-        { shape[0], shape[1], shape[2], shape[3], shape[4] } ,
-        torch::kFloat32
-    ).clone();
-
-    if (variable_idx.has_value()) {
-        data = data.index({ variable_idx.value() }).unsqueeze(0);
-    }
-
-    if (section_range.has_value()) {
-        auto r = section_range.value();
-        data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
-    }
-
-    if (frame_range.has_value()) {
-        auto r = frame_range.value();
-        data = data.index({ torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(r.first, r.second) });
-    }
-
-    return data;
-}
 
 int64_t ScientificDataset::update_length() {
     dataset_length = shape[0] * shape[1] * t_samples;

@@ -75,29 +75,6 @@ ASSERT_TRUE(item.find("index") != item.end() , "Item has index");
 TEST_PASS();
 }
 
-TEST(binary_loading)
-auto data = create_test_tensor();
-save_binary(data , "test.bin");
-
-DatasetConfig config;
-config.n_frame = 8;
-config.binary_path = "test.bin";
-config.inst_norm = true;
-config.norm_type = "mean_range";
-config.train_mode = true;
-config.train_size = 64; // Match input size
-
-ScientificDataset dataset(config);
-
-ASSERT_TRUE(dataset.size() > 0 , "Dataset created from binary");
-ASSERT_TRUE(dataset.original_data().defined() , "Original data accessible");
-
-auto item = dataset.get_item(0);
-ASSERT_TRUE(item.at("input").defined() , "Sample input defined");
-
-std::remove("test.bin");
-TEST_PASS();
-}
 
 TEST(variable_selection)
 auto data = create_test_tensor(); // [2, 3, 24, 64, 64]
@@ -428,7 +405,6 @@ int main() {
 
     try {
         test_memory_loading();
-        test_binary_loading();
         test_variable_selection();
         test_section_range_selection();
         test_frame_range_selection();

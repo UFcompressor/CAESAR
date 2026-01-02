@@ -45,7 +45,6 @@ std::unordered_map<std::string , int> get_augment_type_arg(
 // Configuration struct to hold all dataset parameters
 struct DatasetConfig {
     // Data source - only one should be provided
-    std::optional<std::string> binary_path;      // Path to binary file
     std::optional<torch::Tensor> memory_data;    // Pre-loaded tensor data
 
     // Required parameters
@@ -169,13 +168,6 @@ private:
         std::optional<std::pair<int , int>> frame_range = std::nullopt
     );
 
-    // Load from binary file
-    torch::Tensor loadDatasetFromBinary(
-        const std::string& bin_path ,
-        std::optional<int> variable_idx = std::nullopt ,
-        std::optional<std::pair<int , int>> section_range = std::nullopt ,
-        std::optional<std::pair<int , int>> frame_range = std::nullopt
-    );
 
     int64_t update_length();
 
