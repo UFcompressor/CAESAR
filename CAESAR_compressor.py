@@ -388,6 +388,7 @@ model = CompressorMix(
 
 state_dict = remove_module_prefix(torch.load('./pretrained/caesar_v.pt', map_location=device))
 model.load_state_dict(state_dict)
+model = model.half()
 
 quantized_cdf, cdf_length, offset = model.entropy_model.prior._update(30)
 medians = model.entropy_model.prior.medians.detach()
@@ -414,7 +415,7 @@ model.eval()
 with torch.no_grad():
     print('device: ', device)
     model = model.to(device)
-    example_inputs=(torch.randn(8, 1, 8, 256, 256, device=device),)
+    example_inputs=(torch.randn(8, 1, 8, 256, 256, device=device).half(),)
     batch_dim = torch.export.Dim("batch", min=1, max=255)
     # [Optional] Specify the first dimension of the input x as dynamic.
     exported = torch.export.export(model, example_inputs, dynamic_shapes={"x": {0: batch_dim}})
