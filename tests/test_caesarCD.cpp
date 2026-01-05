@@ -171,7 +171,7 @@ int main() {
 
         std::filesystem::create_directories(out_dir);
 
-        const int batch_size = 128;
+        const int batch_size = 64;
         const int n_frame = 8;
         torch::Tensor raw = loadRawBinary(raw_path , shape);
 
@@ -203,6 +203,7 @@ int main() {
 
         DatasetConfig config;
         config.memory_data = raw_5d;
+        config.device = torch::Device(torch::kCPU);
         config.variable_idx = 0;
         config.n_frame = n_frame;
         config.dataset_name = "TCf48 Dataset";
@@ -216,7 +217,7 @@ int main() {
         config.test_size = { 256, 256 };
         config.augment_type = {};
 
-        float rel_eb = 0.001f;
+        float rel_eb = 0.1f;
         auto start_timeC = std::chrono::high_resolution_clock::now();
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
         auto end_timeC = std::chrono::high_resolution_clock::now();
