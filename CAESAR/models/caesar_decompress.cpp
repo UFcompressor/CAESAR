@@ -236,7 +236,7 @@ torch::Tensor Decompressor::decompress(
         new_shape.insert(new_shape.end() , decoded_latents_sizes.begin() + 1 , decoded_latents_sizes.end());
         torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
 
-        std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
+        std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents.to(torch::kFloat32) });
         torch::Tensor raw_output = decompressor_outputs[0];
 
         torch::Tensor norm_output = reshape_batch_2d_3d(raw_output , (long)cur_samples , n_frame);
