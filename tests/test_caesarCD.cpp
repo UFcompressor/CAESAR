@@ -221,8 +221,9 @@ int main() {
         auto start_timeC = std::chrono::high_resolution_clock::now();
         CompressionResult comp = compressor.compress(config , batch_size , rel_eb);
         auto end_timeC = std::chrono::high_resolution_clock::now();
-        auto durationC = std::chrono::duration_cast<std::chrono::seconds>(end_timeC - start_timeC);
-        std::cout << "\nTime taken for compression is: " << durationC.count() << " seconds" << std::endl;
+        auto durationC = std::chrono::duration_cast<std::chrono::milliseconds>(end_timeC - start_timeC);
+        std::chrono::duration<double> secondsC = std::chrono::duration_cast<std::chrono::duration<double>>(durationC);
+        std::cout << "\nTime taken for compression is: " << secondsC.count() << " s " << std::endl;
 
         std::string latents_file = out_dir + "encoded_latents.bin";
         std::string hyper_file = out_dir + "encoded_hyper_latents.bin";
@@ -303,8 +304,9 @@ int main() {
             comp
         );
         auto end_timeD = std::chrono::high_resolution_clock::now();
-        auto durationD = std::chrono::duration_cast<std::chrono::seconds>(end_timeD - start_timeD);
-        std::cout << "\nTime taken for decompression is: " << durationD.count() << " seconds" << std::endl;
+        auto durationD = std::chrono::duration_cast<std::chrono::milliseconds>(end_timeD - start_timeD);
+                std::chrono::duration<double> secondsD = std::chrono::duration_cast<std::chrono::duration<double>>(durationD);
+        std::cout << "\nTime taken for decompression is: " << secondsD.count() << " s " << std::endl;
         if (!recon.defined() || recon.numel() == 0) {
             std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
             return 1;
