@@ -1,11 +1,3 @@
-find_package(MPI)
-if(MPI_FOUND)
-    message(STATUS "MPI found, enabling MPI tests")
-    set(MPI_LIB MPI::MPI_CXX)
-else()
-    message(STATUS "MPI not found, skipping MPI linking")
-    set(MPI_LIB "")
-endif()
 
 if(APPLE)
     set(FILESYSTEM_LIB "")

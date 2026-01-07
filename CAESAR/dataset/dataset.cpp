@@ -1,5 +1,4 @@
 #include "dataset.h"
-#include <omp.h>
 
 
 torch::Tensor centerCrop(const torch::Tensor& x, std::pair<int64_t, int64_t> tShape) {

@@ -1,8 +1,6 @@
-find_package(MPI)
 find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
-find_package(OpenMP REQUIRED)
 
 # ZSTD Detection Logic
 if(PkgConfig_FOUND)
@@ -112,16 +110,6 @@ if(USE_CUDA)
     endif()
 endif()
 
-if(MPI_FOUND)
-    target_include_directories(caesar_lib PRIVATE ${MPI_INCLUDE_PATH})
-    target_link_libraries(caesar_lib PUBLIC MPI::MPI_CXX)
-    target_compile_definitions(caesar_lib PUBLIC USE_MPI)
-endif()
-
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(caesar_lib PRIVATE OpenMP::OpenMP_CXX)
-endif()
-
 target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -march=native -mtune=native -fprefetch-loop-arrays>
@@ -130,7 +118,11 @@ target_compile_options(caesar_lib PRIVATE
 
 if(USE_CUDA)
     target_compile_options(caesar_lib PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -O3 --maxrregcount=64>
+        $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>
+    )
+
+    target_compile_options(caesar_lib PRIVATE
+        $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -O3 --maxrregcount=64>
     )
 endif()
 
