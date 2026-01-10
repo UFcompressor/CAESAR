@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 //** JL modified **//
 #ifdef USE_CUDA
     #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -34,3 +35,7 @@ double rss_gb();
 #ifdef USE_CUDA
 double gpu_free_gb();
 #endif
+
+std::chrono::high_resolution_clock::time_point get_start_time();
+std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_point start);
+

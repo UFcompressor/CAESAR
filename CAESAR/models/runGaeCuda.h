@@ -123,6 +123,7 @@ public:
     MainData decompressLossless(
         const MetaData& metaData ,
         const CompressedData& compressedData);
+    
 private:
     double quanBin_;
     torch::Device device_;
@@ -131,15 +132,10 @@ private:
     int vectorSize_;
     double errorBound_;
     double error_;
-
     torch::Tensor toCPUContiguous(const torch::Tensor& tensor);
     std::vector<uint8_t> serializeTensor(const torch::Tensor& tensor);
-
-
     torch::Tensor deserializeTensor(const std::vector<uint8_t>& bytes ,
         const std::vector<int64_t>& shape ,
         torch::ScalarType dtype);
-#ifdef USE_CUDA
     void cleanupGPUMemory();
-#endif
 };

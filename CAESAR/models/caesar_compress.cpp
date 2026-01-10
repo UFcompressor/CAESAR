@@ -252,6 +252,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
     ScientificDataset dataset(config);
     std::cout << "[MEM] dataset loaded " << rss_gb() << " GiB\n";
 
+    auto start_inf = get_start_time();
     CompressionResult result;
     result.num_samples = 0;
     result.num_batches = 0;
@@ -549,7 +550,11 @@ hyper_outputs.shrink_to_fit();
     double quan_factor = 2.0;
     std::string codec_alg = "Zstd";
     std::pair<int , int> patch_size = { 8, 8 };
+    
+    auto inf_time = get_time(start_inf);
+    std::cout << "Inference time: " << inf_time.count() << " s\n";
 
+    auto start_GAE = get_start_time();
     PCACompressor pca_compressor(rel_eb ,
         quan_factor ,
         device_.is_cuda() ? "cuda" : "cpu" ,
@@ -600,6 +605,8 @@ hyper_outputs.shrink_to_fit();
     if (!result.compressionMetaData.indexes.empty()) {
         std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)
     }
+    auto GAE_time = get_time(start_GAE);
+    std::cout << "GAE time: " << GAE_time.count() << " s\n";
 
     return result;
 }

@@ -122,9 +122,10 @@ if(USE_CUDA)
     )
 
     target_compile_options(caesar_lib PRIVATE
-        $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -O3 --maxrregcount=64>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -O3 --maxrregcount=64>
     )
 endif()
+
 
 set_target_properties(caesar_lib PROPERTIES
     VERSION 1.0.0

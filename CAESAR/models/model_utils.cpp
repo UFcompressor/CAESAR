@@ -119,3 +119,15 @@ double gpu_free_gb() {
 }
 #endif
 
+
+std::chrono::high_resolution_clock::time_point get_start_time()
+{
+    return std::chrono::high_resolution_clock::now();
+}
+
+std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_point start)
+{
+    auto end = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+}
+

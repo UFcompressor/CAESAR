@@ -51,6 +51,7 @@ PCA& PCA::fit(const torch::Tensor& x) {
     return *this;
 }
 
+
 torch::Tensor block2Vector(const torch::Tensor& blockData , std::pair<int , int> patchSize) {
     int patchH = patchSize.first;
     int patchW = patchSize.second;
@@ -271,6 +272,7 @@ PCACompressor::~PCACompressor() {
 #endif
 }
 
+
 GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     const torch::Tensor& reconsData) {
 
@@ -377,6 +379,9 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
         pca.fit(residualPca);
         pcaBasis = pca.components();
         allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
+        
+        pcaBasis = pcaBasis.to(torch::kFloat32);
+        allCoeff = allCoeff.to(torch::kFloat32);
     }
 
     originalDataDevice = torch::Tensor();
@@ -443,7 +448,6 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     );
     allCoeff = torch::Tensor();
 
-    // Process unique values in chunks
     std::vector<at::Tensor> inverse_parts;
     std::vector<at::Tensor> unique_parts;
     int64_t chunk_size = 1LL << 30;
@@ -507,7 +511,7 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     MetaData metaData;
     metaData.GAE_correction_occur = true;
-    metaData.pcaBasis = pcaBasis.to(device_);
+    metaData.pcaBasis = pcaBasis.to(torch::kFloat32).to(device_);
     metaData.uniqueVals = uniqueVals.to(device_);
     metaData.quanBin = quanBin_;
     metaData.nVec = mainData.processMask.size(0);
@@ -550,13 +554,13 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
     torch::Tensor coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
 
     torch::Tensor coeff = torch::zeros(indexMask.sizes() ,
-        torch::TensorOptions().dtype(metaData.pcaBasis.dtype()).device(device_));
+        torch::TensorOptions().dtype(torch::kFloat32).device(device_));
 
     coeff.masked_scatter_(indexMask , coeffInt * metaData.quanBin);
     coeffInt = torch::Tensor();
     indexMask = torch::Tensor();
 
-    torch::Tensor pcaReconstruction = torch::matmul(coeff , metaData.pcaBasis);
+    torch::Tensor pcaReconstruction = torch::matmul(coeff , metaData.pcaBasis.to(torch::kFloat32));
     coeff = torch::Tensor();
 
     reconsDevice.index_put_({ mainData.processMask } ,
@@ -573,6 +577,7 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
 std::pair<std::unique_ptr<CompressedData> , int64_t>
 PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainData)
 {
+    auto start = get_start_time();
     auto compressedData = std::make_unique<CompressedData>();
     int64_t totalBytes = 0;
 
@@ -845,12 +850,16 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
     totalBytes = compressedData->data.size();
     compressedData->dataBytes = totalBytes;
 
+    auto end = get_time(start);
+    std::cout << "Time spent in comrpesslossess: " << end.count() << " s\n";
+
     return { std::move(compressedData), totalBytes };
 }
 
 MainData PCACompressor::decompressLossless(
     const MetaData& metaData , const CompressedData& compressedData)
 {
+    auto start = get_start_time(); 
     MainData mainData;
     size_t offset = 0;
 
@@ -1036,6 +1045,8 @@ MainData PCACompressor::decompressLossless(
                 }
 
                 cudaStreamDestroy(stream);
+                auto end = get_time(start);
+                std::cout << "End of decomrpesslosssess: " << end.count() << " s\n";
                 return output;
             }
 
@@ -1244,9 +1255,8 @@ torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes
     return tensor;
 }
 
-//** JL modified **/
-#ifdef USE_CUDA
 void PCACompressor::cleanupGPUMemory() {
+#ifdef USE_CUDA
     if (device_.is_cuda()) {
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
         c10::hip::HIPCachingAllocator::emptyCache();
@@ -1254,5 +1264,5 @@ void PCACompressor::cleanupGPUMemory() {
         c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
     }
-}
 #endif
+}
