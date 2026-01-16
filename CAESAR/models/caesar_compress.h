@@ -4,6 +4,8 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <vector>
 #include <string>
+#include "model_cache.h"
+#include "array_utils.h"
 #include "../dataset/dataset.h"
 
 
@@ -55,26 +57,25 @@ public:
     ~Compressor() = default;
 
     CompressionResult compress(const DatasetConfig& config , int batch_size = 32 , float rel_eb = 0.1);
-
 private:
     torch::Device device_;
-    std::unique_ptr<torch::inductor::AOTIModelPackageLoader> compressor_model_;
-    // ** JL modified ** //
-    std::unique_ptr<torch::inductor::AOTIModelPackageLoader> hyper_decompressor_model_;
-    std::unique_ptr<torch::inductor::AOTIModelPackageLoader> decompressor_model_;
-
-    torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data , int64_t batch_size);
-    torch::Tensor deblockHW(const torch::Tensor& data , int64_t nH , int64_t nW , const std::vector<int64_t>& padding);
-    torch::Tensor recons_data(const torch::Tensor& recons_data , std::vector<int32_t> shape , int64_t pad_T) const;
-    // **** //
-
+    
+ 
+    torch::inductor::AOTIModelPackageLoader* compressor_model_;
+    torch::inductor::AOTIModelPackageLoader* hyper_decompressor_model_;
+    torch::inductor::AOTIModelPackageLoader* decompressor_model_;
+    
+    torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data, int64_t batch_size);
+    torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW, const std::vector<int64_t>& padding);
+    torch::Tensor recons_data(const torch::Tensor& recons_data, std::vector<int32_t> shape, int64_t pad_T) const;
+    
     void load_models();
     void load_probability_tables();
+    
 
     std::vector<std::vector<int32_t>> vbr_quantized_cdf_;
     std::vector<int32_t> vbr_cdf_length_;
     std::vector<int32_t> vbr_offset_;
-
     std::vector<std::vector<int32_t>> gs_quantized_cdf_;
     std::vector<int32_t> gs_cdf_length_;
     std::vector<int32_t> gs_offset_;

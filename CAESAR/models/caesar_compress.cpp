@@ -7,43 +7,6 @@
 #include <cmath>
 #include <limits>
 
-template<typename T>
-std::vector<T> load_array_from_bin(const std::string& filename) {
-    std::ifstream input_file(filename , std::ios::binary);
-    if (!input_file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filename);
-    }
-
-    input_file.seekg(0 , std::ios::end);
-    size_t file_size_in_bytes = input_file.tellg();
-    input_file.seekg(0 , std::ios::beg);
-
-    size_t num_elements = file_size_in_bytes / sizeof(T);
-    std::vector<T> loaded_data(num_elements);
-
-    input_file.read(reinterpret_cast<char*>(loaded_data.data()) , file_size_in_bytes);
-    input_file.close();
-
-    return loaded_data;
-}
-
-template<typename T>
-std::vector<std::vector<T>> reshape_to_2d(const std::vector<T>& flat_vec , size_t rows , size_t cols) {
-    if (flat_vec.size() != rows * cols) {
-        throw std::invalid_argument("Invalid dimensions for reshape.");
-    }
-
-    std::vector<std::vector<T>> vec_2d;
-    vec_2d.reserve(rows);
-    auto it = flat_vec.begin();
-
-    for (size_t r = 0; r < rows; ++r) {
-        vec_2d.emplace_back(it , it + cols);
-        it += cols;
-    }
-
-    return vec_2d;
-}
 
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
@@ -219,27 +182,18 @@ Compressor::Compressor(torch::Device device) : device_(device) {
 }
 
 void Compressor::load_models() {
-    compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        get_model_file("caesar_compressor.pt2").string()
-    );
-    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        get_model_file("caesar_hyper_decompressor.pt2").string()
-    );
-    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        get_model_file("caesar_decompressor.pt2").string()
-    );
+    compressor_model_ = ModelCache::instance().get_compressor_model();
+    hyper_decompressor_model_ = ModelCache::instance().get_hyper_decompressor_model();
+    decompressor_model_ = ModelCache::instance().get_decompressor_model();
 }
 
 void Compressor::load_probability_tables() {
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("vbr_quantized_cdf.bin"));
-    vbr_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("vbr_cdf_length.bin"));
-    vbr_offset_ = load_array_from_bin<int32_t>(get_model_file("vbr_offset.bin"));
-    vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
-
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("gs_quantized_cdf.bin"));
-    gs_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("gs_cdf_length.bin"));
-    gs_offset_ = load_array_from_bin<int32_t>(get_model_file("gs_offset.bin"));
-    gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
+    vbr_quantized_cdf_ = ModelCache::instance().get_vbr_quantized_cdf();
+    vbr_cdf_length_ = ModelCache::instance().get_vbr_cdf_length();
+    vbr_offset_ = ModelCache::instance().get_vbr_offset();
+    gs_quantized_cdf_ = ModelCache::instance().get_gs_quantized_cdf();
+    gs_cdf_length_ = ModelCache::instance().get_gs_cdf_length();
+    gs_offset_ = ModelCache::instance().get_gs_offset();
 }
 
 CompressionResult Compressor::compress(const DatasetConfig& config , int batch_size , float rel_eb) {

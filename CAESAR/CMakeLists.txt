@@ -112,7 +112,7 @@ endif()
 
 target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -march=native -mtune=native -fprefetch-loop-arrays>
+    $<$<CONFIG:Release>:-O3  -mtune=native -fprefetch-loop-arrays>
     $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
 )
 

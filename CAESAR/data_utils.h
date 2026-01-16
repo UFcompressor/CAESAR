@@ -28,7 +28,7 @@ struct PaddingInfo {
  * @return std::pair containing the padded 5D tensor and PaddingInfo metadata
  */
 std::pair<torch::Tensor, PaddingInfo> to_5d_and_pad(
-    const torch::Tensor& arr,
+    torch::Tensor& arr,
     int64_t H = 256,
     int64_t W = 256,
     bool force_padding = false
@@ -42,6 +42,6 @@ std::pair<torch::Tensor, PaddingInfo> to_5d_and_pad(
  * @return Restored tensor with original shape and size
  */
 torch::Tensor restore_from_5d(
-    const torch::Tensor& padded_5d,
+    torch::Tensor& padded_5d,
     const PaddingInfo& info
 );

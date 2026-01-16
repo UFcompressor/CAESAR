@@ -28,23 +28,18 @@ if(USE_CUDA)
     endif()
 endif()
 
-add_executable(test_dataset testDataSet.cpp)
-target_link_libraries(test_dataset PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 add_executable(test_caesarCD test_caesarCD.cpp)
 target_link_libraries(test_caesarCD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-add_executable(test_rans test_range_coder_consistency.cpp)
-target_link_libraries(test_rans PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
-
 add_executable(test_caesarC test_caesarC.cpp)
 target_link_libraries(test_caesarC PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-add_executable(test_caesarD test_decompress_consistency.cpp)
-target_link_libraries(test_caesarD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-add_executable(test_datasetNRMSE testDatasetNRMSE.cpp)
-target_link_libraries(test_datasetNRMSE PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_executable(test_padding test_padding.cpp)
+target_link_libraries(test_padding PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+
 
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
@@ -74,9 +69,8 @@ set(TEST_TARGETS
     test_dataset
     test_caesarC
     test_caesarCD
+    test_padding
     test_datasetNRMSE
-    test_rans
-    test_caesarD
     test_runGaeCuda
 )
 

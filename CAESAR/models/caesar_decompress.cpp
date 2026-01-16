@@ -8,6 +8,8 @@
 #include <limits>
 #include "caesar_compress.h"
 #include "model_utils.h"
+#include "model_cache.h"
+#include "array_utils.h"
 
 torch::Tensor deblockHW(const torch::Tensor& data ,
     int64_t nH ,
@@ -31,33 +33,6 @@ torch::Tensor recons_data(const torch::Tensor& recons_data ,
         });
 }
 torch::Tensor unpadding(const torch::Tensor& padded_data , const std::vector<int>& padding);
-
-template<typename T>
-std::vector<T> load_array_from_bin(const std::string& filename) {
-    std::ifstream input_file(filename , std::ios::binary);
-    if (!input_file.is_open()) throw std::runtime_error("Cannot open file: " + filename);
-    input_file.seekg(0 , std::ios::end);
-    size_t file_size_in_bytes = input_file.tellg();
-    input_file.seekg(0 , std::ios::beg);
-    size_t num_elements = file_size_in_bytes / sizeof(T);
-    std::vector<T> loaded_data(num_elements);
-    input_file.read(reinterpret_cast<char*>(loaded_data.data()) , file_size_in_bytes);
-    input_file.close();
-    return loaded_data;
-}
-
-template<typename T>
-std::vector<std::vector<T>> reshape_to_2d(const std::vector<T>& flat_vec , size_t rows , size_t cols) {
-    if (flat_vec.size() != rows * cols) throw std::invalid_argument("Invalid dimensions for reshape.");
-    std::vector<std::vector<T>> vec_2d;
-    vec_2d.reserve(rows);
-    auto it = flat_vec.begin();
-    for (size_t r = 0; r < rows; ++r) {
-        vec_2d.emplace_back(it , it + cols);
-        it += cols;
-    }
-    return vec_2d;
-}
 
 template<typename T>
 std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
@@ -86,30 +61,17 @@ Decompressor::Decompressor(torch::Device device) : device_(device) {
 }
 
 void Decompressor::load_models() {
-
-    std::string hyper_decompressor_path;
-    std::string decompressor_path;
-    std::cout << "Loading decompressor models..." << std::endl;
-    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        get_model_file("caesar_hyper_decompressor.pt2").string()
-    );
-    decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-        get_model_file("caesar_decompressor.pt2").string()
-    );
+    hyper_decompressor_model_ = ModelCache::instance().get_hyper_decompressor_model();
+    decompressor_model_ = ModelCache::instance().get_decompressor_model();
 }
 
 void Decompressor::load_probability_tables() {
-
-    auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("vbr_quantized_cdf.bin"));
-    vbr_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("vbr_cdf_length.bin"));
-    vbr_offset_ = load_array_from_bin<int32_t>(get_model_file("vbr_offset.bin"));
-    vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d , 64 , 63);
-
-    auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>(get_model_file("gs_quantized_cdf.bin"));
-    gs_cdf_length_ = load_array_from_bin<int32_t>(get_model_file("gs_cdf_length.bin"));
-    gs_offset_ = load_array_from_bin<int32_t>(get_model_file("gs_offset.bin"));
-    gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d , 128 , 249);
-
+    vbr_quantized_cdf_ = ModelCache::instance().get_vbr_quantized_cdf();
+    vbr_cdf_length_ = ModelCache::instance().get_vbr_cdf_length();
+    vbr_offset_ = ModelCache::instance().get_vbr_offset();
+    gs_quantized_cdf_ = ModelCache::instance().get_gs_quantized_cdf();
+    gs_cdf_length_ = ModelCache::instance().get_gs_cdf_length();
+    gs_offset_ = ModelCache::instance().get_gs_offset();
 }
 
 torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data , int64_t batch_size , int64_t n_frame) {
@@ -178,7 +140,9 @@ torch::Tensor Decompressor::decompress(
     }
     std::vector<int64_t> input_shape(meta.data_input_shape.begin() , meta.data_input_shape.end());
     torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
-    std::cout << "\nrecon_tensor shape: " << recon_tensor.sizes() << std::endl;
+    input_shape.clear();
+    input_shape.shrink_to_fit();
+
 
     for (size_t lat_start = 0; lat_start < encoded_latents.size(); lat_start += (size_t)batch_size * 2) {
         size_t lat_end = std::min(lat_start + (size_t)batch_size * 2 , encoded_latents.size());
@@ -264,15 +228,17 @@ torch::Tensor Decompressor::decompress(
         result.num_batches++;
     }
 
+    offsets_tensor = torch::Tensor();
+    scales_tensor = torch::Tensor();
+    indexes_tensor = torch::Tensor();
+
+
     auto [b1_i32 , b2_i32 , pad_i32] = meta.block_info;
 
     int64_t block_info_1 = b1_i32;
     int64_t block_info_2 = b2_i32;
     std::vector<int64_t> block_info_3(pad_i32.begin() , pad_i32.end());
 
-    for (auto v : block_info_3)
-        std::cout << v << " ";
-    std::cout << std::endl;
 
     torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor , block_info_1 , block_info_2 , block_info_3);
     recon_tensor = torch::Tensor();
@@ -282,10 +248,12 @@ torch::Tensor Decompressor::decompress(
         recon_tensor_deblock = torch::Tensor();
         torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
         std::vector<int> padding_recon_info = std::get<1>(padding_recon);
+        padding_recon = {};
 
         float global_scale = meta.global_scale;
         float global_offset = meta.global_offset;
         torch::Tensor padded_recon_tensor_norm = (padded_recon_tensor - global_offset) / global_scale;
+        padded_recon_tensor = torch::Tensor();
         double quan_factor = 2.0;
 
         std::string codec_alg = "Zstd";
@@ -326,8 +294,11 @@ torch::Tensor Decompressor::decompress(
         torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
             gae_record_metaData ,
             gae_record_compressedData);
+        padded_recon_tensor = torch::Tensor();
 
         torch::Tensor recons_gae_unpadded = unpadding(recons_gae , comp_result.gaeMetaData.padding_recon_info);
+        padding_recon_info.clear();
+        padding_recon_info.shrink_to_fit();
         torch::Tensor final_recon_norm = recons_data(recons_gae_unpadded , meta.data_input_shape , meta.pad_T);
         torch::Tensor final_recon = final_recon_norm * meta.global_scale + meta.global_offset;
         return final_recon;

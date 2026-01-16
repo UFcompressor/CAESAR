@@ -10,6 +10,7 @@
 #include "../CAESAR/models/caesar_decompress.h"
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/data_utils.h"
+#include "../CAESAR/models/array_utils.h"
 #include <chrono>
 
 bool save_encoded_streams(const std::vector<std::string>& streams , const std::string& filename) {
