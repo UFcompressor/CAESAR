@@ -33,24 +33,66 @@ PCA::PCA(int numComponents , const std::string& device)
 
 PCA& PCA::fit(const torch::Tensor& x) {
     auto xDevice = x.to(device_);
-    mean_ = torch::mean(xDevice , 0);
+    const auto N = xDevice.size(0);
+    const auto D = xDevice.size(1);
+
+    mean_ = torch::mean(xDevice, 0);
+
+    if (N < 2) {
+        auto eye = torch::eye(
+            D,
+            torch::TensorOptions().dtype(x.dtype()).device(device_)
+        );
+
+        if (numComponents_ > 0) {
+            components_ = eye.slice(0, 0, numComponents_);
+        } else {
+            components_ = eye;
+        }
+
+        return *this;
+    }
+
     auto xCentered = xDevice - mean_;
 
-    auto C = torch::matmul(xCentered.transpose(0 , 1) , xCentered) / (xCentered.size(0) - 1);
+    auto C = torch::matmul(xCentered.transpose(0, 1), xCentered) / (N - 1);
 
-    auto eigen = torch::linalg_eigh(C);
-    auto evals = std::get<0>(eigen);
-    auto evecs = std::get<1>(eigen);
-    auto idx = torch::argsort(evals , 0 , true);
-    auto Vt = torch::index_select(evecs , 1 , idx).transpose(0 , 1);
+    C = 0.5 * (C + C.transpose(0, 1));
+    auto trace = torch::trace(C);
+    auto eps = 1e-6 * trace / D;
+    C = C + eps * torch::eye(
+        D,
+        torch::TensorOptions().dtype(C.dtype()).device(C.device())
+    );
+
+    torch::Tensor evals, evecs;
+    try {
+        auto eigen = torch::linalg_eigh(C);
+        evals = std::get<0>(eigen);
+        evecs = std::get<1>(eigen);
+    }
+    catch (const c10::Error&) {
+        auto svd = torch::linalg_svd(xCentered, false);
+        auto Vh = std::get<2>(svd);
+
+        if (numComponents_ > 0) {
+            components_ = Vh.slice(0, 0, numComponents_);
+        } else {
+            components_ = Vh;
+        }
+        return *this;
+    }
+
+    auto idx = torch::argsort(evals, 0, true);
+    auto Vt = torch::index_select(evecs, 1, idx).transpose(0, 1);
 
     if (numComponents_ > 0) {
-        Vt = Vt.slice(0 , 0 , numComponents_);
+        Vt = Vt.slice(0, 0, numComponents_);
     }
+
     components_ = Vt;
     return *this;
 }
-
 
 torch::Tensor block2Vector(const torch::Tensor& blockData , std::pair<int , int> patchSize) {
     int patchH = patchSize.first;
