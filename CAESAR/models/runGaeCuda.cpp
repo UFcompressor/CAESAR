@@ -316,7 +316,7 @@ PCACompressor::~PCACompressor() {
 
 
 GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
-    const torch::Tensor& reconsData) {
+    const torch::Tensor& reconsData, const torch::Tensor& externalBasis) {
 
     auto inputShape = originalData.sizes();
 
@@ -382,29 +382,10 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     residualPca = torch::index_select(residualPca , 0 , indices);
     indices = torch::Tensor();
 
-    PCA pca(-1 , device_.str());
-    pca.fit(residualPca);
-    torch::Tensor pcaBasis = pca.components();
-    std::cout << "finished pca\n";
-
-    if (pcaBasis.size(0) == 0 || pcaBasis.size(1) == 0) {
-        MetaData metaData;
-        metaData.GAE_correction_occur = false;
-        metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
-        metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
-        metaData.quanBin = quanBin_;
-        metaData.nVec = originalData.size(0);
-        metaData.prefixLength = 0;
-        metaData.dataBytes = 0;
-
-        auto compressedData = std::make_unique<CompressedData>();
-        compressedData->data.clear();
-        compressedData->dataBytes = 0;
-        compressedData->coeffIntBytes = 0;
-
-        return { metaData, std::move(compressedData), 0 };
-    }
-
+    torch::Tensor pcaBasis = externalBasis;   // 或成员变量 basis_
+    TORCH_CHECK(pcaBasis.defined(), "externalBasis is not defined");
+    pcaBasis = pcaBasis.to(device_, true).to(torch::kFloat32).contiguous();
+    
     torch::Tensor allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
     torch::Tensor reconstructedResidual = torch::matmul(allCoeff , pcaBasis);
     torch::Tensor reconError = torch::abs(reconstructedResidual - residualPca);
@@ -413,18 +394,18 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     reconstructedResidual = torch::Tensor();
     reconError = torch::Tensor();
 
-    if (reconErrorMax > error_) {
-        std::cout << "[WARN] High PCA reconstruction error (" << reconErrorMax
-            << ") > " << error_ << " — switching to float64" << std::endl;
+//     if (reconErrorMax > error_) {
+//         std::cout << "[WARN] High PCA reconstruction error (" << reconErrorMax
+//             << ") > " << error_ << " — switching to float64" << std::endl;
 
-        residualPca = residualPca.to(torch::kDouble);
-        pca.fit(residualPca);
-        pcaBasis = pca.components();
-        allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
+//         residualPca = residualPca.to(torch::kDouble);
+//         pca.fit(residualPca);
+//         pcaBasis = pca.components();
+//         allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
         
-        pcaBasis = pcaBasis.to(torch::kFloat32);
-        allCoeff = allCoeff.to(torch::kFloat32);
-    }
+//         pcaBasis = pcaBasis.to(torch::kFloat32);
+//         allCoeff = allCoeff.to(torch::kFloat32);
+//     }
 
     originalDataDevice = torch::Tensor();
     reconsDataDevice = torch::Tensor();

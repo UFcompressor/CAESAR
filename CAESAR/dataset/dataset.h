@@ -61,7 +61,7 @@ class BaseDataset {
 public:
     explicit BaseDataset(const DatasetConfig& config);
     virtual ~BaseDataset() = default;
-
+    
     torch::Tensor apply_augments(torch::Tensor data);
     torch::Tensor apply_padding_or_crop(torch::Tensor data);
     torch::Tensor apply_inst_norm(torch::Tensor data, bool return_norm = false);
@@ -112,6 +112,7 @@ public:
     const std::vector<std::pair<int, float>>& get_filtered_blocks() const;
     const int64_t& get_pad_T() const;
     const std::vector<int64_t>& get_shape_info() const;
+    torch::Tensor raw_data() const;
 
 private:
     std::vector<int64_t> shape_org;
@@ -121,7 +122,8 @@ private:
     int64_t pad_T;
     int64_t dataset_length;
     int64_t visible_length;
-
+    DatasetConfig config_;
+    
     torch::Tensor data_input;
     torch::ScalarType dtype;
 
@@ -139,7 +141,7 @@ private:
         std::optional<int> variable_idx = std::nullopt,
         std::optional<std::pair<int, int>> section_range = std::nullopt,
         std::optional<std::pair<int, int>> frame_range = std::nullopt
-    );
+    )const;
 
     int64_t update_length();
     std::unordered_map<std::string, torch::Tensor> post_processing(

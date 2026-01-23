@@ -409,7 +409,7 @@ torch::Tensor BaseDataset::apply_downsampling(torch::Tensor data, int step) {
 
 
 ScientificDataset::ScientificDataset(const DatasetConfig& config)
-    : BaseDataset(config)
+    : BaseDataset(config), config_(config)
 {
     std::cout << "*************** Loading dataset ***************\n";
     std::cout << "Device: " << device_ << "\n";
@@ -427,8 +427,9 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
         throw std::runtime_error("No data provided");
     }
 
-    data = data.to(device_);
 
+    data = data.to(device_);
+        
     auto sizes = data.sizes();
     shape_org = std::vector<int64_t>(sizes.begin(), sizes.end());
 
@@ -503,7 +504,7 @@ torch::Tensor ScientificDataset::loadDatasetInMemory(
     const torch::Tensor& memory_data,
     std::optional<int> variable_idx,
     std::optional<std::pair<int, int>> section_range,
-    std::optional<std::pair<int, int>> frame_range)
+    std::optional<std::pair<int, int>> frame_range) const
 {
     torch::Tensor data = memory_data;
 
@@ -663,4 +664,13 @@ void ScientificDataset::clear() {
 
 ScientificDataset::~ScientificDataset() {
     clear();
+}
+
+torch::Tensor ScientificDataset::raw_data() const {
+    return loadDatasetInMemory(
+        config_.memory_data.value(),
+        config_.variable_idx,
+        config_.section_range,
+        config_.frame_range
+    );
 }

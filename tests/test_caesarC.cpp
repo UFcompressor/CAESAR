@@ -103,7 +103,6 @@ void save_aux_metadata_binary(const CompressionResult& result , const std::strin
     write_vec_float_with_count(result.compressionMetaData.scales , out_dir + "/scales.bin");
     write_nested_i32_with_count(result.compressionMetaData.indexes , out_dir + "/indexes.bin");
 
-    // 可选：根据需要也可以把其它小字段一起存，但本轮我们只存解码必需的三项
     std::cout << "✓ offsets.bin, scales.bin, indexes.bin saved." << std::endl;
 }
 

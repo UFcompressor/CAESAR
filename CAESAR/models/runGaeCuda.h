@@ -110,7 +110,7 @@ public:
     ~PCACompressor();
 
     GAECompressionResult compress(const torch::Tensor& originalData ,
-        const torch::Tensor& reconsData);
+        const torch::Tensor& reconsData, const torch::Tensor& externalBasis);
 
 
     torch::Tensor decompress(const torch::Tensor& reconsData ,
