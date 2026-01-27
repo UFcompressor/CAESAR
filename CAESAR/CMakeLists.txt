@@ -116,7 +116,6 @@ target_compile_options(caesar_lib PRIVATE
     $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
 )
 
-
 if(USE_CUDA)
     target_compile_options(caesar_lib PRIVATE
         $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>

@@ -8,6 +8,20 @@
 #include "array_utils.h"
 #include "../dataset/dataset.h"
 
+
+// ** JL modified ** //
+struct GAEMetaData {
+    bool GAE_correction_occur;
+    std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
+    std::vector<std::vector<float>> pcaBasis; // tensor is converted into vector for adios
+    std::vector<float> uniqueVals; // tensor is converted into vector for adios
+    double quanBin;
+    int64_t nVec;
+    int64_t prefixLength;
+    int64_t dataBytes;
+    size_t coeffIntBytes;
+};
+
 struct CompressionMetaData {
     std::vector<float> offsets; // local info - corresponding to latent
     std::vector<float> scales; // local info - corresponding to latent
@@ -19,42 +33,23 @@ struct CompressionMetaData {
     float global_offset; // global info
     int64_t pad_T; // global_info
 };
-
-struct GaeBatchRecord {
-    bool correction_occur = false;
-
-    double quanBin = 0.0;
-    int64_t nVec = 0;
-    int64_t prefixLength = 0;
-
-    int64_t dataBytes = 0;
-    size_t coeffIntBytes = 0;
-
-    std::vector<uint8_t> comp_data;
-    std::vector<float> uniqueVals;
-
-    int32_t batch_n = 0;
-};
-
-struct GAEMetaData {
-    std::vector<std::vector<float>> global_pcaBasis;
-};
+// **** //
 
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
-
+    // ** JL modified ** //
+    // GAE compressed data
+    std::vector<uint8_t> gae_comp_data;
+    // record metadata for decompression
     CompressionMetaData compressionMetaData;
-
     GAEMetaData gaeMetaData;
-    std::vector<GaeBatchRecord> gae_batches;
 
-    int num_samples = 0;
-    int num_batches = 0;
+
+    // **** //
+    int num_samples;
+    int num_batches;
 };
-
-
-// **** //
 
 class Compressor {
 public:

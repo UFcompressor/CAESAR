@@ -60,7 +60,7 @@ void testPCACompressor2() {
     // Normalize data (as done in Python)
     auto [original_norm , x_min , x_max , x_mean] = normalizeData(original_data);
     auto [recons_norm , y_min , y_max , y_mean] = normalizeData(recons_data);
-    
+
     std::cout << "Data range: [" << x_min << ", " << x_max << "], mean: " << x_mean << std::endl;
 
     // Compute initial NRMSE
@@ -79,11 +79,7 @@ void testPCACompressor2() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running Compression Tests" << std::endl;
     std::cout << "========================================\n" << std::endl;
-    
-    PCA pca(-1, "cpu");
-    pca.fit(original_norm);
-    auto basis = pca.components();
-    
+
     for (double target_nrmse : test_nrmse_values) {
         std::cout << "\n--- Testing NRMSE Target: " << target_nrmse << " ---" << std::endl;
 
@@ -103,7 +99,7 @@ void testPCACompressor2() {
         PCACompressor compressor(target_nrmse , quan_factor , device , codec_alg , patch_size);
 
         // Compress
-        auto compression_result = compressor.compress(original_norm , recons_norm, basis);
+        auto compression_result = compressor.compress(original_norm , recons_norm);
         auto encoding_end = std::chrono::high_resolution_clock::now();
 
         int64_t compressed_bytes = compression_result.dataBytes;
@@ -205,12 +201,8 @@ void testDecompression() {
         // Make sure reconstruction is different enough to trigger compression
         torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
 
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-        
         // Compress
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes == 0) {
             std::cout << "Warning: No compression occurred, skipping test" << std::endl;
@@ -251,13 +243,8 @@ void testDecompression() {
         // 4D block data
         torch::Tensor originalData = torch::randn({ 5, 2, 16, 16 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 2.0 * torch::randn_like(originalData);
-        
-        auto org_vectors = block2Vector(originalData, {8, 8});
-        PCA pca(-1, "cpu");
-        pca.fit(org_vectors);
-        auto basis = pca.components();
-        
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes > 0) {
             torch::Tensor decompressed = compressor.decompress(
@@ -287,12 +274,8 @@ void testDecompression() {
 
         torch::Tensor originalData = torch::randn({ numVectors, vectorSize } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 1.0 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-        
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes > 0) {
             torch::Tensor decompressed = compressor.decompress(
@@ -325,13 +308,9 @@ void testDecompression() {
 
         torch::Tensor originalData = torch::randn({ numVectors, vectorSize } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
 
         auto startCompress = std::chrono::high_resolution_clock::now();
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
         auto endCompress = std::chrono::high_resolution_clock::now();
 
         if (compressResult.dataBytes > 0) {
@@ -371,12 +350,7 @@ void testDecompression() {
         torch::Tensor originalData = torch::randn({ 100, 64 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 2.0 * torch::randn_like(originalData);
 
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-
-        
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes > 0) {
             std::cout << "Unique values: " << compressResult.metaData.uniqueVals.size(0) << std::endl;
@@ -400,12 +374,8 @@ void testDecompression() {
 
         torch::Tensor originalData = torch::randn({ 150, 64 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 1.5 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
 
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes > 0) {
             // Verify metadata fields
@@ -438,11 +408,7 @@ void testDecompression() {
 
         torch::Tensor reconsData = originalData + 0.1 * torch::randn_like(originalData);
 
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
 
         if (compressResult.dataBytes > 0) {
             double compressionRatio =
@@ -475,13 +441,8 @@ void testDecompression() {
         auto originalData = coeffs1 * base1 + coeffs2 * base2;
         auto reconsData = originalData + 0.05 * torch::randn_like(originalData);
 
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-
-        
         auto startCompress = std::chrono::high_resolution_clock::now();
-        auto compressResult = compressor.compress(originalData , reconsData, basis);
+        auto compressResult = compressor.compress(originalData , reconsData);
         auto endCompress = std::chrono::high_resolution_clock::now();
 
         if (compressResult.dataBytes > 0) {
@@ -563,11 +524,7 @@ void testPCACompressor() {
 
         try {
             std::cout << "Starting compression..." << std::endl;
-            PCA pca(-1, "cpu");
-            pca.fit(originalData);
-            auto basis = pca.components();
-            
-            auto result = compressor.compress(originalData , reconsData, basis);
+            auto result = compressor.compress(originalData , reconsData);
 
             std::cout << "Compression completed!" << std::endl;
             std::cout << "Data bytes: " << result.dataBytes << std::endl;
@@ -604,12 +561,8 @@ void testPCACompressor() {
         // Create data where residual is very small
         torch::Tensor originalData = torch::ones({ 50, 64 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 0.001 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
 
-        auto result = compressor.compress(originalData , reconsData, basis);
+        auto result = compressor.compress(originalData , reconsData);
 
         std::cout << "Data bytes (should be 0): " << result.dataBytes << std::endl;
         assert(result.dataBytes == 0);
@@ -640,12 +593,8 @@ void testPCACompressor() {
         torch::Tensor originalData = torch::randn({ numVectors, vectorSize } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 0.1 * torch::randn_like(originalData);
 
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-        
         try {
-            auto result = compressor.compress(originalData , reconsData, basis);
+            auto result = compressor.compress(originalData , reconsData);
             std::cout << "Compression with 4x4 patches completed, data bytes: "
                 << result.dataBytes << std::endl;
 
@@ -682,10 +631,7 @@ void testPCACompressor() {
         auto startTime = std::chrono::high_resolution_clock::now();
 
         try {
-            PCA pca(-1, "cpu");
-            pca.fit(originalData);
-            auto basis = pca.components();
-            auto result = compressor.compress(originalData , reconsData, basis);
+            auto result = compressor.compress(originalData , reconsData);
 
             auto endTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -724,12 +670,7 @@ void testPCACompressor() {
         torch::Tensor reconsData = originalData + 0.05 * torch::randn_like(originalData);
 
         try {
-            auto org_vectors = block2Vector(originalData, {8, 8});
-            PCA pca(-1, "cpu");
-            pca.fit(org_vectors);
-            auto basis = pca.components();
-
-            auto result = compressor.compress(originalData , reconsData, basis);
+            auto result = compressor.compress(originalData , reconsData);
             std::cout << "Block format compression completed, data bytes: "
                 << result.dataBytes << std::endl;
             std::cout << "Test 6 passed" << std::endl;
@@ -753,12 +694,8 @@ void testPCACompressor() {
 
         // Reconstruction is just noise (guaranteed high error)
         torch::Tensor reconsData = torch::zeros_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
 
-        auto result = compressor.compress(originalData , reconsData, basis);
+        auto result = compressor.compress(originalData , reconsData);
 
         std::cout << "Data bytes: " << result.dataBytes << std::endl;
         std::cout << "PCA basis shape: ["
@@ -776,12 +713,8 @@ void testPCACompressor() {
         // Just one vector of size 64
         torch::Tensor originalData = torch::randn({ 1, 64 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 0.1 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
 
-        auto result = compressor.compress(originalData , reconsData, basis);
+        auto result = compressor.compress(originalData , reconsData);
 
         std::cout << "Data bytes: " << result.dataBytes << std::endl;
         std::cout << "Unique values count: " << result.metaData.uniqueVals.size(0) << std::endl;
@@ -798,11 +731,8 @@ void testPCACompressor() {
 
         torch::Tensor originalData = torch::randn({ 100, 64 } , torch::kFloat32);
         torch::Tensor reconsData = originalData + 0.05 * torch::randn_like(originalData);
-        
-        PCA pca(-1, "cpu");
-        pca.fit(originalData);
-        auto basis = pca.components();
-        auto result = compressor.compress(originalData , reconsData, basis);
+
+        auto result = compressor.compress(originalData , reconsData);
 
         std::cout << "Compression completed with Cascaded codec, data bytes: "
             << result.dataBytes << std::endl;
@@ -858,10 +788,10 @@ void testBitUtils() {
         // Create simple test data (100 vectors of size 64 = 8x8 patches)
         int numVectors = 100;
         int vectorSize = 64; // 8x8
-        
+
         // Original data with some structure
         torch::Tensor originalData = torch::randn({ numVectors, vectorSize } , torch::kFloat32);
-        
+
         // Add some correlation structure
         for (int i = 0; i < numVectors; ++i) {
             originalData[i] = originalData[i] + 0.5 * originalData[0]; // Add correlation
@@ -888,10 +818,7 @@ void testBitUtils() {
         std::cout << "Vectors above threshold: " << torch::sum(norms > errorBound).item<int64_t>() << std::endl;
 
         try {
-            PCA pca(-1, "cpu");
-            pca.fit(originalData);
-            auto basis = pca.components();
-            auto result = compressor.compress(originalData , reconsData, basis);
+            auto result = compressor.compress(originalData , reconsData);
 
             std::cout << "Compression completed!" << std::endl;
             std::cout << "Data bytes: " << result.dataBytes << std::endl;

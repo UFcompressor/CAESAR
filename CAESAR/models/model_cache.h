@@ -18,6 +18,33 @@ public:
         return instance;
     }
 
+    // ** JL modified ** //
+    // Add cache empty
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        
+        compressor_model_.reset();
+        compressor_model_loaded_ = false;
+
+        hyper_decompressor_model_.reset();
+        hyper_decompressor_model_loaded_ = false;
+
+        decompressor_model_.reset();
+        decompressor_model_loaded_ = false;
+
+        vbr_quantized_cdf_.clear();
+        vbr_cdf_length_.clear();
+        vbr_offset_.clear();
+        
+        gs_quantized_cdf_.clear();
+        gs_cdf_length_.clear();
+        gs_offset_.clear();
+        
+        prob_tables_loaded_ = false;
+
+        std::cout << "[ModelCache] All cached models and tables have been cleared." << std::endl;
+    }
+    // **** //
 
     torch::inductor::AOTIModelPackageLoader* get_compressor_model() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -152,7 +179,6 @@ private:
 
         prob_tables_loaded_ = true;
     }
-
 
     std::unique_ptr<torch::inductor::AOTIModelPackageLoader> compressor_model_;
     std::unique_ptr<torch::inductor::AOTIModelPackageLoader> hyper_decompressor_model_;

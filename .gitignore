@@ -23,3 +23,8 @@ __pycache__/
 .ipynb_checkpoints/
 
 build/ install/
+build/
+install/
+exported_model
+build_script_atlas.sh
+pretrained
