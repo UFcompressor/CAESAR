@@ -435,5 +435,6 @@ with torch.no_grad():
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), f"exported_model/{model_name}.pt2"),
     )
-    print(f"Decompres model saved to exported_model/{model_name}.pt2")
-
+    print()
+    print(f"decompress model saved to exported_model/{model_name}.pt2")
+    print()
