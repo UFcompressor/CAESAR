@@ -215,3 +215,5 @@ NVIDIA nvCOMP: https://developer.nvidia.com/nvcomp
 CUDA Toolkit: https://developer.nvidia.com/cuda-toolkit
 PyTorch: https://pytorch.org/
 Zstandard (zstd): https://facebook.github.io/zstd/
+
+NO MPI
