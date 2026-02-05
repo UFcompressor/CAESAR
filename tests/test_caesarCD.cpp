@@ -314,8 +314,8 @@ int main() {
 
     auto start_timeD = std::chrono::high_resolution_clock::now();
     Decompressor decompressor(decompression_device);
-    torch::Tensor recon = decompressor.decompress(
-        loaded_latents, loaded_hyper, batch_size, config.n_frame, comp);
+    torch::Tensor recon =
+        decompressor.decompress(batch_size, config.n_frame, comp);
     auto end_timeD = std::chrono::high_resolution_clock::now();
     auto durationD = std::chrono::duration_cast<std::chrono::milliseconds>(
         end_timeD - start_timeD);
