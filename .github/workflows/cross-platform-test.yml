@@ -172,6 +172,20 @@ jobs:
 
           ./test_runGaeCuda
 
+      - name: Run test_padding
+        shell: bash
+        run: |
+          cd build/tests
+          chmod +x test_padding || true
+
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            echo "Running on macOS - setting environment variables"
+            export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
+            export OMP_NUM_THREADS=1
+          fi
+
+          ./test_padding
+
       - name: Check test results
         shell: bash
         run: |

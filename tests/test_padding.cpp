@@ -91,15 +91,16 @@ void test_4d_large_no_padding() {
     std::cout << "\n=== Test 4D Large (no padding needed) ===" << std::endl;
     torch::Tensor data = torch::randn({3, 10, 256, 256});
     auto [padded, info] = to_5d_and_pad(data, 256, 256, false);
-    
+
     std::cout << "Original shape: [3, 10, 256, 256]" << std::endl;
     std::cout << "Padded shape: " << padded.sizes() << std::endl;
     std::cout << "Was padded: " << info.was_padded << std::endl;
-    
+
     assert(info.was_padded == false);
     assert(padded.dim() == 5);
-    assert(padded.sizes()[1] == 10);
-    
+    assert(padded.sizes()[1] == 3);  
+    assert(padded.sizes()[2] == 10);
+
     torch::Tensor restored = restore_from_5d(padded, info);
     assert(restored.sizes()[0] == 3 && restored.sizes()[1] == 10);
 }
