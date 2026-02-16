@@ -1,8 +1,33 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+
 find_dependency(Torch REQUIRED)
-find_dependency(PkgConfig)
-pkg_check_modules(ZSTD REQUIRED libzstd IMPORTED_TARGET)
+
+
+if(NOT TARGET zstd_target)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ZSTD libzstd IMPORTED_TARGET)
+    endif()
+    
+    if(ZSTD_FOUND)
+        add_library(zstd_target ALIAS PkgConfig::ZSTD)
+    else()
+        find_path(ZSTD_INCLUDE_DIR zstd.h)
+        find_library(ZSTD_LIBRARY NAMES zstd aocl_compression)
+        
+        if(ZSTD_INCLUDE_DIR AND ZSTD_LIBRARY)
+            add_library(zstd_target UNKNOWN IMPORTED)
+            set_target_properties(zstd_target PROPERTIES
+                IMPORTED_LOCATION "${ZSTD_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}"
+            )
+        else()
+            message(FATAL_ERROR "Zstd library not found")
+        endif()
+    endif()
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/CAESARTargets.cmake")
 check_required_components(CAESAR)
