@@ -131,3 +131,21 @@ std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_
     return std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 }
 
+
+int get_allocated_cores() {
+#ifdef __linux__
+    // Linux: Use CPU affinity
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    
+    if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
+        int count = CPU_COUNT(&cpu_set);
+        if (count > 0) {
+            return count;
+        }
+    }
+#endif
+
+    // any other OS or fallback
+    return 4;
+}

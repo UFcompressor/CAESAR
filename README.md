@@ -17,6 +17,10 @@ The baseline model, CAESAR-V, is built on a variational autoencoder (VAE) with s
 - Model compression requires a correctly configured Python environment
 - This repository officially supports **Linux and macOS**
 
+- When running on CPU please change in CAESAR_compressor.py model.half() to model.float() and change kFloat16 to kFloat32 in CAESAR/model/CAESAR_compressor.cpp
+- This make compression with CPU a lot faster. Also, if you do this make sure to only compress and depress always with the weights of the compressor as floats to ensure integerty of the data
+
+
 ## Build Instructions
 
 ### 1. Clone the repository
@@ -145,15 +149,10 @@ macOS: Fully supported with CPU builds
 
 References
 Original CAESAR repository: https://github.com/Shaw-git/CAESAR
-
 NVIDIA nvCOMP: https://developer.nvidia.com/nvcomp
-
 CUDA Toolkit: https://developer.nvidia.com/cuda-toolkit
-
 PyTorch: https://pytorch.org/
-
 Zstandard (zstd): https://facebook.github.io/zstd/
-
 CompressAI: https://github.com/InterDigitalInc/CompressAI
 
 
