@@ -417,24 +417,27 @@ PCA::PCA(int numComponents , const std::string& device)
 
 PCA& PCA::fit(const torch::Tensor& x) {
     auto xDevice = x.to(device_);
-    mean_ = torch::mean(xDevice , 0);
+    mean_ = torch::mean(xDevice, 0);
     auto xCentered = xDevice - mean_;
 
-    auto C = torch::matmul(xCentered.transpose(0 , 1) , xCentered) / (xCentered.size(0) - 1);
+    // Normalize by std to handle tiny value ranges
+    auto scale = torch::std(xCentered) + 1e-8f;
+    xCentered = xCentered / scale;
+
+    auto C = torch::matmul(xCentered.transpose(0, 1), xCentered) / (xCentered.size(0) - 1);
 
     auto eigen = torch::linalg_eigh(C);
     auto evals = std::get<0>(eigen);
     auto evecs = std::get<1>(eigen);
-    auto idx = torch::argsort(evals , 0 , true);
-    auto Vt = torch::index_select(evecs , 1 , idx).transpose(0 , 1);
+    auto idx = torch::argsort(evals, 0, true);
+    auto Vt = torch::index_select(evecs, 1, idx).transpose(0, 1);
 
     if (numComponents_ > 0) {
-        Vt = Vt.slice(0 , 0 , numComponents_);
+        Vt = Vt.slice(0, 0, numComponents_);
     }
     components_ = Vt;
     return *this;
 }
-
 
 torch::Tensor block2Vector(const torch::Tensor& blockData , std::pair<int , int> patchSize) {
     int patchH = patchSize.first;
@@ -723,6 +726,33 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     auto indices = torch::nonzero(mainData.processMask).squeeze(1);
     residualPca = torch::index_select(residualPca , 0 , indices);
     indices = torch::Tensor();
+
+    // DEBUG
+std::cout << "residualPca shape: " << residualPca.sizes() << "\n";
+std::cout << "residualPca min: " << residualPca.min().item<float>() << "\n";
+std::cout << "residualPca max: " << residualPca.max().item<float>() << "\n";
+std::cout << "residualPca std: " << torch::std(residualPca).item<float>() << "\n";
+
+
+// Not enough samples to run PCA - need at least 2 rows
+if (residualPca.size(0) < 2) {
+    MetaData metaData;
+    metaData.GAE_correction_occur = false;
+    metaData.pcaBasis = torch::empty({0, vectorSize_}, torch::kFloat32);
+    metaData.uniqueVals = torch::empty({0}, torch::kFloat32);
+    metaData.quanBin = quanBin_;
+    metaData.nVec = originalData.size(0);
+    metaData.prefixLength = 0;
+    metaData.dataBytes = 0;
+
+    auto compressedData = std::make_unique<CompressedData>();
+    compressedData->data.clear();
+    compressedData->dataBytes = 0;
+    compressedData->coeffIntBytes = 0;
+
+    return {metaData, std::move(compressedData), 0};
+}
+
 
     PCA pca(-1 , device_.str());
     pca.fit(residualPca);

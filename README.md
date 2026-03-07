@@ -1,4 +1,4 @@
-# CAESAR_C
+# CAESAR
 
 C++ implementation of CAESAR using LibTorch. The goal is to provide a C++ version of the CAESAR foundation model for efficient compression of scientific data.
 
