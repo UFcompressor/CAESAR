@@ -167,7 +167,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
 int main() {
   try {
-    // keep shape for cpu ci test 1,1,20,256,256
+    
     const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
     const std::string raw_path = "TCf48.bin.f32";
     const std::string out_dir = "./output/";
@@ -181,26 +181,23 @@ int main() {
     raw = raw.squeeze();
     std::cout << "After squeeze, shape: " << raw.sizes() << "\n";
 
-    // Keep a copy of raw for comparison later since to_5d_and_pad clears it
-    torch::Tensor raw_copy = raw.clone();
+    float raw_min = raw.min().item<float>();
+    float raw_max = raw.max().item<float>();
+    auto raw_shape = raw.sizes().vec();
 
     torch::Tensor raw_5d;
     PaddingInfo padding_info;
-    bool force_padding = false;  // to use padding or not
+    bool force_padding = false;
 
     if (shape.size() >= 5 && shape[3] >= 128 && shape[4] >= 128) {
-      // For 5D+ data, use specified H and W
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, shape[3], shape[4], force_padding);
+        std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, shape[3], shape[4], force_padding);
     } else if (shape.size() == 4 || shape.size() == 3) {
-      // For 3D/4D data, just pass 128x128 - function will decide to pad or not
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, 128, 128, force_padding);
+        std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, 128, 128, force_padding);
     } else {
-      // default 256x256
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, 256, 256, force_padding);
+        std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, 256, 256, force_padding);
     }
+
+    raw = torch::Tensor();
 
     torch::Device compression_device = torch::Device(torch::kCPU);
     torch::Device decompression_device = torch::Device(torch::kCPU);
@@ -224,34 +221,32 @@ int main() {
     config.test_size = {256, 256};
     config.augment_type = {};
 
+
+    raw_5d = torch::Tensor();
+
     float rel_eb = 0.001f;
     auto start_timeC = std::chrono::high_resolution_clock::now();
     CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
-    auto durationC = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_timeC - start_timeC);
     std::chrono::duration<double> secondsC =
-        std::chrono::duration_cast<std::chrono::duration<double>>(durationC);
-    std::cout << "\nTime taken for compression is: " << secondsC.count()
-              << " s " << std::endl;
+        std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC - start_timeC);
+    std::cout << "\nTime taken for compression is: " << secondsC.count() << " s\n";
 
     std::string latents_file = out_dir + "encoded_latents.bin";
     std::string hyper_file = out_dir + "encoded_hyper_latents.bin";
     if (!save_encoded_streams(comp.encoded_latents, latents_file)) {
-      std::cerr << "Failed to save encoded_latents\n";
-      return 1;
+        std::cerr << "Failed to save encoded_latents\n";
+        return 1;
     }
     if (!save_encoded_streams(comp.encoded_hyper_latents, hyper_file)) {
-      std::cerr << "Failed to save encoded_hyper_latents\n";
-      return 1;
+        std::cerr << "Failed to save encoded_hyper_latents\n";
+        return 1;
     }
-    std::cout << "Compression finished. Encoded streams written to " << out_dir
-              << "\n";
+    std::cout << "Compression finished. Encoded streams written to " << out_dir << "\n";
 
     uint64_t compressed_bytes = 0;
     for (const auto& s : comp.encoded_latents) compressed_bytes += s.size();
-    for (const auto& s : comp.encoded_hyper_latents)
-      compressed_bytes += s.size();
+    for (const auto& s : comp.encoded_hyper_latents) compressed_bytes += s.size();
 
     uint64_t num_elements = 1;
     for (auto d : shape) num_elements *= static_cast<uint64_t>(d);
@@ -260,94 +255,82 @@ int main() {
     size_t comp_all_meta_size = calculate_metadata_size(comp);
 
     double CR_without_meta = (compressed_bytes > 0)
-                                 ? static_cast<double>(uncompressed_bytes) /
-                                       static_cast<double>(compressed_bytes)
-                                 : 0.0;
-
+        ? static_cast<double>(uncompressed_bytes) / static_cast<double>(compressed_bytes)
+        : 0.0;
     double CR_with_meta = (compressed_bytes + comp_all_meta_size > 0)
-                              ? static_cast<double>(uncompressed_bytes) /
-                                    (static_cast<double>(compressed_bytes) +
-                                     static_cast<double>(comp_all_meta_size))
-                              : 0.0;
+        ? static_cast<double>(uncompressed_bytes) /
+          (static_cast<double>(compressed_bytes) + static_cast<double>(comp_all_meta_size))
+        : 0.0;
 
     std::cout << "\nCompression stats:\n";
     std::cout << "  - Uncompressed bytes: " << uncompressed_bytes << "\n";
     std::cout << "  - Compressed bytes:   " << compressed_bytes << "\n";
     std::cout << "  - Metadata bytes:     " << comp_all_meta_size << "\n";
-    std::cout << "  - Compression Ratio (CR) without metadata: "
-              << CR_without_meta << "\n";
-    std::cout << "  - Compression Ratio (CR) with metadata:    " << CR_with_meta
-              << "\n";
+    std::cout << "  - Compression Ratio (CR) without metadata: " << CR_without_meta << "\n";
+    std::cout << "  - Compression Ratio (CR) with metadata:    " << CR_with_meta << "\n";
 
     double CR = CR_with_meta;
     std::cout << "\n===== DECOMPRESSION =====\n";
 
-    std::vector<std::string> loaded_latents =
-        load_encoded_streams(latents_file);
+    std::vector<std::string> loaded_latents = load_encoded_streams(latents_file);
     std::vector<std::string> loaded_hyper = load_encoded_streams(hyper_file);
 
     std::vector<torch::Tensor> offsets, scales, indexes;
     {
-      const auto& meta = comp.compressionMetaData;
+        const auto& meta = comp.compressionMetaData;
+        offsets.reserve(meta.offsets.size());
+        scales.reserve(meta.scales.size());
+        indexes.reserve(meta.indexes.size());
 
-      offsets.reserve(meta.offsets.size());
-      scales.reserve(meta.scales.size());
-      indexes.reserve(meta.indexes.size());
-
-      for (float v : meta.offsets)
-        offsets.push_back(
-            torch::tensor({v}, torch::kFloat32).to(decompression_device));
-
-      for (float v : meta.scales)
-        scales.push_back(
-            torch::tensor({v}, torch::kFloat32).to(decompression_device));
-
-      for (const auto& idx_vec : meta.indexes) {
-        torch::Tensor idx_tensor =
-            torch::from_blob(const_cast<int32_t*>(idx_vec.data()),
-                             {(int64_t)idx_vec.size()}, torch::kInt32)
-                .clone()
-                .to(decompression_device);
-        indexes.push_back(idx_tensor);
-      }
+        for (float v : meta.offsets)
+            offsets.push_back(torch::tensor({v}, torch::kFloat32).to(decompression_device));
+        for (float v : meta.scales)
+            scales.push_back(torch::tensor({v}, torch::kFloat32).to(decompression_device));
+        for (const auto& idx_vec : meta.indexes) {
+            torch::Tensor idx_tensor =
+                torch::from_blob(const_cast<int32_t*>(idx_vec.data()),
+                                 {(int64_t)idx_vec.size()}, torch::kInt32)
+                    .clone()
+                    .to(decompression_device);
+            indexes.push_back(idx_tensor);
+        }
     }
 
     auto start_timeD = std::chrono::high_resolution_clock::now();
     Decompressor decompressor(decompression_device);
-    torch::Tensor recon =
-        decompressor.decompress(batch_size, config.n_frame, comp);
+    torch::Tensor recon = decompressor.decompress(batch_size, config.n_frame, comp);
     auto end_timeD = std::chrono::high_resolution_clock::now();
-    auto durationD = std::chrono::duration_cast<std::chrono::milliseconds>(
-        end_timeD - start_timeD);
     std::chrono::duration<double> secondsD =
-        std::chrono::duration_cast<std::chrono::duration<double>>(durationD);
-    std::cout << "\nTime taken for decompression is: " << secondsD.count()
-              << " s " << std::endl;
+        std::chrono::duration_cast<std::chrono::duration<double>>(end_timeD - start_timeD);
+    std::cout << "\nTime taken for decompression is: " << secondsD.count() << " s\n";
+
     if (!recon.defined() || recon.numel() == 0) {
-      std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
-      return 1;
+        std::cerr << "Decompression failed: reconstructed tensor is empty.\n";
+        return 1;
     }
 
-    std::cout << "Reconstructed tensor shape: " << recon.sizes() << std::endl;
+    std::cout << "Reconstructed tensor shape: " << recon.sizes() << "\n";
 
     torch::Tensor restored = restore_from_5d(recon, padding_info);
-    torch::Tensor raw_cpu = raw_copy.to(torch::kCPU);
+    recon = torch::Tensor();
+
+    torch::Tensor raw_for_metrics = loadRawBinary(raw_path, shape).squeeze();
     torch::Tensor recon_cpu = restored.to(torch::kCPU);
-    torch::Tensor diff = recon_cpu - raw_cpu;
+    restored = torch::Tensor();
+
+    torch::Tensor diff = recon_cpu - raw_for_metrics;
+    raw_for_metrics = torch::Tensor();
+
     double mse = diff.pow(2).mean().item<double>();
+    diff = torch::Tensor();
     double rmse = std::sqrt(mse);
-    double nrmse =
-        rmse / (raw_cpu.max().item<double>() - raw_cpu.min().item<double>());
+    double nrmse = rmse / (static_cast<double>(raw_max) - static_cast<double>(raw_min));
 
-    std::cout << "=== Quality Metrics ===" << std::endl;
-    std::cout << "NRMSE: " << nrmse << std::endl;
-    std::cout << "Compression Ratio (CR): " << CR << std::endl;
-
-    std::cout << "Decompression finished. Reconstructed data shape: "
-              << restored.sizes() << "\n";
-
-    std::cout << "\n  TEST PASSED: Compression and decompression completed "
-                 "successfully!\n";
+    std::cout << "=== Quality Metrics ===" << "\n";
+    std::cout << "NRMSE: " << nrmse << "\n";
+    std::cout << "Compression Ratio (CR): " << CR << "\n";
+    std::cout << "Decompression finished. Reconstructed data shape: " << restored.sizes() << "\n";
+    std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
     return 0;
 
   } catch (const std::exception& e) {
