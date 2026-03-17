@@ -199,10 +199,6 @@ void Compressor::load_probability_tables() {
 CompressionResult Compressor::compress(const DatasetConfig& config , int batch_size , float rel_eb) {
     c10::InferenceMode guard;
 
-    std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
-    std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
-    std::cout << "Batch size: " << batch_size << std::endl;
-
     ScientificDataset dataset(config);
     std::cout << "[MEM] dataset loaded " << rss_gb() << " GiB\n";
 
@@ -393,9 +389,10 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
             new_shape.insert(new_shape.end() , decoded_latents_sizes.begin() + 1 , decoded_latents_sizes.end());
 
             torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
-            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
+            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({reshaped_latents.to(torch::kDouble)});
 
-            torch::Tensor raw_output = decompressor_outputs[0];
+           torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
+
             torch::Tensor norm_output = reshape_batch_2d_3d(raw_output , num_input_samples);
 
             torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
@@ -544,11 +541,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config , int batch_s
         gae_record_compressedData.data = result.gae_comp_data;
         gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
         gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
-
-        torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
-            gae_record_metaData ,
-            gae_record_compressedData);
-
 
     }
 

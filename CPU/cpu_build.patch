@@ -1,8 +1,8 @@
 diff --git a/CAESAR/models/caesar_compress.cpp b/CAESAR/models/caesar_compress.cpp
-index 29df7e3..83e12b6 100644
+index 357c0dd..55eb810 100644
 --- a/CAESAR/models/caesar_compress.cpp
 +++ b/CAESAR/models/caesar_compress.cpp
-@@ -1,566 +1,591 @@
+@@ -1,558 +1,584 @@
  #include "caesar_compress.h"
 -#include "range_coder/rans_coder.hpp"
 -#include "runGaeCuda.h" 
@@ -369,13 +369,6 @@ index 29df7e3..83e12b6 100644
 +                                       int batch_size, float rel_eb) {
 +  c10::InferenceMode guard;
  
--    std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
--    std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
--    std::cout << "Batch size: " << batch_size << std::endl;
-+  std::cout << "\n========== STARTING COMPRESSION ==========" << std::endl;
-+  std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
-+  std::cout << "Batch size: " << batch_size << std::endl;
- 
 -    ScientificDataset dataset(config);
 -    std::cout << "[MEM] dataset loaded " << rss_gb() << " GiB\n";
 +  ScientificDataset dataset(config);
@@ -445,7 +438,20 @@ index 29df7e3..83e12b6 100644
 -            padding_i32.push_back(static_cast<int32_t>(pad_val));
 -        }
 -        result.compressionMetaData.block_info = std::make_tuple(nH_i32 , nW_i32 , padding_i32);
--    }
++  }
++
++  {
++    auto block_info = dataset.get_block_info();
++    const auto& padding_vec = std::get<2>(block_info);
++    int32_t nH_i32 = static_cast<int32_t>(std::get<0>(block_info));
++    int32_t nW_i32 = static_cast<int32_t>(std::get<1>(block_info));
++    const std::vector<int64_t>& padding_i64 = std::get<2>(block_info);
++    std::vector<int32_t> padding_i32;
++    padding_i32.reserve(padding_i64.size());
++
++    for (int64_t pad_val : padding_i64) {
++      padding_i32.push_back(static_cast<int32_t>(pad_val));
+     }
 -
 -    RansEncoder range_encoder;
 -
@@ -589,9 +595,10 @@ index 29df7e3..83e12b6 100644
 -            new_shape.insert(new_shape.end() , decoded_latents_sizes.begin() + 1 , decoded_latents_sizes.end());
 -
 -            torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
--            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({ reshaped_latents });
+-            std::vector<torch::Tensor> decompressor_outputs = decompressor_model_->run({reshaped_latents.to(torch::kDouble)});
 -
--            torch::Tensor raw_output = decompressor_outputs[0];
+-           torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
+-
 -            torch::Tensor norm_output = reshape_batch_2d_3d(raw_output , num_input_samples);
 -
 -            torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
@@ -615,54 +622,6 @@ index 29df7e3..83e12b6 100644
 -            batch_scales_vec.clear();
 -            batch_indexes.clear();
 -            result.num_batches++;
--        }
-+  }
-+
-+  {
-+    auto block_info = dataset.get_block_info();
-+    const auto& padding_vec = std::get<2>(block_info);
-+    int32_t nH_i32 = static_cast<int32_t>(std::get<0>(block_info));
-+    int32_t nW_i32 = static_cast<int32_t>(std::get<1>(block_info));
-+    const std::vector<int64_t>& padding_i64 = std::get<2>(block_info);
-+    std::vector<int32_t> padding_i32;
-+    padding_i32.reserve(padding_i64.size());
-+
-+    for (int64_t pad_val : padding_i64) {
-+      padding_i32.push_back(static_cast<int32_t>(pad_val));
-     }
--
--    if (!result.compressionMetaData.filtered_blocks.empty()) {
--        const int64_t V = static_cast<int64_t>(result.compressionMetaData.data_input_shape[0]);
--        const int64_t S = static_cast<int64_t>(result.compressionMetaData.data_input_shape[1]);
--        const int64_t T = static_cast<int64_t>(result.compressionMetaData.data_input_shape[2]);
--
--        const int64_t n_frame_filtered = 16;
--        const int64_t samples = T / n_frame_filtered;
--
--        if (samples == 0 || S == 0) {
--            std::cerr << "Error: 'samples' or 'S' is zero, cannot calculate indexes." << std::endl;
--        }
--        else {
--            const int64_t S_times_samples = S * samples;
--
--            for (const auto& pair : result.compressionMetaData.filtered_blocks) {
--                const int32_t label = pair.first;
--                const float value = pair.second;
--
--                const int64_t v = label / S_times_samples;
--                const int64_t remain = label % S_times_samples;
--                const int64_t s = remain / samples;
--                const int64_t blk_idx = remain % samples;
--                const int64_t start_t = blk_idx * n_frame_filtered;
--                const int64_t end_t = (blk_idx + 1) * n_frame_filtered;
--
--                torch::Tensor dest_slice = recon_tensor
--                    .select(0 , v)
--                    .select(0 , s)
--                    .slice(0 , start_t , end_t);
--
--                dest_slice.fill_(value);
--            }
 -        }
 +    result.compressionMetaData.block_info =
 +        std::make_tuple(nH_i32, nW_i32, padding_i32);
@@ -717,6 +676,45 @@ index 29df7e3..83e12b6 100644
      }
 +    result.compressionMetaData.indexes.push_back(index_vec);
  
+-    if (!result.compressionMetaData.filtered_blocks.empty()) {
+-        const int64_t V = static_cast<int64_t>(result.compressionMetaData.data_input_shape[0]);
+-        const int64_t S = static_cast<int64_t>(result.compressionMetaData.data_input_shape[1]);
+-        const int64_t T = static_cast<int64_t>(result.compressionMetaData.data_input_shape[2]);
+-
+-        const int64_t n_frame_filtered = 16;
+-        const int64_t samples = T / n_frame_filtered;
+-
+-        if (samples == 0 || S == 0) {
+-            std::cerr << "Error: 'samples' or 'S' is zero, cannot calculate indexes." << std::endl;
+-        }
+-        else {
+-            const int64_t S_times_samples = S * samples;
+-
+-            for (const auto& pair : result.compressionMetaData.filtered_blocks) {
+-                const int32_t label = pair.first;
+-                const float value = pair.second;
+-
+-                const int64_t v = label / S_times_samples;
+-                const int64_t remain = label % S_times_samples;
+-                const int64_t s = remain / samples;
+-                const int64_t blk_idx = remain % samples;
+-                const int64_t start_t = blk_idx * n_frame_filtered;
+-                const int64_t end_t = (blk_idx + 1) * n_frame_filtered;
+-
+-                torch::Tensor dest_slice = recon_tensor
+-                    .select(0 , v)
+-                    .select(0 , s)
+-                    .slice(0 , start_t , end_t);
+-
+-                dest_slice.fill_(value);
+-            }
+-        }
++    float current_max = input_tensor.max().item<float>();
++    float current_min = input_tensor.min().item<float>();
++    if (current_max > batch_max) {
++      batch_max = current_max;
+     }
+-
 -    int64_t block_info_1 = static_cast<int64_t>(std::get<0>(result.compressionMetaData.block_info));
 -    int64_t block_info_2 = static_cast<int64_t>(std::get<1>(result.compressionMetaData.block_info));
 -    std::vector<int64_t> block_info_3;
@@ -725,12 +723,10 @@ index 29df7e3..83e12b6 100644
 -
 -    for (int32_t val : padding_vec_i32) {
 -        block_info_3.push_back(static_cast<int64_t>(val));
-+    float current_max = input_tensor.max().item<float>();
-+    float current_min = input_tensor.min().item<float>();
-+    if (current_max > batch_max) {
-+      batch_max = current_max;
++    if (current_min < batch_min) {
++      batch_min = current_min;
      }
--
+ 
 -    torch::Tensor recon_tensor_deblock = deblockHW(recon_tensor , block_info_1 , block_info_2 , block_info_3);
 -
 -    std::tuple<torch::Tensor , std::vector<int>> padding_original = padding(dataset.original_data());
@@ -809,17 +805,6 @@ index 29df7e3..83e12b6 100644
 -        gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
 -        gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
 -
--        torch::Tensor recons_gae = pca_compressor.decompress(padded_recon_tensor_norm ,
--            gae_record_metaData ,
--            gae_record_compressedData);
--
--
-+    if (current_min < batch_min) {
-+      batch_min = current_min;
-     }
- 
--    else {
--        std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
 +    if (batch_inputs.size() == static_cast<size_t>(batch_size) ||
 +        i == dataset.size() - 1) {
 +      torch::Tensor batched_input = torch::cat(batch_inputs, 0);
@@ -912,9 +897,10 @@ index 29df7e3..83e12b6 100644
 +
 +      torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
 +      std::vector<torch::Tensor> decompressor_outputs =
-+          decompressor_model_->run({reshaped_latents});
++          decompressor_model_->run({reshaped_latents.to(torch::kDouble)});
 +
-+      torch::Tensor raw_output = decompressor_outputs[0];
++      torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
++
 +      torch::Tensor norm_output =
 +          reshape_batch_2d_3d(raw_output, num_input_samples);
 +
@@ -943,6 +929,10 @@ index 29df7e3..83e12b6 100644
 +      batch_indexes.clear();
 +      result.num_batches++;
      }
+-
+-    else {
+-        std::cout << "[GAE SKIPPED] No data processed by GAE." << std::endl;
+-    }
 -
 -    if (!result.compressionMetaData.indexes.empty()) {
 -        std::cout << ", " << result.compressionMetaData.indexes[0].size(); // 0번째 안쪽 벡터의 크기(4)
@@ -1088,10 +1078,6 @@ index 29df7e3..83e12b6 100644
 +    gae_record_compressedData.data = result.gae_comp_data;
 +    gae_record_compressedData.dataBytes = result.gaeMetaData.dataBytes;
 +    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
-+
-+    torch::Tensor recons_gae =
-+        pca_compressor.decompress(padded_recon_tensor_norm, gae_record_metaData,
-+                                  gae_record_compressedData);
 +
 +  }
 +

@@ -85,8 +85,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                                        const unsigned int n_frame,
                                        const CompressionResult& comp_result) {
   c10::InferenceMode guard;
-  std::cout << "\n========== STARTING DECOMPRESSION ==========" << std::endl;
-  std::cout << "Device: " << (device_.is_cuda() ? "GPU" : "CPU") << std::endl;
 
   DecompressionResult result;
   result.num_samples = 0;
@@ -176,7 +174,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
 
     torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
-
     torch::Tensor latent_indexes_cpu = latent_indexes_recon.cpu().contiguous();
 
     torch::Tensor decoded_latents_before_offset =
@@ -203,8 +200,9 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);
 
     std::vector<torch::Tensor> decompressor_outputs =
-        decompressor_model_->run({reshaped_latents.to(torch::kFloat32)});
-    torch::Tensor raw_output = decompressor_outputs[0];
+        decompressor_model_->run({reshaped_latents.to(torch::kDouble)});
+    torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
+
 
     torch::Tensor norm_output =
         reshape_batch_2d_3d(raw_output, (long)cur_samples, n_frame);
