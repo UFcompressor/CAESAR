@@ -785,14 +785,18 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
 
     if (reconErrorMax > error_ || error_ < 10.0 * static_cast<double>(std::numeric_limits<float>::epsilon())) {
    #ifdef USE_CUDA
-    int64_t estimatedGiB = (residualPca.size(0) * residualPca.size(1) * 8 * 6) / (1024LL * 1024 * 1024);
-    double freeGiB = gpu_free_gb();
-    if (estimatedGiB > freeGiB) {
-        std::cerr << "[WARN] GAE estimated peak memory ~" << estimatedGiB 
-                  << " GiB but only " << freeGiB << " GiB free.\n"
-                  << "[WARN] Consider: larger error bound, smaller dataset chunks,\n"
-                  << "[WARN] or multiple GPUs. Attempting anyway...\n";
-    }
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    double leftGiB = gpu_used_gb();
+    if ((prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - 2.0 < leftGiB) {
+    std::cerr << "[WARN] GAE near memory limit: "
+              << leftGiB << " GiB used on GPU "
+              << " GiB left on GPU " << (prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - leftGiB << " GiB.\n"
+              << "[WARN] Consider: larger error bound, smaller dataset chunks,\n"
+              << "[WARN] or multiple GPUs. Attempting anyway...\n";
+}
 #endif
 
         residualPca = residualPca.to(torch::kDouble);

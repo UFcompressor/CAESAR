@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <torch/torch.h>
 //** JL modified **//
 #ifdef USE_CUDA
     #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -33,8 +34,24 @@ fs::path get_model_file(const std::string& filename);
 double rss_gb();
 
 #ifdef USE_CUDA
-double gpu_free_gb();
+double gpu_used_gb();
 #endif
+
+static inline double tensor_gb(const torch::Tensor& t) {
+    if (!t.defined()) return 0.0;
+    return (double)t.numel() * t.element_size() / (1024.0 * 1024 * 1024);
+}
+
+static inline void mem_print(const char* tag) {
+#ifdef USE_CUDA
+    std::cout << "[MEM] " << tag
+              << "  rss="      << rss_gb()      << " GiB"
+              << "  gpu_used=" << gpu_used_gb() << " GiB\n";
+#else
+    std::cout << "[MEM] " << tag
+              << "  rss=" << rss_gb() << " GiB\n";
+#endif
+}
 
 std::chrono::high_resolution_clock::time_point get_start_time();
 std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_point start);
