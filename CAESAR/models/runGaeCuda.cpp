@@ -659,9 +659,8 @@ PCACompressor::~PCACompressor() {
 #endif
 }
 
-
-GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
-    const torch::Tensor& reconsData) {
+GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
+    torch::Tensor reconsData) {
 
     auto inputShape = originalData.sizes();
 
@@ -676,7 +675,7 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
         int nH = H / patchSize_.first;
         int nW = W / patchSize_.second;
         totalVectors = T * nH * nW;
-        for (int i = 0; i < inputShape.size() - 3; ++i) {
+        for (int i = 0; i < (int)inputShape.size() - 3; ++i) {
             totalVectors *= inputShape[i];
         }
     }
@@ -699,6 +698,14 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
 
     torch::Tensor residualPca = originalDataDevice - reconsDataDevice;
 
+    originalDataDevice = torch::Tensor();
+    reconsDataDevice = torch::Tensor();
+    originalData = torch::Tensor();
+    reconsData = torch::Tensor();
+#ifdef USE_CUDA
+    cleanupGPUMemory();
+#endif
+
     torch::Tensor norms = torch::linalg_norm(residualPca , c10::nullopt , { 1 });
 
     MainData mainData;
@@ -711,7 +718,7 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
         metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
         metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
-        metaData.nVec = originalData.size(0);
+        metaData.nVec = mainData.processMask.size(0);
         metaData.prefixLength = 0;
         metaData.dataBytes = 0;
 
@@ -727,32 +734,23 @@ GAECompressionResult PCACompressor::compress(const torch::Tensor& originalData ,
     residualPca = torch::index_select(residualPca , 0 , indices);
     indices = torch::Tensor();
 
-    // DEBUG
-std::cout << "residualPca shape: " << residualPca.sizes() << "\n";
-std::cout << "residualPca min: " << residualPca.min().item<float>() << "\n";
-std::cout << "residualPca max: " << residualPca.max().item<float>() << "\n";
-std::cout << "residualPca std: " << torch::std(residualPca).item<float>() << "\n";
+    if (residualPca.size(0) < 2) {
+        MetaData metaData;
+        metaData.GAE_correction_occur = false;
+        metaData.pcaBasis = torch::empty({0, vectorSize_} , torch::kFloat32);
+        metaData.uniqueVals = torch::empty({0} , torch::kFloat32);
+        metaData.quanBin = quanBin_;
+        metaData.nVec = mainData.processMask.size(0);
+        metaData.prefixLength = 0;
+        metaData.dataBytes = 0;
 
+        auto compressedData = std::make_unique<CompressedData>();
+        compressedData->data.clear();
+        compressedData->dataBytes = 0;
+        compressedData->coeffIntBytes = 0;
 
-// Not enough samples to run PCA - need at least 2 rows
-if (residualPca.size(0) < 2) {
-    MetaData metaData;
-    metaData.GAE_correction_occur = false;
-    metaData.pcaBasis = torch::empty({0, vectorSize_}, torch::kFloat32);
-    metaData.uniqueVals = torch::empty({0}, torch::kFloat32);
-    metaData.quanBin = quanBin_;
-    metaData.nVec = originalData.size(0);
-    metaData.prefixLength = 0;
-    metaData.dataBytes = 0;
-
-    auto compressedData = std::make_unique<CompressedData>();
-    compressedData->data.clear();
-    compressedData->dataBytes = 0;
-    compressedData->coeffIntBytes = 0;
-
-    return {metaData, std::move(compressedData), 0};
-}
-
+        return {metaData, std::move(compressedData), 0};
+    }
 
     PCA pca(-1 , device_.str());
     pca.fit(residualPca);
@@ -765,7 +763,7 @@ if (residualPca.size(0) < 2) {
         metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
         metaData.uniqueVals = torch::empty({ 0 } , torch::kFloat32);
         metaData.quanBin = quanBin_;
-        metaData.nVec = originalData.size(0);
+        metaData.nVec = mainData.processMask.size(0);
         metaData.prefixLength = 0;
         metaData.dataBytes = 0;
 
@@ -781,44 +779,48 @@ if (residualPca.size(0) < 2) {
     torch::Tensor reconstructedResidual = torch::matmul(allCoeff , pcaBasis);
     torch::Tensor reconError = torch::abs(reconstructedResidual - residualPca);
     double reconErrorMax = reconError.max().item<double>();
-
     reconstructedResidual = torch::Tensor();
     reconError = torch::Tensor();
+    allCoeff = torch::Tensor();
 
-    if (reconErrorMax > error_) {
-        std::cout << "[WARN] High PCA reconstruction error (" << reconErrorMax
-            << ") > " << error_ << " — switching to float64" << std::endl;
+    if (reconErrorMax > error_ || error_ < 10.0 * static_cast<double>(std::numeric_limits<float>::epsilon())) {
+   #ifdef USE_CUDA
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    double leftGiB = gpu_used_gb();
+    if ((prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - 2.0 < leftGiB) {
+    std::cerr << "[WARN] GAE near memory limit: "
+              << leftGiB << " GiB used on GPU "
+              << " GiB left on GPU " << (prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - leftGiB << " GiB.\n"
+              << "[WARN] Consider: larger error bound, smaller dataset chunks,\n"
+              << "[WARN] or multiple GPUs. Attempting anyway...\n";
+}
+#endif
 
         residualPca = residualPca.to(torch::kDouble);
         pca.fit(residualPca);
         pcaBasis = pca.components();
-        allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
-        
-        pcaBasis = pcaBasis.to(torch::kFloat32);
-        allCoeff = allCoeff.to(torch::kFloat32);
     }
 
-    originalDataDevice = torch::Tensor();
-    reconsDataDevice = torch::Tensor();
+    allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
     residualPca = torch::Tensor();
 #ifdef USE_CUDA
     cleanupGPUMemory();
 #endif
 
     std::cout << "allCoeffpower\n";
-    torch::Tensor allCoeffPower = allCoeff.pow(2);
-    torch::Tensor sortIndex = torch::argsort(allCoeffPower , 1 , true);
-    torch::Tensor allCoeffSorted = torch::gather(allCoeff , 1 , sortIndex);
+    torch::Tensor allCoeffPower   = allCoeff.pow(2);
+    torch::Tensor sortIndex       = torch::argsort(allCoeffPower , 1 , true);
+    torch::Tensor allCoeffSorted  = torch::gather(allCoeff , 1 , sortIndex);
     torch::Tensor quanCoeffSorted = torch::round(allCoeffSorted / quanBin_) * quanBin_;
-    torch::Tensor resCoeffSorted = allCoeffSorted - quanCoeffSorted;
+
+    torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower , 1 , sortIndex)
+                                    - (allCoeffSorted - quanCoeffSorted).pow(2);
     allCoeffSorted = torch::Tensor();
 
-    torch::Tensor tmp = resCoeffSorted.pow(2);
-    torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower , 1 , sortIndex) - tmp;
-    tmp = torch::Tensor();
-    resCoeffSorted = torch::Tensor();
-
-    torch::Tensor stepErrors = torch::ones_like(allCoeffPowerDesc);
+    torch::Tensor stepErrors   = torch::ones_like(allCoeffPowerDesc);
     torch::Tensor remainErrors = torch::sum(allCoeffPower , 1);
     allCoeffPower = torch::Tensor();
 
@@ -835,30 +837,27 @@ if (residualPca.size(0) < 2) {
     stepErrors = torch::Tensor();
 
     torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt) , 1);
-    auto batchIndices = torch::arange(mask.size(0) , torch::TensorOptions().device(device_));
+    auto batchIndices = torch::arange(mask.size(0) ,
+        torch::TensorOptions().device(device_));
     mask.index_put_({ batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1) } , true);
     firstFalseIdx = torch::Tensor();
     batchIndices = torch::Tensor();
 
-    torch::Tensor selectedCoeffQ = quanCoeffSorted * mask;
+    torch::Tensor selectedCoeffQBool = (quanCoeffSorted * mask) != 0;
     quanCoeffSorted = torch::Tensor();
 
-    torch::Tensor selectedCoeffUnsortQ = torch::zeros_like(selectedCoeffQ);
-    auto idx = torch::arange(selectedCoeffQ.size(0) , torch::TensorOptions().device(device_)).unsqueeze(1);
-    selectedCoeffUnsortQ.scatter_(1 , sortIndex , selectedCoeffQ);
-
-    selectedCoeffQ = torch::Tensor();
+    torch::Tensor finalMask = torch::zeros(
+        {selectedCoeffQBool.size(0), selectedCoeffQBool.size(1)} ,
+        torch::TensorOptions().dtype(torch::kBool).device(device_));
+    finalMask.scatter_(1 , sortIndex , selectedCoeffQBool);
+    selectedCoeffQBool = torch::Tensor();
     sortIndex = torch::Tensor();
-    idx = torch::Tensor();
 #ifdef USE_CUDA
     cleanupGPUMemory();
 #endif
 
-    mask = selectedCoeffUnsortQ != 0;
-    selectedCoeffUnsortQ = torch::Tensor();
-
     torch::Tensor coeffIntFlatten = torch::round(
-        allCoeff.masked_select(mask) / quanBin_
+        allCoeff.masked_select(finalMask) / quanBin_
     );
     allCoeff = torch::Tensor();
 
@@ -874,7 +873,6 @@ if (residualPca.size(0) < 2) {
         auto partial_unique = at::_unique(chunk , true , true);
 
         unique_parts.push_back(std::get<0>(partial_unique));
-
         auto inv = std::get<1>(partial_unique) + offset;
         inverse_parts.push_back(inv);
         offset += std::get<0>(partial_unique).size(0);
@@ -909,16 +907,15 @@ if (residualPca.size(0) < 2) {
     all_inverses = torch::Tensor();
 
     mainData.coeffInt = inverseIndices;
-
 #ifdef USE_CUDA
     cleanupGPUMemory();
 #endif
 
-    auto prefixResult = indexMaskPrefix(mask);
+    auto prefixResult = indexMaskPrefix(finalMask);
     mainData.prefixMask = prefixResult.first;
     mainData.maskLength = prefixResult.second;
 
-    mask = torch::Tensor();
+    finalMask = torch::Tensor();
 #ifdef USE_CUDA
     cleanupGPUMemory();
 #endif
@@ -926,7 +923,7 @@ if (residualPca.size(0) < 2) {
     MetaData metaData;
     metaData.GAE_correction_occur = true;
     metaData.pcaBasis = pcaBasis.to(torch::kFloat32).to(device_);
-    metaData.uniqueVals = uniqueVals.to(device_);
+    metaData.uniqueVals = uniqueVals.to(torch::kFloat32).to(device_);
     metaData.quanBin = quanBin_;
     metaData.nVec = mainData.processMask.size(0);
     metaData.prefixLength = mainData.prefixMask.size(0);
@@ -1201,9 +1198,6 @@ MainData PCACompressor::decompressLossless(
     use_nvcomp = device_.is_cuda();
 #endif
 
-    // ═══════════════════════════════════════════════════════
-    // GPU PATH — batched nvcomp, early return
-    // ═══════════════════════════════════════════════════════
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
     if (use_nvcomp)
     {
@@ -1263,9 +1257,6 @@ MainData PCACompressor::decompressLossless(
     }
 #endif
 
-    // ═══════════════════════════════════════════════════════
-    // CPU PATH — plain ZSTD, no gpu_decompress calls at all
-    // ═══════════════════════════════════════════════════════
     std::cout << "[GAE Coeff Decompression] CPU ZSTD is used\n";
 
     // processMask

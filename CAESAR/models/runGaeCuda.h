@@ -109,8 +109,8 @@ public:
         std::pair<int , int> patchSize = { 8, 8 });
     ~PCACompressor();
 
-    GAECompressionResult compress(const torch::Tensor& originalData ,
-        const torch::Tensor& reconsData);
+    GAECompressionResult compress( torch::Tensor originalData ,
+         torch::Tensor reconsData);
 
 
     torch::Tensor decompress(const torch::Tensor& reconsData ,
