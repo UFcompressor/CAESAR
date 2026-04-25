@@ -190,7 +190,7 @@ int main() {
     bool force_padding = false;
 
     if (shape.size() >= 5 && shape[3] >= 128 && shape[4] >= 128) {
-        std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, shape[3], shape[4], force_padding);
+      std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, shape[3], shape[4], force_padding);
     } else if (shape.size() == 4 || shape.size() == 3) {
         std::tie(raw_5d, padding_info) = to_5d_and_pad(raw, 128, 128, force_padding);
     } else {
@@ -331,6 +331,10 @@ int main() {
     std::cout << "Compression Ratio (CR): " << CR << "\n";
     std::cout << "Decompression finished. Reconstructed data shape: " << restored.sizes() << "\n";
     std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
+
+    
+    ModelCache& cache = ModelCache::instance();
+    cache.clear();
     return 0;
 
   } catch (const std::exception& e) {

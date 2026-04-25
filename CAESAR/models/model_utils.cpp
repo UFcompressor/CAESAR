@@ -130,6 +130,7 @@ std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_
 }
 
 
+// assume 4 as min
 int get_allocated_cores() {
 #ifdef __linux__
     // Linux: Use CPU affinity
@@ -138,8 +139,11 @@ int get_allocated_cores() {
     
     if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
         int count = CPU_COUNT(&cpu_set);
-        if (count > 0) {
+        if (count > 0 && count > 4) {
             return count;
+        }
+        else {
+          return 4;
         }
     }
 #endif

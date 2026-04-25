@@ -198,7 +198,6 @@ class Compressor(nn.Module):
         result = {}
         
         if return_time:
-            torch.cuda.synchronize()  # Wait for all GPU ops to finish
             start_time = time.time()
         
         latent = self.encode(x)
@@ -215,13 +214,11 @@ class Compressor(nn.Module):
         frame_bit, bpp = self.bpp(x.shape, state4bpp)
         
         if return_time:
-            torch.cuda.synchronize()  # Wait for all GPU ops to finish
             start_time = time.time()
             
         output = self.decode(q_latent)
         
         if return_time:
-            torch.cuda.synchronize()  # Wait for all GPU ops to finish
             result["decoding_time"] = time.time() - start_time
             
         result.update({

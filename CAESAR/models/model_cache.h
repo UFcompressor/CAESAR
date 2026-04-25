@@ -18,8 +18,6 @@ public:
         return instance;
     }
 
-    // ** JL modified ** //
-    // Add cache empty
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
         
@@ -44,7 +42,6 @@ public:
 
         std::cout << "[ModelCache] All cached models and tables have been cleared." << std::endl;
     }
-    // **** //
 
     torch::inductor::AOTIModelPackageLoader* get_compressor_model() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -127,7 +124,6 @@ private:
     ~ModelCache() = default;
 
     void load_compressor_model() {
-        std::cout << "Loading compressor model (once)..." << std::endl;
         compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             get_model_file("caesar_compressor.pt2").string()
         );
@@ -135,7 +131,6 @@ private:
     }
 
     void load_hyper_decompressor_model() {
-        std::cout << "Loading hyper decompressor model (once)..." << std::endl;
         hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             get_model_file("caesar_hyper_decompressor.pt2").string()
         );
@@ -143,7 +138,6 @@ private:
     }
 
     void load_decompressor_model() {
-        std::cout << "Loading decompressor model (once)..." << std::endl;
         decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             get_model_file("caesar_decompressor.pt2").string()
         );
@@ -151,7 +145,6 @@ private:
     }
 
     void load_probability_tables() {
-        std::cout << "Loading probability tables (once)..." << std::endl;
         
         // Load VBR tables
         auto vbr_quantized_cdf_1d = load_array_from_bin<int32_t>(
