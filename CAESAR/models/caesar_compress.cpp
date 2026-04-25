@@ -349,7 +349,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
       std::vector<torch::Tensor> decompressor_outputs =
           decompressor_model_->run(
-              {q_latent_with_offset.reshape(new_shape).to(torch::kFloat32)});
+              {q_latent_with_offset.reshape(new_shape).to(torch::kFloat64)});
       torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
       decompressor_outputs.clear();
       torch::cuda::synchronize();

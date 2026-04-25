@@ -168,7 +168,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
   try {
     
-    const std::vector<int64_t> shape = {1, 256, 256, 256, 256};
+    const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
     const std::string raw_path = "TCf48.bin.f32";
     const std::string out_dir = "./output/";
 
@@ -199,15 +199,15 @@ int main() {
 
     raw = torch::Tensor();
 
-    torch::Device compression_device = torch::Device(torch::kCUDA);
-    torch::Device decompression_device = torch::Device(torch::kCUDA);
+    torch::Device compression_device = torch::Device(torch::kCPU);
+    torch::Device decompression_device = torch::Device(torch::kCPU);
 
     std::cout << "\n===== COMPRESSION =====\n";
     Compressor compressor(compression_device);
 
     DatasetConfig config;
     config.memory_data = raw_5d;
-    config.device = torch::Device(torch::kCUDA);
+    config.device = torch::Device(torch::kCPU);
     config.variable_idx = 0;
     config.n_frame = n_frame;
     config.dataset_name = "TCf48 Dataset";
@@ -224,7 +224,7 @@ int main() {
 
     raw_5d = torch::Tensor();
 
-    float rel_eb = 0.1f;
+    float rel_eb = 0.001f;
     auto start_timeC = std::chrono::high_resolution_clock::now();
     CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
