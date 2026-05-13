@@ -100,54 +100,42 @@ torch::Tensor deblockHW(const torch::Tensor& data,
     return result;
 }
 
-
 std::tuple<torch::Tensor, std::tuple<int64_t, int64_t, std::vector<int64_t>>>
 blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
-
     int64_t hBlock = block_size.first;
     int64_t wBlock = block_size.second;
-
     auto sizes = data.sizes();
     int64_t V = sizes[0];
     int64_t S = sizes[1];
     int64_t T = sizes[2];
     int64_t H = sizes[3];
     int64_t W = sizes[4];
-
     int64_t H_target = static_cast<int64_t>(std::ceil((double)H / hBlock)) * hBlock;
     int64_t dH = H_target - H;
     int64_t top = dH / 2;
     int64_t down = dH - top;
     int64_t nH = H_target / hBlock;
-
     int64_t W_target = static_cast<int64_t>(std::ceil((double)W / wBlock)) * wBlock;
     int64_t dW = W_target - W;
     int64_t left = dW / 2;
     int64_t right = dW - left;
     int64_t nW = W_target / wBlock;
-
     auto reshaped = data.view({V * S, T, H, W});
-    auto device = data.device();
-    auto options = reshaped.options();
-
-    auto padded = torch::zeros({V * S, T, H_target, W_target}, options);
-
-    padded.slice(2, top, top + H).slice(3, left, left + W).copy_(reshaped);
-
-    auto restored = padded.view({V, S, T, H_target, W_target});
-
+    auto padded = torch::nn::functional::pad(
+        reshaped ,
+        torch::nn::functional::PadFuncOptions({ left, right, top, down }).mode(torch::kReflect)
+    );
+    auto paddedSizes = padded.sizes();
+    int64_t H_p = paddedSizes[2];
+    int64_t W_p = paddedSizes[3];
+    auto restored = padded.view({V, S, T, H_p, W_p});
     auto blocked = restored.reshape({V, S, T, nH, hBlock, nW, wBlock})
                            .permute({0, 1, 3, 5, 2, 4, 6})
                            .reshape({V, S * nH * nW, T, hBlock, wBlock});
-
     std::vector<int64_t> padding = {top, down, left, right};
-
-    padded.reset();
-    reshaped.reset();
-    restored.reset();
-
     return {blocked, {nH, nW, padding}};
 }
+
 
 std::pair<std::vector<std::pair<int, float>>, std::vector<int>>
 data_filtering(const torch::Tensor& data, int nFrame, const torch::Device& device) {

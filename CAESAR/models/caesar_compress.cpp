@@ -312,11 +312,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       time_input_transfer += get_time(t0).count();
 
       auto t1 = get_start_time();
-      std::vector<torch::Tensor> outputs =
-          compressor_model_->run({batched_input.to(torch::kFloat16)});
-      torch::Tensor latent         = outputs[0];
-      torch::Tensor q_hyper_latent = outputs[1];
-      torch::Tensor hyper_indexes  = outputs[2];
+      std::vector<torch::Tensor> outputs = compressor_model_->run({batched_input.to(torch::kFloat32)});  // remove kFloat16 yourself
+      torch::Tensor q_latent       = outputs[0];
+      torch::Tensor latent_indexes = outputs[1];
+      torch::Tensor q_hyper_latent = outputs[2];
+      torch::Tensor hyper_indexes  = outputs[3];
       outputs.clear();
 
 #ifdef USE_CUDA
@@ -326,24 +326,18 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
       auto t2 = get_start_time();
       std::vector<torch::Tensor> hyper_outputs =
-          hyper_decompressor_model_->run({q_hyper_latent.to(torch::kDouble)});
-      torch::Tensor mean                 = hyper_outputs[0].to(torch::kFloat32);
-      torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kFloat32);
+          hyper_decompressor_model_->run({q_hyper_latent.to(torch::kFloat32)});
+      torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
       hyper_outputs.clear();
 #ifdef USE_CUDA
       torch::cuda::synchronize();
 #endif
       time_hyper += get_time(t2).count();
 
-      torch::Tensor q_latent             = (latent - mean).to(torch::kInt32);
-      torch::Tensor latent_indexes_int32 = latent_indexes_recon.to(torch::kInt32);
-      torch::Tensor q_hyper_latent_int32 = q_hyper_latent.to(torch::kInt32);
-      torch::Tensor hyper_indexes_int32  = hyper_indexes.to(torch::kInt32);
-
       all_q_latent.push_back(q_latent);
-      all_latent_indexes.push_back(latent_indexes_int32);
-      all_q_hyper_latent.push_back(q_hyper_latent_int32);
-      all_hyper_indexes.push_back(hyper_indexes_int32);
+      all_latent_indexes.push_back(latent_indexes);
+      all_q_hyper_latent.push_back(q_hyper_latent);
+      all_hyper_indexes.push_back(hyper_indexes);
       total_latent_codes += q_latent.sizes()[0];
 
       auto t3 = get_start_time();
@@ -358,7 +352,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
       std::vector<torch::Tensor> decompressor_outputs =
           decompressor_model_->run(
-              {q_latent_with_offset.reshape(new_shape).to(torch::kDouble)});
+              {q_latent_with_offset.reshape(new_shape).to(torch::kFloat32)});
       torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
       decompressor_outputs.clear();
 #ifdef USE_CUDA

@@ -1,4 +1,4 @@
-name: Cross-Platform Build and Test
+game: Cross-Platform Build and Test
 
 on:
   push:
@@ -20,7 +20,8 @@ jobs:
       - name: Apply CPU build patch
         shell: bash
         run: |
-          git apply CPU/cpu_build.patch
+        echo "start"
+
 
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
