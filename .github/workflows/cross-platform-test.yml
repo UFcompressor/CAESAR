@@ -1,7 +1,7 @@
-game: Cross-Platform Build and Test
+name: Cross-Platform Build and Test
 
 on:
-  push:
+ push:
   pull_request:
 
 jobs:
@@ -16,12 +16,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Apply CPU build patch
-        shell: bash
-        run: |
-        echo "start"
-
 
       - name: Free Disk Space (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -195,4 +189,4 @@ jobs:
       - name: Check test results
         shell: bash
         run: |
-          echo "Test completed successfully on ${{ matrix.os }}!"
+          echo "Test completed successfully on ${{ matrix.os }}!" 
