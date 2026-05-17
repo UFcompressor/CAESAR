@@ -1,5 +1,4 @@
 #include "runGaeCuda.h"
-#include <cstdlib>
 
 #ifdef USE_CUDA
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -1373,8 +1372,11 @@ torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes
 }
 
 void PCACompressor::cleanupGPUMemory() {
-    const char* force = std::getenv("CAESAR_EMPTY_CACHE");
-    if (!force || std::string(force) != "1") {
+
+    const char* disable =
+        std::getenv("CAESAR_DO_NOT_EMPTY_CUDA_CACHE");
+
+    if (disable && std::string(disable) == "1") {
         return;
     }
 
