@@ -32,37 +32,39 @@
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
 
 struct NvcompBatchCompressResult {
-    std::vector<uint8_t> compressed;
-    size_t               rawBytes;
+    torch::Tensor compressed;  // CPU kUInt8 tensor
+    size_t        rawBytes;
 };
 
 // We chunk all inputs down to this size before submitting as one big batch.
 static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 16ULL * 1024 * 1024; // 16 MB
-                                                                     //
+
+// Skips all host-to-device uploads for input data — tensors are used directly,
+// so this function pipelines seamlessly after GPU-side operations like bitsToBytes.
 static std::vector<NvcompBatchCompressResult>
-nvcomp_batch_compress(
-    const std::vector<const uint8_t*>& inputs,
-    const std::vector<size_t>&         sizes)
+nvcomp_batch_compress(const std::vector<torch::Tensor>& inputs)
 {
     const size_t N = inputs.size();
     std::vector<NvcompBatchCompressResult> results(N);
 
     struct ChunkInfo {
-        size_t buf_idx;
-        size_t offset;
-        size_t chunk_size;
+        size_t          buf_idx;
+        const uint8_t*  src_ptr;   // points directly into the GPU tensor
+        size_t          chunk_size;
     };
     std::vector<ChunkInfo> chunks;
     std::vector<size_t>    chunk_start_idx(N);
 
     for (size_t i = 0; i < N; i++) {
-        results[i].rawBytes = sizes[i];
+        size_t sz = (size_t)inputs[i].numel();
+        results[i].rawBytes = sz;
         chunk_start_idx[i]  = chunks.size();
-        if (sizes[i] == 0) continue;
+        if (sz == 0) continue;
+        const uint8_t* ptr = inputs[i].data_ptr<uint8_t>();
         size_t offset = 0;
-        while (offset < sizes[i]) {
-            size_t this_chunk = std::min(NVCOMP_ZSTD_MAX_CHUNK, sizes[i] - offset);
-            chunks.push_back({i, offset, this_chunk});
+        while (offset < sz) {
+            size_t this_chunk = std::min(NVCOMP_ZSTD_MAX_CHUNK, sz - offset);
+            chunks.push_back({i, ptr + offset, this_chunk});
             offset += this_chunk;
         }
     }
@@ -88,11 +90,7 @@ nvcomp_batch_compress(
               << " maxOutPerChunk=" << maxOutPerChunk
               << " tempBytes=" << totalTempBytes << "\n";
 
-    // Input pool sized to actual data, not totalChunks * 16MB
-    size_t inputPoolSize = totalUncompressed + totalChunks * 255;
-    size_t outputPoolSize = totalChunks * maxOutPerChunk;
-
-    void* d_input_pool   = nullptr;
+    // remove size and input pool and its allocation
     void* d_output_pool  = nullptr;
     void* d_temp         = nullptr;
     void* d_input_ptrs   = nullptr;
@@ -101,8 +99,7 @@ nvcomp_batch_compress(
     void* d_output_sizes = nullptr;
     void* d_statuses     = nullptr;
 
-    CHECK_CUDA(cudaMalloc(&d_input_pool,   inputPoolSize));
-    CHECK_CUDA(cudaMalloc(&d_output_pool,  outputPoolSize));
+    CHECK_CUDA(cudaMalloc(&d_output_pool,  totalChunks * maxOutPerChunk));
     if (totalTempBytes > 0)
         CHECK_CUDA(cudaMalloc(&d_temp, totalTempBytes));
     CHECK_CUDA(cudaMalloc(&d_input_ptrs,   totalChunks * sizeof(void*)));
@@ -111,7 +108,6 @@ nvcomp_batch_compress(
     CHECK_CUDA(cudaMalloc(&d_output_sizes, totalChunks * sizeof(size_t)));
     CHECK_CUDA(cudaMalloc(&d_statuses,     totalChunks * sizeof(nvcompStatus_t)));
 
-    // Build host-side pointer arrays using actual offsets into input pool
     std::vector<void*>  h_input_ptrs(totalChunks);
     std::vector<void*>  h_output_ptrs(totalChunks);
     std::vector<size_t> h_input_sizes(totalChunks);
@@ -119,25 +115,14 @@ nvcomp_batch_compress(
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
-    // Compute actual byte offset of each chunk in the input pool
-    size_t pool_offset = 0;
+    // Point directly into GPU tensor memory
     for (size_t c = 0; c < totalChunks; c++) {
-        h_input_ptrs[c]  = (uint8_t*)d_input_pool  + pool_offset;
+        h_input_ptrs[c]  = (void*)chunks[c].src_ptr;
         h_output_ptrs[c] = (uint8_t*)d_output_pool + c * maxOutPerChunk;
         h_input_sizes[c] = chunks[c].chunk_size;
-        pool_offset += (chunks[c].chunk_size + 255) & ~size_t(255);  // round up to 256-byte
     }
 
-    // H2D: upload all chunks async — no sync
-    for (size_t c = 0; c < totalChunks; c++) {
-        CHECK_CUDA(cudaMemcpyAsync(
-            h_input_ptrs[c],
-            inputs[chunks[c].buf_idx] + chunks[c].offset,
-            chunks[c].chunk_size,
-            cudaMemcpyHostToDevice, stream));
-    }
-
-    // H2D: upload pointer/size metadata async
+    // H2D: only pointer/size metadata arrays (no need to upload data)
     CHECK_CUDA(cudaMemcpyAsync(d_input_ptrs,  h_input_ptrs.data(),  totalChunks * sizeof(void*),  cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_output_ptrs, h_output_ptrs.data(), totalChunks * sizeof(void*),  cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_input_sizes, h_input_sizes.data(), totalChunks * sizeof(size_t), cudaMemcpyHostToDevice, stream));
@@ -156,7 +141,7 @@ nvcomp_batch_compress(
         (nvcompStatus_t*)d_statuses,
         stream));
 
-    // D2H: read back sizes and statuses async on same stream — no mid-sync
+    // D2H: read back sizes and statuses on the same stream — no mid-sync
     std::vector<size_t>         h_output_sizes(totalChunks);
     std::vector<nvcompStatus_t> h_statuses(totalChunks);
 
@@ -177,17 +162,15 @@ nvcomp_batch_compress(
 
     // Assemble per-buffer results (same framing as original)
     for (size_t i = 0; i < N; i++) {
-        if (sizes[i] == 0) continue;
+        if (inputs[i].numel() == 0) continue;
 
         size_t first = chunk_start_idx[i];
         size_t count = 0;
         for (size_t c = first; c < totalChunks && chunks[c].buf_idx == i; c++) count++;
 
-        std::vector<uint8_t>& out = results[i].compressed;
-
         if (count == 1) {
-            out.resize(h_output_sizes[first]);
-            CHECK_CUDA(cudaMemcpy(out.data(),
+            results[i].compressed = torch::empty({(int64_t)h_output_sizes[first]}, torch::kUInt8);
+            CHECK_CUDA(cudaMemcpy(results[i].compressed.data_ptr<uint8_t>(),
                 (uint8_t*)d_output_pool + first * maxOutPerChunk,
                 h_output_sizes[first], cudaMemcpyDeviceToHost));
         } else {
@@ -195,8 +178,8 @@ nvcomp_batch_compress(
             size_t totalCompressed = 0;
             for (size_t c = first; c < first + count; c++) totalCompressed += h_output_sizes[c];
 
-            out.resize(headerSize + totalCompressed);
-            uint8_t* p = out.data();
+            results[i].compressed = torch::empty({(int64_t)(headerSize + totalCompressed)}, torch::kUInt8);
+            uint8_t* p = results[i].compressed.data_ptr<uint8_t>();
 
             uint64_t nc = count;
             memcpy(p, &nc, 8); p += 8;
@@ -204,7 +187,7 @@ nvcomp_batch_compress(
                 uint64_t us = chunks[c].chunk_size; memcpy(p, &us, 8); p += 8;
             }
             for (size_t c = first; c < first + count; c++) {
-                uint64_t cs = h_output_sizes[c];    memcpy(p, &cs, 8); p += 8;
+                uint64_t cs = h_output_sizes[c]; memcpy(p, &cs, 8); p += 8;
             }
             for (size_t c = first; c < first + count; c++) {
                 CHECK_CUDA(cudaMemcpy(p,
@@ -215,7 +198,6 @@ nvcomp_batch_compress(
         }
     }
 
-    cudaFree(d_input_pool);
     cudaFree(d_output_pool);
     if (d_temp) cudaFree(d_temp);
     cudaFree(d_input_ptrs);
@@ -555,13 +537,13 @@ torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask ,
     return arr2d;
 }
 
-std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
+torch::Tensor BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
     torch::Tensor bits = bitArray.dtype() == torch::kUInt8
         ? bitArray.flatten()
         : bitArray.to(torch::kUInt8).flatten();
 
-    int64_t numBits = bits.numel();
-    int64_t numBytes = (numBits + 7) / 8;
+    int64_t numBits    = bits.numel();
+    int64_t numBytes   = (numBits + 7) / 8;
     int64_t paddedBits = numBytes * 8;
 
     if (paddedBits != numBits) {
@@ -574,39 +556,32 @@ std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
         {128, 64, 32, 16, 8, 4, 2, 1},
         torch::TensorOptions().dtype(torch::kUInt8).device(bits.device()));
 
-    torch::Tensor packed = (bits.reshape({numBytes, 8}) * weights)
+    // Keep result on original device — avoids a CPU round-trip before nvcomp.
+    return (bits.reshape({numBytes, 8}) * weights)
         .sum(1)
         .to(torch::kUInt8)
-        .contiguous()
-        .cpu();
-
-    std::vector<uint8_t> out(numBytes);
-    std::memcpy(out.data(), packed.data_ptr<uint8_t>(), numBytes);
-    return out;
+        .contiguous();
 }
 
-torch::Tensor BitUtils::bytesToBits(const std::vector<uint8_t>& byteSeq , int64_t numBits) {
-    int64_t totalBits = byteSeq.size() * 8;
+torch::Tensor BitUtils::bytesToBits(const torch::Tensor& byteSeq , int64_t numBits) {
+    torch::Tensor bytes = byteSeq.flatten().to(torch::kUInt8);
+    int64_t numBytes  = bytes.numel();
+    int64_t totalBits = numBytes * 8;
 
-    if (numBits == -1) {
-        numBits = totalBits;
-    }
+    if (numBits == -1) numBits = totalBits;
+    numBits = std::min(numBits, totalBits);
 
-    numBits = std::min(numBits , totalBits);
+    // Broadcast each byte against MSB-first weights to extract individual bits.
+    torch::Tensor weights = torch::tensor(
+        {128, 64, 32, 16, 8, 4, 2, 1},
+        torch::TensorOptions().dtype(torch::kUInt8).device(bytes.device()));
 
-    torch::Tensor unpacked = torch::zeros({ numBits } , torch::kBool);
-    auto data = unpacked.data_ptr<bool>();
+    torch::Tensor bits = bytes.unsqueeze(1)  // [N, 1]
+        .bitwise_and(weights)                // broadcast → [N, 8]
+        .ne(0)
+        .reshape({-1});
 
-    for (int64_t bitIdx = 0; bitIdx < numBits; ++bitIdx) {
-        int64_t byteIdx = bitIdx / 8;
-        int64_t bitInByte = bitIdx % 8;
-
-        uint8_t byte = byteSeq[byteIdx];
-        bool bitValue = (byte >> (7 - bitInByte)) & 1;
-        data[bitIdx] = bitValue;
-    }
-
-    return unpacked;
+    return bits.narrow(0, 0, numBits);
 }
 
 uint8_t BitUtils::packByte(const uint8_t* bits) {
@@ -992,11 +967,12 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
     auto compressedData = std::make_unique<CompressedData>();
     int64_t totalBytes = 0;
 
-    auto processMaskBytes = BitUtils::bitsToBytes(mainData.processMask.to(torch::kUInt8));
+    // Change to tensor to avoid memory copy
+    torch::Tensor processMaskBytes = BitUtils::bitsToBytes(mainData.processMask.to(torch::kUInt8));
 
-    auto prefixMaskBytes = BitUtils::bitsToBytes(mainData.prefixMask.to(torch::kUInt8));
-
-    auto maskLengthBytes = serializeTensor(mainData.maskLength);
+    torch::Tensor prefixMaskBytes  = BitUtils::bitsToBytes(mainData.prefixMask.to(torch::kUInt8));
+    
+    torch::Tensor maskLengthBytes  = serializeTensor(mainData.maskLength);
 
     torch::Tensor coeffIntConverted;
     int64_t nUniqueVals = metaData.uniqueVals.size(0);
@@ -1006,7 +982,7 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
         coeffIntConverted = mainData.coeffInt.to(torch::kInt16);
     else
         coeffIntConverted = mainData.coeffInt.to(torch::kInt32);
-    auto coeffIntBytes = serializeTensor(coeffIntConverted);
+    torch::Tensor coeffIntBytes = serializeTensor(coeffIntConverted);
 
     int compressionLevel = 2;
     if (const char* envLevel = std::getenv("CAESAR_GAE_ZSTD_LEVEL")) {
@@ -1016,24 +992,20 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
         }
     }
 
-    size_t raw_process_mask_bytes = 0;
-    size_t raw_prefix_mask_bytes  = 0;
-    size_t raw_mask_length_bytes  = 0;
-    size_t raw_coeff_int_bytes    = 0;
-    
+    // Capture raw sizes before any path moves/frees these tensors.
+    size_t raw_process_mask_bytes = (size_t)processMaskBytes.numel();
+    size_t raw_prefix_mask_bytes  = (size_t)prefixMaskBytes.numel();
+    size_t raw_mask_length_bytes  = (size_t)maskLengthBytes.numel();
+    size_t raw_coeff_int_bytes    = (size_t)coeffIntBytes.numel();
+
     bool use_nvcomp = false;
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-use_nvcomp = device_.is_cuda();
-#endif
-    
-#ifdef USE_CUDA
-#else
+    use_nvcomp = device_.is_cuda();
 #endif
 
-#ifdef ENABLE_NVCOMP
-#else
-#endif
-    std::vector<uint8_t> processMaskCompressed , prefixMaskCompressed , maskLengthCompressed , coeffIntCompressed;
+    // Change to tensors
+    torch::Tensor processMaskCompressed, prefixMaskCompressed,
+                  maskLengthCompressed,  coeffIntCompressed;
     std::vector<size_t> compressedSizes;
 
     #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
@@ -1041,32 +1013,33 @@ use_nvcomp = device_.is_cuda();
     {
         std::cout << "[GAE Coeff Compression] NVCOMP ZSTD batched (4 buffers, 1 call)\n";
 
-        std::vector<const uint8_t*> ptrs  = { processMaskBytes.data(), prefixMaskBytes.data(), maskLengthBytes.data(), coeffIntBytes.data() };
-        std::vector<size_t>         sizes = { processMaskBytes.size(), prefixMaskBytes.size(), maskLengthBytes.size(), coeffIntBytes.size() };
+        // processMask/prefixMask are already on GPU (from bitsToBytes).
+        // maskLength/coeffInt come from serializeTensor (CPU) — move to GPU for the batch.
+        std::vector<torch::Tensor> inputs = {
+            processMaskBytes.contiguous(),
+            prefixMaskBytes.contiguous(),
+            maskLengthBytes.to(device_).contiguous(),
+            coeffIntBytes.to(device_).contiguous()
+        };
 
-        auto batchResults = nvcomp_batch_compress(ptrs, sizes );
+        auto batchResults = nvcomp_batch_compress(inputs);
 
-        raw_process_mask_bytes = sizes[0];
-        raw_prefix_mask_bytes  = sizes[1];
-        raw_mask_length_bytes  = sizes[2];
-        raw_coeff_int_bytes    = sizes[3];
+        // Release input tensors now that compression is done.
+        processMaskBytes = torch::Tensor();
+        prefixMaskBytes  = torch::Tensor();
+        maskLengthBytes  = torch::Tensor();
+        coeffIntBytes    = torch::Tensor();
 
         processMaskCompressed = std::move(batchResults[0].compressed);
         prefixMaskCompressed  = std::move(batchResults[1].compressed);
         maskLengthCompressed  = std::move(batchResults[2].compressed);
         coeffIntCompressed    = std::move(batchResults[3].compressed);
 
-        // Free raw buffers
-        processMaskBytes.clear(); processMaskBytes.shrink_to_fit();
-        prefixMaskBytes.clear();  prefixMaskBytes.shrink_to_fit();
-        maskLengthBytes.clear();  maskLengthBytes.shrink_to_fit();
-        coeffIntBytes.clear();    coeffIntBytes.shrink_to_fit();
-
         compressedSizes = {
-            processMaskCompressed.size(),
-            prefixMaskCompressed.size(),
-            maskLengthCompressed.size(),
-            coeffIntCompressed.size()
+            (size_t)processMaskCompressed.numel(),
+            (size_t)prefixMaskCompressed.numel(),
+            (size_t)maskLengthCompressed.numel(),
+            (size_t)coeffIntCompressed.numel()
         };
     }
 #endif
@@ -1075,15 +1048,15 @@ use_nvcomp = device_.is_cuda();
     {
         std::cout << "[GAE Coeff Compression] CPU ZSTD is used (zstdmt)\n";
 
-        auto zstd_compress_mt = [&](const std::vector<uint8_t>& in,
+        auto zstd_compress_mt = [&](const torch::Tensor& in_tensor,
                                     std::vector<uint8_t>& out,
                                     int level,
                                     int workers) -> size_t
         {
-            if (in.empty()) {
-                out.clear();
-                return 0;
-            }
+            if (in_tensor.numel() == 0) { out.clear(); return 0; }
+
+            const uint8_t* data      = in_tensor.data_ptr<uint8_t>();
+            size_t         data_size = (size_t)in_tensor.numel();
 
             // sanity: require zstd >= 1.4.0 for ZSTD_c_nbWorkers
             #if !defined(ZSTD_VERSION_NUMBER) || (ZSTD_VERSION_NUMBER < 10400)
@@ -1108,11 +1081,11 @@ use_nvcomp = device_.is_cuda();
             }
 
             // allocate output
-            size_t bound = ZSTD_compressBound(in.size());
+            size_t bound = ZSTD_compressBound(data_size);
             out.resize(bound);
 
             // compress
-            size_t compSize = ZSTD_compress2(cctx, out.data(), out.size(), in.data(), in.size());
+            size_t compSize = ZSTD_compress2(cctx, out.data(), out.size(), data, data_size);
 
             ZSTD_freeCCtx(cctx);
 
@@ -1124,26 +1097,32 @@ use_nvcomp = device_.is_cuda();
             return compSize;
         };
 
-        const int workers = get_allocated_cores();  // default 
+        // processMask/prefixMask are GPU tensors from bitsToBytes — bring to CPU.
+        torch::Tensor pmbCpu  = processMaskBytes.cpu().contiguous();
+        torch::Tensor pfmbCpu = prefixMaskBytes.cpu().contiguous();
+        // maskLengthBytes and coeffIntBytes are already CPU tensors.
+
+        // Release GPU tensors now that CPU copies exist.
+        processMaskBytes = torch::Tensor();
+        prefixMaskBytes  = torch::Tensor();
+
+        const int workers = get_allocated_cores();
         std::cout << "Using " << workers << " threads for zstd compression\n";
-        size_t processMaskCompSize = zstd_compress_mt(processMaskBytes, processMaskCompressed, compressionLevel, workers);
 
-        size_t prefixMaskCompSize  = zstd_compress_mt(prefixMaskBytes,  prefixMaskCompressed,  compressionLevel, workers);
+        std::vector<uint8_t> pmc, pfmc, mlc, cic;
+        size_t processMaskCompSize = zstd_compress_mt(pmbCpu,         pmc, compressionLevel, workers);
+        size_t prefixMaskCompSize  = zstd_compress_mt(pfmbCpu,        pfmc, compressionLevel, workers);
+        size_t maskLengthCompSize  = zstd_compress_mt(maskLengthBytes, mlc, compressionLevel, workers);
+        size_t coeffIntCompSize    = zstd_compress_mt(coeffIntBytes,   cic, compressionLevel, workers);
 
-        size_t maskLengthCompSize  = zstd_compress_mt(maskLengthBytes,  maskLengthCompressed,  compressionLevel, workers);
+        maskLengthBytes = torch::Tensor();
+        coeffIntBytes   = torch::Tensor();
 
-        size_t coeffIntCompSize    = zstd_compress_mt(coeffIntBytes,    coeffIntCompressed,    compressionLevel, workers);
-        
-        raw_process_mask_bytes = processMaskBytes.size();
-        raw_prefix_mask_bytes  = prefixMaskBytes.size();
-        raw_mask_length_bytes  = maskLengthBytes.size();
-        raw_coeff_int_bytes    = coeffIntBytes.size();
-        
-        // free raw buffers after compression finished
-        processMaskBytes.clear(); processMaskBytes.shrink_to_fit();
-        prefixMaskBytes.clear();  prefixMaskBytes.shrink_to_fit();
-        maskLengthBytes.clear();  maskLengthBytes.shrink_to_fit();
-        coeffIntBytes.clear();    coeffIntBytes.shrink_to_fit();
+        // Wrap compressed vectors into tensors for uniform assembly below.
+        processMaskCompressed = torch::tensor(pmc, torch::kUInt8);
+        prefixMaskCompressed  = torch::tensor(pfmc, torch::kUInt8);
+        maskLengthCompressed  = torch::tensor(mlc, torch::kUInt8);
+        coeffIntCompressed    = torch::tensor(cic, torch::kUInt8);
 
         compressedSizes = {
             processMaskCompSize,
@@ -1153,38 +1132,35 @@ use_nvcomp = device_.is_cuda();
         };
     }
 
-    size_t comp_process_mask_bytes = processMaskCompressed.size();
-    size_t comp_prefix_mask_bytes  = prefixMaskCompressed.size();
-    size_t comp_mask_length_bytes  = maskLengthCompressed.size();
-    size_t comp_coeff_int_bytes    = coeffIntCompressed.size();
+    size_t comp_process_mask_bytes = (size_t)processMaskCompressed.numel();
+    size_t comp_prefix_mask_bytes  = (size_t)prefixMaskCompressed.numel();
+    size_t comp_mask_length_bytes  = (size_t)maskLengthCompressed.numel();
+    size_t comp_coeff_int_bytes    = (size_t)coeffIntCompressed.numel();
 
     auto CR = [](size_t rawb, size_t compb) -> double {
         return compb ? (double)rawb / (double)compb : 0.0;
     };
 
     const size_t totalCompressedPayloadBytes =
-        processMaskCompressed.size() +
-        prefixMaskCompressed.size() +
-        maskLengthCompressed.size() +
-        coeffIntCompressed.size();
+        comp_process_mask_bytes + comp_prefix_mask_bytes +
+        comp_mask_length_bytes  + comp_coeff_int_bytes;
 
     compressedData->data.clear();
     compressedData->data.reserve(4 * sizeof(size_t) + totalCompressedPayloadBytes);
 
-    for (size_t size : compressedSizes) {
-        for (int i = 0; i < 8; ++i) {
-            compressedData->data.push_back((size >> (i * 8)) & 0xFF);
-        }
+    for (size_t sz : compressedSizes) {
+        for (int i = 0; i < 8; ++i)
+            compressedData->data.push_back((sz >> (i * 8)) & 0xFF);
     }
 
-    compressedData->data.insert(compressedData->data.end() ,
-        processMaskCompressed.begin() , processMaskCompressed.end());
-    compressedData->data.insert(compressedData->data.end() ,
-        prefixMaskCompressed.begin() , prefixMaskCompressed.end());
-    compressedData->data.insert(compressedData->data.end() ,
-        maskLengthCompressed.begin() , maskLengthCompressed.end());
-    compressedData->data.insert(compressedData->data.end() ,
-        coeffIntCompressed.begin() , coeffIntCompressed.end());
+    auto append_tensor = [&](const torch::Tensor& t) {
+        const uint8_t* p = t.data_ptr<uint8_t>();
+        compressedData->data.insert(compressedData->data.end(), p, p + t.numel());
+    };
+    append_tensor(processMaskCompressed);
+    append_tensor(prefixMaskCompressed);
+    append_tensor(maskLengthCompressed);
+    append_tensor(coeffIntCompressed);
 
     compressedData->coeffIntBytes = raw_coeff_int_bytes;
     totalBytes = compressedData->data.size();
@@ -1235,7 +1211,9 @@ MainData PCACompressor::decompressLossless(
             std::vector<size_t>         decomp_sizes = { processMaskOrigSize };
 
             auto res = nvcomp_batch_decompress(ptrs, comp_sizes, decomp_sizes);
-            mainData.processMask = BitUtils::bytesToBits(res[0], metaData.nVec).to(device_);
+            mainData.processMask = BitUtils::bytesToBits(
+                torch::from_blob(res[0].data(), {(int64_t)res[0].size()}, torch::kUInt8).clone(),
+                metaData.nVec).to(device_);
         }
         offset += compressedSizes[0];
 
@@ -1254,7 +1232,9 @@ MainData PCACompressor::decompressLossless(
             auto res = nvcomp_batch_decompress(ptrs, comp_sizes, decomp_sizes);
 
             // prefixMask
-            mainData.prefixMask = BitUtils::bytesToBits(res[0], metaData.prefixLength).to(device_);
+            mainData.prefixMask = BitUtils::bytesToBits(
+                torch::from_blob(res[0].data(), {(int64_t)res[0].size()}, torch::kUInt8).clone(),
+                metaData.prefixLength).to(device_);
 
             // maskLength
             mainData.maskLength = torch::from_blob(res[1].data(),
@@ -1291,7 +1271,9 @@ MainData PCACompressor::decompressLossless(
         if (ZSTD_isError(sz))
             throw std::runtime_error("process_mask decompression failed");
     }
-    mainData.processMask = BitUtils::bytesToBits(processMaskVec, metaData.nVec).to(device_);
+    mainData.processMask = BitUtils::bytesToBits(
+        torch::from_blob(processMaskVec.data(), {(int64_t)processMaskVec.size()}, torch::kUInt8).clone(),
+        metaData.nVec).to(device_);
     offset += compressedSizes[0];
 
     // prefixMask
@@ -1305,7 +1287,9 @@ MainData PCACompressor::decompressLossless(
         if (ZSTD_isError(sz))
             throw std::runtime_error("prefix_mask decompression failed");
     }
-    mainData.prefixMask = BitUtils::bytesToBits(prefixMaskVec, metaData.prefixLength).to(device_);
+    mainData.prefixMask = BitUtils::bytesToBits(
+        torch::from_blob(prefixMaskVec.data(), {(int64_t)prefixMaskVec.size()}, torch::kUInt8).clone(),
+        metaData.prefixLength).to(device_);
     offset += compressedSizes[1];
 
     // maskLength
@@ -1359,15 +1343,9 @@ torch::Tensor PCACompressor::toCPUContiguous(const torch::Tensor& tensor) {
     return tensor.cpu().contiguous();
 }
 
-std::vector<uint8_t> PCACompressor::serializeTensor(const torch::Tensor& tensor) {
+torch::Tensor PCACompressor::serializeTensor(const torch::Tensor& tensor) {
     auto cpuTensor = toCPUContiguous(tensor);
-    auto dataPtr = cpuTensor.data_ptr();
-    auto numBytes = cpuTensor.numel() * cpuTensor.element_size();
-
-    std::vector<uint8_t> bytes(numBytes);
-    std::memcpy(bytes.data() , dataPtr , numBytes);
-
-    return bytes;
+    return cpuTensor.view(torch::kUInt8).contiguous();
 }
 
 torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes ,
