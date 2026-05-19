@@ -1,6 +1,4 @@
 #include "../CAESAR/models/runGaeCuda.h" 
-#include <iostream>
-#include <chrono>
 
 
 // Helper function to compute NRMSE (Normalized Root Mean Square Error)
@@ -769,15 +767,17 @@ void testBitUtils() {
 
         std::cout << "Output bytes: ";
 
-        for (uint8_t byte : bytes) {
-            std::cout << static_cast<int>(byte) << " ";
+        auto bytes_cpu = bytes.to(torch::kCPU).contiguous();
+
+        for (int i = 0; i < bytes_cpu.numel(); ++i) {
+            std::cout << (int)bytes_cpu[i].item<uint8_t>() << " ";
         }
 
         std::cout << std::endl;
 
         // Expected: 178 (10110010 in binary)
-        assert(bytes.size() == 1);
-        assert(bytes[0] == 178);
+        assert(bytes_cpu.numel() == 1);
+        assert(bytes_cpu[0].item<uint8_t>() == 178);
 
         std::cout << "Test 1 passed" << std::endl;
     }
@@ -786,7 +786,7 @@ void testBitUtils() {
     {
         std::cout << "Test 2: Bytes to bits conversion..." << std::endl;
 
-        std::vector<uint8_t> bytes = {178};
+        torch::Tensor bytes = torch::tensor({178}, torch::kUInt8);
 
         auto bits = BitUtils::bytesToBits(bytes);
 
