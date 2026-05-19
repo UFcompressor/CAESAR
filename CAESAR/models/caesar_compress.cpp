@@ -6,6 +6,7 @@
 #include <fstream>
 #include <cmath>
 #include <limits>
+#include <utility>
 #ifdef USE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
@@ -550,7 +551,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   result.gaeMetaData.prefixLength  = gae_compression_result.metaData.prefixLength;
   result.gaeMetaData.dataBytes     = gae_compression_result.metaData.dataBytes;
   result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
-  result.gae_comp_data             = gae_compression_result.compressedData->data;
+  result.gae_comp_data             = std::move(gae_compression_result.compressedData->data);
 
   if (result.gaeMetaData.GAE_correction_occur) {
     result.gaeMetaData.pcaBasis =
@@ -558,18 +559,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.gaeMetaData.uniqueVals =
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
 
-    MetaData gae_record_metaData;
-    gae_record_metaData.pcaBasis     = gae_compression_result.metaData.pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals   = gae_compression_result.metaData.uniqueVals.to(device_);
-    gae_record_metaData.quanBin      = result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec         = result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes    = result.gaeMetaData.dataBytes;
-
-    CompressedData gae_record_compressedData;
-    gae_record_compressedData.data          = result.gae_comp_data;
-    gae_record_compressedData.dataBytes     = result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
   } else {
     std::cout << "[GAE SKIPPED] No data processed by GAE.\n";
   }
