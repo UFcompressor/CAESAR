@@ -972,7 +972,9 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
 
     torch::Tensor prefixMaskBytes  = BitUtils::bitsToBytes(mainData.prefixMask.to(torch::kUInt8));
     
-    torch::Tensor maskLengthBytes  = serializeTensor(mainData.maskLength);
+    // torch::Tensor maskLengthBytes  = serializeTensor(mainData.maskLength);
+    // Remove D2H memory copy caused by serilizeTensor
+    torch::Tensor maskLengthBytes = mainData.maskLength.contiguous().view(torch::kUInt8);
 
     torch::Tensor coeffIntConverted;
     int64_t nUniqueVals = metaData.uniqueVals.size(0);
@@ -982,7 +984,8 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
         coeffIntConverted = mainData.coeffInt.to(torch::kInt16);
     else
         coeffIntConverted = mainData.coeffInt.to(torch::kInt32);
-    torch::Tensor coeffIntBytes = serializeTensor(coeffIntConverted);
+    // torch::Tensor coeffIntBytes = serializeTensor(coeffIntConverted);
+    torch::Tensor coeffIntBytes = coeffIntConverted.contiguous().view(torch::kUInt8);
 
     int compressionLevel = 2;
     if (const char* envLevel = std::getenv("CAESAR_GAE_ZSTD_LEVEL")) {
@@ -1018,8 +1021,8 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
         std::vector<torch::Tensor> inputs = {
             processMaskBytes.contiguous(),
             prefixMaskBytes.contiguous(),
-            maskLengthBytes.to(device_).contiguous(),
-            coeffIntBytes.to(device_).contiguous()
+            maskLengthBytes.contiguous(),
+            coeffIntBytes.contiguous()
         };
 
         auto batchResults = nvcomp_batch_compress(inputs);
@@ -1097,14 +1100,17 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
             return compSize;
         };
 
-        // processMask/prefixMask are GPU tensors from bitsToBytes — bring to CPU.
+        // Brings data back to cpu
         torch::Tensor pmbCpu  = processMaskBytes.cpu().contiguous();
         torch::Tensor pfmbCpu = prefixMaskBytes.cpu().contiguous();
-        // maskLengthBytes and coeffIntBytes are already CPU tensors.
+        torch::Tensor mlbCpu  = maskLengthBytes.cpu().contiguous();
+        torch::Tensor cibCpu  = coeffIntBytes.cpu().contiguous();
 
         // Release GPU tensors now that CPU copies exist.
         processMaskBytes = torch::Tensor();
         prefixMaskBytes  = torch::Tensor();
+        maskLengthBytes  = torch::Tensor();
+        coeffIntBytes    = torch::Tensor();
 
         const int workers = get_allocated_cores();
         std::cout << "Using " << workers << " threads for zstd compression\n";
@@ -1112,11 +1118,8 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
         std::vector<uint8_t> pmc, pfmc, mlc, cic;
         size_t processMaskCompSize = zstd_compress_mt(pmbCpu,         pmc, compressionLevel, workers);
         size_t prefixMaskCompSize  = zstd_compress_mt(pfmbCpu,        pfmc, compressionLevel, workers);
-        size_t maskLengthCompSize  = zstd_compress_mt(maskLengthBytes, mlc, compressionLevel, workers);
-        size_t coeffIntCompSize    = zstd_compress_mt(coeffIntBytes,   cic, compressionLevel, workers);
-
-        maskLengthBytes = torch::Tensor();
-        coeffIntBytes   = torch::Tensor();
+        size_t maskLengthCompSize  = zstd_compress_mt(mlbCpu,   mlc, compressionLevel, workers);
+        size_t coeffIntCompSize    = zstd_compress_mt(cibCpu,   cic, compressionLevel, workers);
 
         // Wrap compressed vectors into tensors for uniform assembly below.
         processMaskCompressed = torch::tensor(pmc, torch::kUInt8);
