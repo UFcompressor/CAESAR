@@ -132,3 +132,71 @@ torch::Tensor restore_from_5d(torch::Tensor& padded_5d,
 
   return restored;
 }
+
+
+// for caesar_V will change api and test soon !!!!!!!!!!!!!!!!!!
+std::pair<torch::Tensor, TileUpscaleInfo> prepare_tile_for_caesar(torch::Tensor& tile) {
+    const int64_t MIN_H = 256, MIN_W = 256, N_FRAMES = 8;
+
+    int64_t orig_H = tile.size(-2);
+    int64_t orig_W = tile.size(-1);
+    int64_t orig_B = tile.numel() / (orig_H * orig_W);
+    int64_t target_H = std::max(orig_H, MIN_H);
+    int64_t target_W = std::max(orig_W, MIN_W);
+    bool needs_upsample = (orig_H < MIN_H || orig_W < MIN_W);
+
+    torch::Tensor spatial = tile.reshape({orig_B, 1, orig_H, orig_W});
+
+    if (needs_upsample) {
+        spatial = torch::nn::functional::interpolate(
+            spatial,
+            torch::nn::functional::InterpolateFuncOptions()
+                .size(std::vector<int64_t>{target_H, target_W})
+                .mode(torch::kBicubic)
+                .align_corners(false));
+    }
+
+    torch::Tensor frame = spatial.squeeze(1).unsqueeze(0).unsqueeze(0);
+
+    int64_t D = frame.size(2);
+    if (D < N_FRAMES) {
+        int64_t reps = (N_FRAMES + D - 1) / D;
+        frame = frame.repeat({1, 1, reps, 1, 1})
+                     .index({torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice(0, N_FRAMES),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice()});
+    }
+
+    TileUpscaleInfo info;
+    info.orig_H        = orig_H;
+    info.orig_W        = orig_W;
+    info.orig_B        = orig_B;
+    info.needs_upsample = needs_upsample;
+
+    return {frame, info};
+}
+
+torch::Tensor restore_tile_from_caesar(torch::Tensor& recon,
+                                       const TileUpscaleInfo& info) {
+    int64_t target_H = std::max(info.orig_H, (int64_t)256);
+    int64_t target_W = std::max(info.orig_W, (int64_t)256);
+
+    torch::Tensor spatial = recon.reshape({-1, 1, target_H, target_W});
+    spatial = spatial.index({torch::indexing::Slice(0, info.orig_B),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice()});
+
+    if (info.needs_upsample) {
+        spatial = torch::nn::functional::interpolate(
+            spatial,
+            torch::nn::functional::InterpolateFuncOptions()
+                .size(std::vector<int64_t>{info.orig_H, info.orig_W})
+                .mode(torch::kBicubic)
+                .align_corners(false));
+    }
+
+    return spatial.squeeze(1).contiguous();
+}

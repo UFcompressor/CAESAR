@@ -127,25 +127,33 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
 
     // Compute the max batch size that keeps total elements under INT32_MAX
     // so reflection_pad2d never hits the 32-bit index limit
-    constexpr int64_t INT32_MAX_VAL = std::numeric_limits<int32_t>::max();
-    int64_t elems_per_slice = T * H_target * W_target; 
-    int64_t safe_batch = std::max(INT64_C(1), INT32_MAX_VAL / elems_per_slice);
+    torch::Tensor padded;
+    if (left == 0 && right == 0 && top == 0 && down == 0) {
+        // Avoid CUDA reflection_pad2d 32-bit indexing limit for huge no-op pads.
+        padded = reshaped;
+    }
+    else {
+        constexpr int64_t INT32_MAX_VAL = std::numeric_limits<int32_t>::max();
+        int64_t elems_per_slice = T * H_target * W_target;
+        int64_t safe_batch = std::max(INT64_C(1), INT32_MAX_VAL / elems_per_slice);
 
-    std::vector<torch::Tensor> chunks;
-    chunks.reserve((V * S + safe_batch - 1) / safe_batch);
+        std::vector<torch::Tensor> chunks;
+        chunks.reserve((V * S + safe_batch - 1) / safe_batch);
 
-    for (int64_t i = 0; i < V * S; i += safe_batch) {
-        int64_t end   = std::min(i + safe_batch, V * S);
-        auto chunk    = reshaped.slice(0, i, end);
-        auto padded_chunk = torch::nn::functional::pad(
-            chunk,
-            torch::nn::functional::PadFuncOptions({left, right, top, down})
-                .mode(torch::kReflect)
-        );
-        chunks.push_back(std::move(padded_chunk));
+        for (int64_t i = 0; i < V * S; i += safe_batch) {
+            int64_t end   = std::min(i + safe_batch, V * S);
+            auto chunk    = reshaped.slice(0, i, end);
+            auto padded_chunk = torch::nn::functional::pad(
+                chunk,
+                torch::nn::functional::PadFuncOptions({left, right, top, down})
+                    .mode(torch::kReflect)
+            );
+            chunks.push_back(std::move(padded_chunk));
+        }
+
+        padded = torch::cat(chunks, 0);
     }
 
-    auto padded  = torch::cat(chunks, 0);
     auto restored = padded.view({V, S, T, H_target, W_target});
     auto blocked  = restored.reshape({V, S, T, nH, hBlock, nW, wBlock})
                              .permute({0, 1, 3, 5, 2, 4, 6})

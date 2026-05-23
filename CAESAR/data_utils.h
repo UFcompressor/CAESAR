@@ -45,3 +45,14 @@ torch::Tensor restore_from_5d(
     torch::Tensor& padded_5d,
     const PaddingInfo& info
 );
+
+struct TileUpscaleInfo {
+    int64_t orig_H;
+    int64_t orig_W;
+    int64_t orig_B;
+    bool needs_upsample;
+};
+
+std::pair<torch::Tensor, TileUpscaleInfo> prepare_tile_for_caesar(torch::Tensor& tile);
+
+torch::Tensor restore_tile_from_caesar(torch::Tensor& recon, const TileUpscaleInfo& info);
