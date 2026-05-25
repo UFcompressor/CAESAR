@@ -1,22 +1,19 @@
 @PACKAGE_INIT@
-
 include(CMakeFindDependencyMacro)
 
+set(Torch_DIR "@Torch_DIR@")
 find_dependency(Torch REQUIRED)
-
 
 if(NOT TARGET zstd_target)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(ZSTD libzstd IMPORTED_TARGET)
     endif()
-    
     if(ZSTD_FOUND)
         add_library(zstd_target ALIAS PkgConfig::ZSTD)
     else()
         find_path(ZSTD_INCLUDE_DIR zstd.h)
         find_library(ZSTD_LIBRARY NAMES zstd aocl_compression)
-        
         if(ZSTD_INCLUDE_DIR AND ZSTD_LIBRARY)
             add_library(zstd_target UNKNOWN IMPORTED)
             set_target_properties(zstd_target PROPERTIES
@@ -26,6 +23,18 @@ if(NOT TARGET zstd_target)
         else()
             message(FATAL_ERROR "Zstd library not found")
         endif()
+    endif()
+endif()
+
+if("@NVCOMP_FOUND@" AND NOT TARGET nvcomp)
+    set(NVCOMP_INCLUDE_DIR "@NVCOMP_INCLUDE_DIR@")
+    set(NVCOMP_LIBRARY "@NVCOMP_LIBRARY@")
+    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
+        add_library(nvcomp UNKNOWN IMPORTED)
+        set_target_properties(nvcomp PROPERTIES
+            IMPORTED_LOCATION "${NVCOMP_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${NVCOMP_INCLUDE_DIR}"
+        )
     endif()
 endif()
 
