@@ -769,18 +769,15 @@ void testBitUtils() {
 
         std::cout << "Output bytes: ";
 
-        // ---- FIX: Tensor-safe iteration ----
-        auto bytes_cpu = bytes.to(torch::kCPU).contiguous();
-
-        for (int i = 0; i < bytes_cpu.numel(); ++i) {
-            std::cout << (int)bytes_cpu[i].item<uint8_t>() << " ";
+        for (uint8_t byte : bytes) {
+            std::cout << static_cast<int>(byte) << " ";
         }
 
         std::cout << std::endl;
 
         // Expected: 178 (10110010 in binary)
-        assert(bytes_cpu.numel() == 1);
-        assert(bytes_cpu[0].item<uint8_t>() == 178);
+        assert(bytes.size() == 1);
+        assert(bytes[0] == 178);
 
         std::cout << "Test 1 passed" << std::endl;
     }
@@ -789,7 +786,7 @@ void testBitUtils() {
     {
         std::cout << "Test 2: Bytes to bits conversion..." << std::endl;
 
-        torch::Tensor bytes = torch::tensor({178}, torch::kUInt8);
+        std::vector<uint8_t> bytes = {178};
 
         auto bits = BitUtils::bytesToBits(bytes);
 
