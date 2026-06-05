@@ -426,9 +426,6 @@ torch::Tensor BaseDataset::apply_downsampling(torch::Tensor data, int step) {
 ScientificDataset::ScientificDataset(const DatasetConfig& config)
     : BaseDataset(config)
 {
-    std::cout << "*************** Loading dataset ***************\n";
-    std::cout << "Device: " << device_ << "\n";
-
     torch::Tensor data;
 
     if (config.memory_data.has_value()) {
@@ -511,7 +508,6 @@ ScientificDataset::ScientificDataset(const DatasetConfig& config)
     visible_length = update_length();
     reverse_id_map = buildReverseIdMap(visible_length, filtered_labels);
     
-    std::cout << "Dataset loaded successfully on " << device_ << "\n";
 }
 
 torch::Tensor ScientificDataset::loadDatasetInMemory(

@@ -6,7 +6,7 @@
 #include <iostream>
 #include <chrono>
 #include <torch/torch.h>
-//** JL modified **//
+
 #ifdef USE_CUDA
     #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
         #include <hip/hip_runtime.h>

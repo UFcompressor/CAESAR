@@ -9,7 +9,7 @@
 #include "../dataset/dataset.h"
 
 
-// ** JL modified ** //
+
 struct GAEMetaData {
     bool GAE_correction_occur;
     std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
@@ -33,12 +33,11 @@ struct CompressionMetaData {
     float global_offset; // global info
     int64_t pad_T; // global_info
 };
-// **** //
+
 
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
-    // ** JL modified ** //
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
     // record metadata for decompression
@@ -46,7 +45,6 @@ struct CompressionResult {
     GAEMetaData gaeMetaData;
 
 
-    // **** //
     int num_samples;
     int num_batches;
 };
