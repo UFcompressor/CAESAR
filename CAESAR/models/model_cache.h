@@ -40,7 +40,6 @@ public:
         
         prob_tables_loaded_ = false;
 
-        std::cout << "[ModelCache] All cached models and tables have been cleared." << std::endl;
     }
 
     torch::inductor::AOTIModelPackageLoader* get_compressor_model() {
