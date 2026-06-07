@@ -151,3 +151,14 @@ int get_allocated_cores() {
     // any other OS or fallback
     return 4;
 }
+
+
+std::string get_model_name() {
+    std::ifstream f(get_model_file("model_name.txt"));
+    if (!f.is_open()) {
+        throw std::runtime_error("Could not open model_name.txt");
+    }
+    std::string name;
+    std::getline(f, name);
+    return name;
+}

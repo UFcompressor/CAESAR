@@ -473,6 +473,8 @@ gs_cdf_length = model.entropy_model.range_coder.gaussian._cdf_length
 gs_offset = model.entropy_model.range_coder.gaussian._offset
 
 os.makedirs("./exported_model/", exist_ok=True)
+with open("./exported_model/model_name.txt", "w") as f:
+    f.write("caesar_v")
 
 quantized_cdf.detach().cpu().numpy().tofile("exported_model/vbr_quantized_cdf.bin")
 cdf_length.detach().cpu().numpy().tofile("exported_model/vbr_cdf_length.bin")

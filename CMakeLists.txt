@@ -45,9 +45,9 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/exported_model/
         DESTINATION share/caesar/models
         FILES_MATCHING PATTERN "*.bin" PATTERN "*.pt2")
         
-add_library(caesar::caesar ALIAS caesar_lib)
+add_library(caesar::caesar ALIAS caesar)
 
-install(TARGETS caesar_lib
+install(TARGETS caesar
   EXPORT CAESARTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib

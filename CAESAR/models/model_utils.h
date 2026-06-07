@@ -57,3 +57,5 @@ std::chrono::high_resolution_clock::time_point get_start_time();
 std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_point start);
 
 int get_allocated_cores();
+
+std::string get_model_name();
