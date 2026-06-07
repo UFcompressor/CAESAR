@@ -30,16 +30,16 @@ endif()
 
 
 add_executable(test_caesarCD test_caesarCD.cpp)
-target_link_libraries(test_caesarCD PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+target_link_libraries(test_caesarCD PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
 add_executable(test_padding test_padding.cpp)
-target_link_libraries(test_padding PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+target_link_libraries(test_padding PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
 
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
-target_link_libraries(test_runGaeCuda PRIVATE caesar_lib "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+target_link_libraries(test_runGaeCuda PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 if(USE_CUDA)
     target_compile_definitions(test_runGaeCuda PRIVATE USE_CUDA)

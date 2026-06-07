@@ -416,6 +416,8 @@ cdf_length = cdf_length.to(torch.int32)
 model.entropy_model.range_coder = RangeCoder(_quantized_cdf = quantized_cdf, _cdf_length= cdf_length, _offset= offset, medians = medians, device=device)
 
 os.makedirs('./exported_model/', exist_ok=True)
+with open("./exported_model/model_name.txt", "w") as f:
+    f.write("caesar_v")
 
 model.eval()
 with torch.no_grad():

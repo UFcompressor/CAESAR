@@ -54,8 +54,6 @@ if(USE_CUDA)
     if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
         set(NVCOMP_FOUND TRUE)
         message(STATUS ">>> Found nvcomp: ${NVCOMP_LIBRARY}")
-    else()
-        message(STATUS ">>> nvcomp NOT found. Will use Hybrid Mode (GPU PCA + CPU ZSTD)")
     endif()
 endif()
 
@@ -69,34 +67,33 @@ set(CAESAR_SRC
     models/runGaeCuda.cpp
     models/gaeFusedKernels.cu
     data_utils.cpp
-
 )
 
-add_library(caesar_lib SHARED ${CAESAR_SRC})
+add_library(caesar SHARED ${CAESAR_SRC})
 
-target_compile_definitions(caesar_lib PRIVATE
+target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
 if(USE_CUDA)
-    target_compile_definitions(caesar_lib PUBLIC USE_CUDA)
+    target_compile_definitions(caesar PUBLIC USE_CUDA)
     message(STATUS "Build defined with USE_CUDA")
 
     if(HIP_FOUND)
-        target_compile_definitions(caesar_lib PUBLIC USE_ROCM)
+        target_compile_definitions(caesar PUBLIC USE_ROCM)
     endif()
 endif()
 
 if(NVCOMP_FOUND)
-    target_compile_definitions(caesar_lib PRIVATE ENABLE_NVCOMP)
+    target_compile_definitions(caesar PRIVATE ENABLE_NVCOMP)
     message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
 # TODO: Mark model type - Currently only CAESAR_V is implemented
-target_compile_definitions(caesar_lib PRIVATE MODEL_CAESAR_V_ONLY)
+target_compile_definitions(caesar PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 
-target_include_directories(caesar_lib
+target_include_directories(caesar
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dataset>
@@ -105,69 +102,69 @@ target_include_directories(caesar_lib
         $<INSTALL_INTERFACE:include/caesar>
 )
 
-target_link_libraries(caesar_lib PUBLIC zstd_target torch)
+target_link_libraries(caesar PUBLIC zstd_target torch)
 
 if(USE_CUDA)
     if(CUDA_FOUND)
-        target_include_directories(caesar_lib PRIVATE ${CUDA_INCLUDE_DIRS})
-        target_link_libraries(caesar_lib PUBLIC ${CUDA_LIBRARIES})
+        target_include_directories(caesar PRIVATE ${CUDA_INCLUDE_DIRS})
+        target_link_libraries(caesar PUBLIC ${CUDA_LIBRARIES})
     endif()
 
     if(NVCOMP_FOUND)
-        target_include_directories(caesar_lib PRIVATE ${NVCOMP_INCLUDE_DIR})
-        target_link_libraries(caesar_lib PUBLIC ${NVCOMP_LIBRARY})
+        target_include_directories(caesar PRIVATE ${NVCOMP_INCLUDE_DIR})
+        target_link_libraries(caesar PUBLIC ${NVCOMP_LIBRARY})
     endif()
 endif()
 
-target_compile_options(caesar_lib PRIVATE
+target_compile_options(caesar PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3  -mtune=native -fprefetch-loop-arrays>
     $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
 )
 
 if(USE_CUDA)
-    target_compile_options(caesar_lib PRIVATE
+    target_compile_options(caesar PRIVATE
         $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>
     )
 
-    target_compile_options(caesar_lib PRIVATE
+    target_compile_options(caesar PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -O3 --maxrregcount=64>
     )
 endif()
 
-set_target_properties(caesar_lib PROPERTIES
+set_target_properties(caesar PROPERTIES
     VERSION 1.0.0
     SOVERSION 1
 )
 
+add_executable(caesar_cli CAESAR.cpp)
 
-add_executable(caesar CAESAR.cpp)
-
-target_link_libraries(caesar PRIVATE caesar_lib torch)
+target_link_libraries(caesar_cli PRIVATE caesar torch)
 
 if(USE_CUDA)
-    target_compile_definitions(caesar PRIVATE USE_CUDA)
+    target_compile_definitions(caesar_cli PRIVATE USE_CUDA)
     if(HIP_FOUND)
-        target_compile_definitions(caesar PRIVATE USE_ROCM)
+        target_compile_definitions(caesar_cli PRIVATE USE_ROCM)
     endif()
 endif()
 
-target_compile_definitions(caesar PRIVATE MODEL_CAESAR_V_ONLY)
+target_compile_definitions(caesar_cli PRIVATE MODEL_CAESAR_V_ONLY)
 
-target_compile_options(caesar PRIVATE
+target_compile_options(caesar_cli PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -mtune=native>
     $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer>
 )
 
+set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
 
-install(TARGETS caesar_lib
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-)
 
 install(TARGETS caesar
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+)
+
+install(TARGETS caesar_cli
     RUNTIME DESTINATION bin
 )
 
@@ -182,6 +179,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/models/pretrained")
     )
 endif()
 
+# install model_name.txt if it exists
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
+        DESTINATION share/caesar/models
+    )
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt" CAESAR_MODEL_NAME)
+    string(STRIP "${CAESAR_MODEL_NAME}" CAESAR_MODEL_NAME)
+else()
+  message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
+endif()
+
+
 message(STATUS "")
 message(STATUS "========================================")
 message(STATUS "CAESAR Build Configuration Summary")
@@ -190,7 +199,7 @@ message(STATUS "GPU Support:       ${USE_CUDA}")
 if(USE_CUDA)
     message(STATUS "nvcomp Support:    ${NVCOMP_FOUND}")
 endif()
-message(STATUS "Model Support:     CAESAR-V only")
+message(STATUS "Model Name:        ${CAESAR_MODEL_NAME}")
 message(STATUS "CLI Executable:    caesar")
 message(STATUS "Install Prefix:    ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "========================================")

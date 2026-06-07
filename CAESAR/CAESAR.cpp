@@ -383,7 +383,6 @@ void print_usage(const char* program_name) {
   std::cout << "  -h, --help               Show this help message\n\n";
   std::cout << "Compression Options:\n";
   std::cout << "  -e, --error-bound <val>  Error bound (default: 0.001)\n";
-  std::cout << "  -m, --model <V|D>        Model type (default: V)\n";
   std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --force-padding          Force padding\n";
@@ -506,7 +505,7 @@ int compress_file(const std::string& input_file, const std::string& output_file,
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
     std::cout << "Output file: " << output_file << "\n";
-    std::cout << "Model: CAESAR-" << model_type << "\n";
+    std::cout << "Model: " << model_type << "\n";
     std::cout << "Compression device: " << compress_device << "\n";
     std::cout << "Error bound: " << error_bound << "\n";
     std::cout << "Batch size: " << batch_size << "\n";
@@ -752,7 +751,7 @@ int main(int argc, char* argv[]) {
     float error_bound = 0.001f;
     int batch_size = 128;
     int n_frame = 8;
-    std::string model_type = "V";
+    std::string model_type = get_model_name();
     std::string compress_device_str;
     std::string decompress_device_str;
     bool show_timing = false;
@@ -777,11 +776,8 @@ int main(int argc, char* argv[]) {
         batch_size = std::stoi(argv[++i]);
       } else if ((arg == "-f" || arg == "--n-frame") && i + 1 < argc) {
         n_frame = std::stoi(argv[++i]);
-      } else if ((arg == "-m" || arg == "--model") && i + 1 < argc) {
-        model_type = argv[++i];
-        std::transform(model_type.begin(), model_type.end(), model_type.begin(),
-                       ::toupper);
-      } else if (arg == "--compress-device" && i + 1 < argc) {
+      } 
+      else if (arg == "--compress-device" && i + 1 < argc) {
         compress_device_str = argv[++i];
       } else if (arg == "--decompress-device" && i + 1 < argc) {
         decompress_device_str = argv[++i];
