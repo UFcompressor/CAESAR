@@ -2,7 +2,9 @@ name: Cross-Platform Build and Test
 
 on:
   push:
+    branches: ['*']
   pull_request:
+    branches: ['*']
 
 jobs:
   build-test:
@@ -27,7 +29,6 @@ jobs:
           haskell: true
           large-packages: true
           docker-images: true
-          swap-storage: true
           swap-storage: true
 
       - name: Setup Python 3.11
