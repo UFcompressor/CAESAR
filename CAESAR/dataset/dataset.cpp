@@ -125,14 +125,37 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
 
     auto reshaped = data.view({V * S, T, H, W});
 
-    // Compute the max batch size that keeps total elements under INT32_MAX
-    // so reflection_pad2d never hits the 32-bit index limit
     torch::Tensor padded;
     if (left == 0 && right == 0 && top == 0 && down == 0) {
-        // Avoid CUDA reflection_pad2d 32-bit indexing limit for huge no-op pads.
         padded = reshaped;
     }
     else {
+        // Pre-zero-pad only if reflection padding would be impossible
+        if (top >= H || down >= H || left >= W || right >= W) {
+            int64_t pre_h = std::max({top - H + 1, down - H + 1, INT64_C(0)});
+            int64_t pre_w = std::max({left - W + 1, right - W + 1, INT64_C(0)});
+            reshaped = torch::nn::functional::pad(
+                reshaped,
+                torch::nn::functional::PadFuncOptions({pre_w, pre_w, pre_h, pre_h})
+                    .mode(torch::kConstant)
+            );
+            H = reshaped.size(2);
+            W = reshaped.size(3);
+
+            // Recompute targets/padding with updated H and W
+            H_target = static_cast<int64_t>(std::ceil((double)H / hBlock)) * hBlock;
+            dH = H_target - H;
+            top  = dH / 2;
+            down = dH - top;
+            nH   = H_target / hBlock;
+
+            W_target = static_cast<int64_t>(std::ceil((double)W / wBlock)) * wBlock;
+            dW = W_target - W;
+            left  = dW / 2;
+            right = dW - left;
+            nW    = W_target / wBlock;
+        }
+
         constexpr int64_t INT32_MAX_VAL = std::numeric_limits<int32_t>::max();
         int64_t elems_per_slice = T * H_target * W_target;
         int64_t safe_batch = std::max(INT64_C(1), INT32_MAX_VAL / elems_per_slice);
@@ -141,8 +164,8 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
         chunks.reserve((V * S + safe_batch - 1) / safe_batch);
 
         for (int64_t i = 0; i < V * S; i += safe_batch) {
-            int64_t end   = std::min(i + safe_batch, V * S);
-            auto chunk    = reshaped.slice(0, i, end);
+            int64_t end = std::min(i + safe_batch, V * S);
+            auto chunk = reshaped.slice(0, i, end);
             auto padded_chunk = torch::nn::functional::pad(
                 chunk,
                 torch::nn::functional::PadFuncOptions({left, right, top, down})
@@ -162,7 +185,6 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
     std::vector<int64_t> padding = {top, down, left, right};
     return {blocked, {nH, nW, padding}};
 }
-
 
 std::pair<std::vector<std::pair<int, float>>, std::vector<int>>
 data_filtering(const torch::Tensor& data, int nFrame, const torch::Device& device) {

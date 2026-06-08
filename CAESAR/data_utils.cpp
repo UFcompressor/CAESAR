@@ -30,8 +30,8 @@ std::pair<torch::Tensor, PaddingInfo> to_5d_and_pad(torch::Tensor& arr,
       check_w = arr.size(3);
     }
 
-    // Check if dimensions meet thresholds: D >= 8 && H >= 128 && W >= 128
-    if (check_d >= 8 && check_h >= 128 && check_w >= 128) {
+    // Check if dimensions meet thresholds: D >= 8 && H >= 2 && W >= 2 never do this
+  if (check_d >= 8 && check_h >= 2 && check_w >= 2) {
       torch::Tensor result_5d;
 
       if (num_dims == 3) {
