@@ -206,129 +206,92 @@ jobs:
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: "3.11"
+          python-version: "3.10"
           activate-environment: compress_env
           auto-activate-base: false
 
       - name: Install Python deps
         run: |
-          conda activate compress_env
-          conda install -y numpy scipy
-          pip install --upgrade pip wheel setuptools
-
-          pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
           $lines = Get-Content requirements.txt | Where-Object {
             $_ -notmatch "^torch" -and
             $_ -notmatch "^torchvision" -and
             $_ -notmatch "^--extra-index-url" -and
             $_ -notmatch "^cupy" -and
             $_ -notmatch "^nvidia" -and
+            $_ -notmatch "^compressai" -and
+            $_ -notmatch "^imageio" -and
             $_ -notmatch "^\s*$"
           }
           $lines | Set-Content temp_requirements.txt
-          pip install --no-cache-dir -r temp_requirements.txt
+          conda run -n compress_env pip install --upgrade pip wheel setuptools
+          conda run -n compress_env pip install --no-cache-dir -r temp_requirements.txt
           Remove-Item temp_requirements.txt
 
-      - name: Install compressai from source
+      - name: Install PyTorch
         run: |
-          conda activate compress_env
+          conda run -n compress_env pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-          # Clone to short path
-          git clone https://github.com/InterDigitalInc/CompressAI.git C:\cai
-          Push-Location C:\cai
-
-          # Patch GCC flags to MSVC equivalents
-          Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
-            $content = Get-Content $_.FullName -Raw -Encoding UTF8
-            if ($content -match '"-std=c\+\+17"' -or $content -match '"-O3"') {
-              $content = $content -replace '"-std=c\+\+17"', '"/std:c++17"'
-              $content = $content -replace '"-O3"', '"/O2"'
-              Set-Content $_.FullName $content -Encoding UTF8
-            }
-          }
-
-          # Set a short temp dir so MSVC output paths don't overflow
-          $env:TEMP = "C:\T"
-          $env:TMP = "C:\T"
-          New-Item -ItemType Directory -Force -Path C:\T
-
-          # Set pip temp dir too
-          $env:PIP_CACHE_DIR = "C:\PC"
-          New-Item -ItemType Directory -Force -Path C:\PC
-
-          # Override MSVC temp output dir
-          $env:CL = "/Fo C:\T\\"
-
-          # Build and install directly from the local patched clone
-          # NO_BUILD_ISOLATION means pip uses the current env, not a fresh one
-          # No version specifier means pip won't go to PyPI
-          pip install --no-build-isolation `
-                      --no-cache-dir `
-                      --ignore-requires-python `
-                      .
-
-          Pop-Location
-
-      - name: Install imageio and cmake
+      - name: Install compressai and imageio
         run: |
-          conda activate compress_env
-          pip install imageio==2.37.0
-          conda install -y -c conda-forge cmake zstd
+          conda run -n compress_env pip install compressai==1.2.6 imageio==2.37.0
+
+      - name: Install cmake and zstd
+        run: |
+          conda install -n compress_env -y -c conda-forge cmake zstd
 
       - name: Download pretrained models
         shell: bash
         run: |
           chmod +x download_models.sh || true
           ./download_models.sh
-          python -c "import torch; print(torch.__version__)"
+          conda run -n compress_env python -c "import torch; print(torch.__version__)"
 
       - name: Prepare CAESAR models
         run: |
-          conda activate compress_env
-          python CAESAR_compressor.py cpu
-          python CAESAR_hyper_decompressor.py cpu
-          python CAESAR_decompressor.py cpu
+          conda run -n compress_env python CAESAR_compressor.py cpu
+          conda run -n compress_env python CAESAR_hyper_decompressor.py cpu
+          conda run -n compress_env python CAESAR_decompressor.py cpu
 
       - name: Configure CMake
         run: |
-          conda activate compress_env
-          $TORCH_PATH = python -c "import torch; print(torch.utils.cmake_prefix_path)"
+          $TORCH_PATH = conda run -n compress_env python -c "import torch; print(torch.utils.cmake_prefix_path)"
           echo "Torch CMake path: $TORCH_PATH"
-
           New-Item -ItemType Directory -Force -Path build
-          cd build
-
+          Push-Location build
           cmake .. `
             -DCMAKE_PREFIX_PATH="$TORCH_PATH" `
             -DBUILD_TESTS=ON `
             -DCMAKE_BUILD_TYPE=Debug
+          Pop-Location
 
       - name: Build project
         run: |
-          cd build
+          Push-Location build
           cmake --build . --config Debug --parallel
+          Pop-Location
 
       - name: Generate dummy test data
         run: |
-          conda activate compress_env
-          python tests/gen_data.py build/tests/Debug --filename TCf48.bin.f32
+          conda run -n compress_env python tests/gen_data.py build/tests/Debug --filename TCf48.bin.f32
 
       - name: Run test_caesarCD
         run: |
-          cd build/tests/Debug
+          Push-Location build/tests/Debug
           New-Item -ItemType Directory -Force -Path output
           .\test_caesarCD.exe
+          Pop-Location
 
       - name: Run test_runGaeCuda
         run: |
-          cd build/tests/Debug
+          Push-Location build/tests/Debug
           .\test_runGaeCuda.exe
+          Pop-Location
 
       - name: Run test_padding
         run: |
-          cd build/tests/Debug
+          Push-Location build/tests/Debug
           .\test_padding.exe
+          Pop-Location
 
       - name: Check test results
         run: |
