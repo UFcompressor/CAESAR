@@ -233,9 +233,27 @@ jobs:
       - name: Install compressai from source
         run: |
           conda activate compress_env
+          $env:TEMP = "C:\T"
+          $env:TMP = "C:\T"
+          New-Item -ItemType Directory -Force -Path C:\T
           git clone https://github.com/InterDigitalInc/CompressAI.git C:\cai
           cd C:\cai
-          pip install -e .
+
+          $setup = Get-Content setup.py -Raw
+          $setup = $setup -replace '"-std=c\+\+17"', '"/std:c++17"'
+          $setup = $setup -replace '"-O3"', '"/O2"'
+          Set-Content setup.py $setup
+
+          Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            if ($content -match '"-std=c\+\+17"' -or $content -match '"-O3"') {
+              $content = $content -replace '"-std=c\+\+17"', '"/std:c++17"'
+              $content = $content -replace '"-O3"', '"/O2"'
+              Set-Content $_.FullName $content
+            }
+          }
+
+          pip install -e . --no-build-isolation
 
       - name: Install imageio and cmake
         run: |
