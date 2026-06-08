@@ -189,11 +189,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
                                         int batch_size, float rel_eb) {
   c10::InferenceMode guard;
 
-  mem_print("before dataset load");
   ScientificDataset dataset(config);
-  mem_print("after dataset load");
-  std::cout << "[MEM]   data_input tensor = "
-            << tensor_gb(dataset.get_data_input()) << " GiB\n";
 
   auto start_inf = get_start_time();
   CompressionResult result;
@@ -251,7 +247,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::vector<int64_t> input_shape(shape_i32.begin(), shape_i32.end());
   torch::Tensor recon_tensor =
       torch::zeros(input_shape, torch::TensorOptions().device(device_));
-  mem_print("after recon_tensor alloc");
 
   std::vector<torch::Tensor> all_q_latent;
   std::vector<torch::Tensor> all_latent_indexes;
@@ -387,15 +382,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     }
   }
 
-  std::cout << "[BATCH LOOP BREAKDOWN]\n"
-            << "  input GPU transfer : " << time_input_transfer << " s\n"
-            << "  compressor model   : " << time_compressor     << " s\n"
-            << "  hyper decomp model : " << time_hyper          << " s\n"
-            << "  decompressor model : " << time_decompressor   << " s\n"
-            << "  recon scatter      : " << time_recon          << " s\n"
-            << "  sum                : "
-            << (time_input_transfer + time_compressor + time_hyper
-                + time_decompressor + time_recon) << " s\n";
 
   torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
   torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
@@ -414,7 +400,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 #ifdef USE_CUDA
   torch::cuda::synchronize();
 #endif
-  std::cout << "Transfer time: " << get_time(start_transfer).count() << " s\n";
 
   cat_q_latent       = torch::Tensor();
   cat_latent_indexes = torch::Tensor();
@@ -449,9 +434,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     });
   }
   for (auto& t : threads) t.join();
-  std::cout << "Encoding time: " << get_time(start_encoding).count() << " s\n"
-            << "Total latent codes: " << total_latent_codes << "\n"
-            << "Workers: " << workers << "\n";
 
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
@@ -460,7 +442,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[1]);
     const int64_t T =
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[2]);
-    const int64_t nf      = 16;
+    const int64_t nf      = 8;
     const int64_t samples = T / nf;
 
     if (samples == 0 || S == 0) {
@@ -520,11 +502,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   padded_recon_tensor.sub_(global_offset).div_(global_scale);
   torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
 
-  mem_print("before GAE");
-  std::cout << "[MEM]   padded_original_norm = "
-            << tensor_gb(padded_original_tensor_norm)
-            << " GiB  padded_recon_norm = "
-            << tensor_gb(padded_recon_tensor_norm) << " GiB\n";
 
   double quan_factor      = 2.0;
   std::string codec_alg   = "Zstd";
@@ -541,7 +518,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   auto gae_compression_result = pca_compressor.compress(
       padded_original_tensor_norm, padded_recon_tensor_norm);
   padded_original_tensor_norm = torch::Tensor();
-  mem_print("after GAE compress");
 
   result.gaeMetaData.GAE_correction_occur =
       gae_compression_result.metaData.GAE_correction_occur;
@@ -559,16 +535,10 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.gaeMetaData.uniqueVals =
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
 
-  } else {
-    std::cout << "[GAE SKIPPED] No data processed by GAE.\n";
-  }
-
-  if (!result.compressionMetaData.indexes.empty())
-    std::cout << ", " << result.compressionMetaData.indexes[0].size();
+  } 
 
   auto GAE_time = get_time(start_GAE);
   std::cout << "GAE time: " << GAE_time.count() << " s\n";
-  mem_print("compress() returning");
 
   return result;
 }

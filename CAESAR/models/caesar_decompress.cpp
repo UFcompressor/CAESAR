@@ -118,8 +118,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   flat_indexes.shrink_to_fit();
 
   if (indexes_tensor.numel() > 0) {
-    std::cout << "[DEBUG] indexes_tensor shape: " << indexes_tensor.sizes()
-              << std::endl;
 
     int64_t rows_to_print = std::min((int64_t)3, indexes_tensor.size(0));
     int64_t cols = indexes_tensor.size(1);
@@ -128,10 +126,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
       auto row = indexes_tensor[i];
       auto row_cpu = row.to(torch::kCPU);
       auto acc = row_cpu.accessor<int32_t, 1>();
-      for (int64_t j = 0; j < cols; ++j) {
-        std::cout << acc[j] << " ";
-      }
-      std::cout << std::endl;
     }
   }
   std::vector<int64_t> input_shape(meta.data_input_shape.begin(),
