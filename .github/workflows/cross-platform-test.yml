@@ -275,9 +275,18 @@ jobs:
 
       - name: Prepare CAESAR models
         run: |
-          conda run -n compress_env python CAESAR_compressor.py cpu
-          conda run -n compress_env python CAESAR_hyper_decompressor.py cpu
-          conda run -n compress_env python CAESAR_decompressor.py cpu
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+
+          cmd /c "`"$vcvars`" && conda run -n compress_env python CAESAR_compressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          cmd /c "`"$vcvars`" && conda run -n compress_env python CAESAR_hyper_decompressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          cmd /c "`"$vcvars`" && conda run -n compress_env python CAESAR_decompressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Configure CMake
         run: |
