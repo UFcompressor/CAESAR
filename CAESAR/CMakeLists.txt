@@ -66,7 +66,11 @@ set(CAESAR_SRC
     data_utils.cpp
 )
 
-add_library(caesar SHARED ${CAESAR_SRC})
+if(MSVC)
+    add_library(caesar STATIC ${CAESAR_SRC})
+else()
+    add_library(caesar SHARED ${CAESAR_SRC})
+endif()
 
 target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
@@ -86,7 +90,7 @@ if(NVCOMP_FOUND)
     message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
-# TODO: Mark model type - Currently only CAESAR_V is implemented
+# todo: fix this to read in the file and set it to just some model name
 target_compile_definitions(caesar PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 
@@ -157,8 +161,11 @@ target_compile_options(caesar_cli PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
 
-set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
-
+if(MSVC)
+    set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar_cli)
+else()
+    set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
+endif()
 
 install(TARGETS caesar
     LIBRARY DESTINATION lib
@@ -180,7 +187,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/models/pretrained")
     )
 endif()
 
-# install model_name.txt if it exists
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
         DESTINATION share/caesar/models
@@ -188,9 +194,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt" CAESAR_MODEL_NAME)
     string(STRIP "${CAESAR_MODEL_NAME}" CAESAR_MODEL_NAME)
 else()
-  message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
+    message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
 endif()
-
 
 message(STATUS "")
 message(STATUS "========================================")
