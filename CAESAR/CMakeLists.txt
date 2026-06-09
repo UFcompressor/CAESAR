@@ -114,9 +114,11 @@ if(USE_CUDA)
 endif()
 
 target_compile_options(caesar PRIVATE
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3  -mtune=native -fprefetch-loop-arrays>
-    $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
 
 if(USE_CUDA)
@@ -148,9 +150,11 @@ endif()
 target_compile_definitions(caesar_cli PRIVATE MODEL_CAESAR_V_ONLY)
 
 target_compile_options(caesar_cli PRIVATE
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -mtune=native>
-    $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
 
 set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
