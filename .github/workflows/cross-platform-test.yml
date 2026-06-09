@@ -233,7 +233,35 @@ jobs:
 
       - name: Install compressai and imageio
         run: |
-          conda run -n compress_env python -m pip install compressai==1.2.6 imageio==2.37.0
+          # Move all temp to D: drive - short paths, avoids MSVC C1083
+          $env:TEMP = "D:\T"
+          $env:TMP = "D:\T"
+          New-Item -ItemType Directory -Force -Path D:\T
+
+          # Clone to short path on D: drive
+          git clone https://github.com/InterDigitalInc/CompressAI.git D:\cai
+          Push-Location D:\cai
+
+          # Patch GCC-only flags to MSVC equivalents
+          Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw -Encoding UTF8
+            if ($content -match '"-std=c\+\+17"' -or $content -match '"-O3"') {
+              $content = $content -replace '"-std=c\+\+17"', '"/std:c++17"'
+              $content = $content -replace '"-O3"', '"/O2"'
+              Set-Content $_.FullName $content -Encoding UTF8
+            }
+          }
+
+          # Build wheel into local dist/ folder - never extracts to pip temp
+          conda run -n compress_env python setup.py bdist_wheel --dist-dir D:\cai\dist
+
+          # Install from the local wheel file
+          $wheel = Get-ChildItem D:\cai\dist\compressai-*.whl | Select-Object -First 1
+          conda run -n compress_env python -m pip install $wheel.FullName
+
+          Pop-Location
+
+          conda run -n compress_env python -m pip install imageio==2.37.0
 
       - name: Install cmake and zstd
         run: |
