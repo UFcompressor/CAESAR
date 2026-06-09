@@ -495,6 +495,6 @@ with torch.no_grad():
     )
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-        package_path=Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2",
+      package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
     print(f"Compressed model saved to exported_model/{model_name}.pt2")

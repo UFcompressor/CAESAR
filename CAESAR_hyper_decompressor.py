@@ -428,6 +428,6 @@ with torch.no_grad():
     exported = torch.export.export(model, example_inputs, dynamic_shapes={"x": {0: batch_dim}})
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-        package_path=Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2",
+        package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
     print(f"Hyper Decompress model saved to exported_model/{model_name}.pt2")
