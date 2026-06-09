@@ -1,7 +1,6 @@
 #include "model_utils.h"
 #include <cstdlib>
 #include <stdexcept>
-#include <unistd.h> 
 
 #ifdef _WIN32
 #include <windows.h>
@@ -15,20 +14,20 @@
 fs::path get_executable_path() {
 #ifdef _WIN32
     char result[MAX_PATH];
-    DWORD count = GetModuleFileNameA(NULL , result , MAX_PATH);
+    DWORD count = GetModuleFileNameA(NULL, result, MAX_PATH);
     if (count != 0 && count < MAX_PATH) {
         return fs::path(result);
     }
 #elif defined(__linux__)
     char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe" , result , PATH_MAX);
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
     if (count != -1) {
-        return fs::path(std::string(result , count));
+        return fs::path(std::string(result, count));
     }
 #elif defined(__APPLE__)
     char result[PATH_MAX];
     uint32_t size = sizeof(result);
-    if (_NSGetExecutablePath(result , &size) == 0) {
+    if (_NSGetExecutablePath(result, &size) == 0) {
         return fs::canonical(fs::path(result));
     }
 #endif
@@ -91,20 +90,18 @@ fs::path get_model_file(const std::string& filename) {
     );
 }
 
-
-
-
-
-// for memory debuging
+// for memory debugging
 double rss_gb() {
+#ifdef __linux__
     std::ifstream statm("/proc/self/statm");
-    long dummy = 0 , rss_pages = 0;
+    long dummy = 0, rss_pages = 0;
     statm >> dummy >> rss_pages;
-
     return (double)rss_pages * sysconf(_SC_PAGESIZE)
         / (1024.0 * 1024 * 1024);
+#else
+    return 0.0;
+#endif
 }
-
 
 #ifdef USE_CUDA
 double gpu_used_gb() {
@@ -129,29 +126,23 @@ std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_
     return std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 }
 
-
 // assume 4 as min
 int get_allocated_cores() {
 #ifdef __linux__
-    // Linux: Use CPU affinity
     cpu_set_t cpu_set;
     CPU_ZERO(&cpu_set);
-    
     if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
         int count = CPU_COUNT(&cpu_set);
         if (count > 0 && count > 4) {
             return count;
         }
         else {
-          return 4;
+            return 4;
         }
     }
 #endif
-
-    // any other OS or fallback
     return 4;
 }
-
 
 std::string get_model_name() {
     std::ifstream f(get_model_file("model_name.txt"));
