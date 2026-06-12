@@ -106,19 +106,25 @@ void test_4d_large_no_padding() {
 }
 
 void test_5d_padding() {
-    std::cout << "\n=== Test 5D (always needs padding) ===" << std::endl;
+    std::cout << "\n=== Test 5D (no padding needed, reshapes in-place) ===" << std::endl;
     torch::Tensor data = torch::randn({2, 3, 10, 256, 256});
     auto [padded, info] = to_5d_and_pad(data, 256, 256, false);
-    
+
     std::cout << "Original shape: [2, 3, 10, 256, 256]" << std::endl;
     std::cout << "Padded shape: " << padded.sizes() << std::endl;
     std::cout << "Was padded: " << info.was_padded << std::endl;
-    
-    assert(info.was_padded == true);
+
+    assert(info.was_padded == false);
     assert(padded.dim() == 5);
-    
+    assert(padded.sizes()[0] == 2);
+    assert(padded.sizes()[1] == 3);
+    assert(padded.sizes()[2] == 10);
+    assert(padded.sizes()[3] == 256);
+    assert(padded.sizes()[4] == 256);
+
     torch::Tensor restored = restore_from_5d(padded, info);
     assert(restored.dim() == 5);
+    assert(restored.sizes()[0] == 2 && restored.sizes()[1] == 3);
 }
 
 void test_force_padding() {

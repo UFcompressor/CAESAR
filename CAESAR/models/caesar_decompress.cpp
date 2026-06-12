@@ -1,18 +1,5 @@
 #include "caesar_decompress.h"
 
-#include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <limits>
-
-#include "array_utils.h"
-#include "caesar_compress.h"
-#include "model_cache.h"
-#include "model_utils.h"
-#include "range_coder/rans_coder.hpp"
-#include "runGaeCuda.h"
-
 torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW,
                         const std::vector<int64_t>& padding);
 
@@ -243,7 +230,27 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor recon_tensor_deblock =
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
   recon_tensor = torch::Tensor();
+  //  ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
+    if (comp_result.use_lbrc) {
+        torch::Tensor recon_cpu =
+            recon_tensor_deblock.to(torch::kCPU).to(torch::kFloat32).contiguous();
+        recon_tensor_deblock = torch::Tensor();
 
+        torch::Tensor corrected = caesar::lbrc::decompress(
+            recon_cpu,
+            comp_result.lbrcMetaData,
+            comp_result.lbrc_blocks,
+            get_allocated_cores());
+
+        torch::Tensor final_recon = recons_data(
+            corrected,
+            comp_result.compressionMetaData.data_input_shape,
+            comp_result.compressionMetaData.pad_T);
+
+        return final_recon;
+    }
+
+// GAE path  ----------------------------------------
   if (comp_result.gaeMetaData.GAE_correction_occur) {
     std::tuple<torch::Tensor, std::vector<int>> padding_recon =
         padding(recon_tensor_deblock);

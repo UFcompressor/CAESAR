@@ -1,11 +1,16 @@
 #pragma once
-
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
-#include <torch/torch.h>
-
 #include <memory>
-#include <string>
-#include <vector>
+#include <cmath>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include "array_utils.h"
+#include "caesar_compress.h"
+#include "model_cache.h"
+#include "model_utils.h"
+#include "range_coder/rans_coder.hpp"
+#include "runGaeCuda.h"
 
 struct CompressionResult;
 struct DecompressionResult {

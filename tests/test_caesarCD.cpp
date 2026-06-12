@@ -162,6 +162,31 @@ size_t calculate_metadata_size(const CompressionResult& result) {
   total_bytes += sizeof(gae_meta.dataBytes);
   total_bytes += sizeof(gae_meta.coeffIntBytes);
 
+
+    // LBRC metadata and compressed streams
+  const auto& lbrc_meta = result.lbrcMetaData;
+  total_bytes += sizeof(lbrc_meta.lbrc_correction_occur);
+  total_bytes += sizeof(lbrc_meta.x_mean);
+  total_bytes += sizeof(lbrc_meta.scale);
+  total_bytes += sizeof(lbrc_meta.encoded_nrmse);
+  total_bytes += sizeof(lbrc_meta.block_size);
+  total_bytes += sizeof(lbrc_meta.zstd_level);
+  total_bytes += sizeof(lbrc_meta.quant_iter);
+  total_bytes += lbrc_meta.shape.size() * sizeof(int32_t);
+
+  for (const auto& blk : result.lbrc_blocks) {
+      total_bytes += sizeof(blk.b) + sizeof(blk.c);
+      total_bytes += sizeof(blk.t0) + sizeof(blk.t1);
+      total_bytes += sizeof(blk.h0) + sizeof(blk.h1);
+      total_bytes += sizeof(blk.w0) + sizeof(blk.w1);
+      total_bytes += sizeof(blk.step);
+      total_bytes += sizeof(blk.bit_count);
+      total_bytes += sizeof(blk.num);
+      for (const auto& s : blk.streams)
+          total_bytes += s.size();
+  }
+
+
   return total_bytes;
 }
 
@@ -224,7 +249,7 @@ int main() {
 
     raw_5d = torch::Tensor();
 
-    float rel_eb = 0.001f;
+    float rel_eb = 0.0001f;
     auto start_timeC = std::chrono::high_resolution_clock::now();
     CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
@@ -329,7 +354,6 @@ int main() {
     std::cout << "=== Quality Metrics ===" << "\n";
     std::cout << "NRMSE: " << nrmse << "\n";
     std::cout << "Compression Ratio (CR): " << CR << "\n";
-    std::cout << "Decompression finished. Reconstructed data shape: " << restored.sizes() << "\n";
     std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
 
     

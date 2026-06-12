@@ -66,6 +66,7 @@ set(CAESAR_SRC
     models/model_utils.cpp
     models/runGaeCuda.cpp
     models/gaeFusedKernels.cu
+    models/lbrc.cpp
     data_utils.cpp
 )
 

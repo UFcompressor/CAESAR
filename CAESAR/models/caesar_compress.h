@@ -1,12 +1,19 @@
 #pragma once
-
-#include <torch/torch.h>
+#include "lbrc.h"
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
-#include <vector>
-#include <string>
 #include "model_cache.h"
 #include "array_utils.h"
 #include "../dataset/dataset.h"
+#include "range_coder/rans_coder.hpp"
+#include "runGaeCuda.h" 
+#include "model_utils.h"
+#include <fstream>
+#include <cmath>
+#include <limits>
+#include <utility>
+#ifdef USE_CUDA
+#include <c10/cuda/CUDACachingAllocator.h>
+#endif
 
 
 
@@ -37,18 +44,23 @@ struct CompressionMetaData {
 
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
-    std::vector<std::string> encoded_hyper_latents;
+    std::vector<std::string> encoded_hyper_latents;    
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
+
+    // LBRC compressed data
+    std::vector<LBRCBlock> lbrc_blocks; 
+    LBRCMetaData    lbrcMetaData;
+    
     // record metadata for decompression
     CompressionMetaData compressionMetaData;
     GAEMetaData gaeMetaData;
 
-
+    bool use_lbrc = true;   
     int num_samples;
     int num_batches;
 };
-
+ 
 class Compressor {
 public:
     explicit Compressor(torch::Device device = torch::Device(torch::kCPU));

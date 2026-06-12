@@ -296,7 +296,6 @@ For questions, bug reports, or contributions, please open an issue on [GitHub](h
 | CompressAI               | [InterDigitalInc/CompressAI](https://github.com/InterDigitalInc/CompressAI)    |
 
 ---
-
 <div align="center">
 <sub>Built for science. Engineered for performance.</sub>
 </div>
