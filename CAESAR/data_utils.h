@@ -2,7 +2,9 @@
 #include <torch/torch.h>
 #include <vector>
 #include <cstdint>
-
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
 /**
  * Structure to hold padding metadata for 5D tensor conversion
  */

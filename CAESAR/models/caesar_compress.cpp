@@ -1,15 +1,4 @@
 #include "caesar_compress.h"
-#include "range_coder/rans_coder.hpp"
-#include "runGaeCuda.h" 
-#include "model_utils.h"
-#include <iostream>
-#include <fstream>
-#include <cmath>
-#include <limits>
-#include <utility>
-#ifdef USE_CUDA
-#include <c10/cuda/CUDACachingAllocator.h>
-#endif
 
 
 template<typename T>
@@ -254,11 +243,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::vector<torch::Tensor> all_hyper_indexes;
   int64_t total_latent_codes = 0;
 
-  double time_input_transfer = 0;
-  double time_compressor     = 0;
-  double time_hyper          = 0;
-  double time_decompressor   = 0;
-  double time_recon          = 0;
 
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
@@ -301,34 +285,18 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
               .view({-1, 1, 1, 1, 1});
       torch::Tensor batched_indexes = torch::cat(batch_indexes, 0).to(device_);
       
-#ifdef USE_CUDA
-      torch::cuda::synchronize();
-#endif
-     
-      time_input_transfer += get_time(t0).count();
-
-      auto t1 = get_start_time();
-      std::vector<torch::Tensor> outputs = compressor_model_->run({batched_input.to(torch::kFloat32)});  // remove kFloat16 yourself
+      std::vector<torch::Tensor> outputs = compressor_model_->run({batched_input.to(torch::kFloat32)}); 
       torch::Tensor q_latent       = outputs[0];
       torch::Tensor latent_indexes = outputs[1];
       torch::Tensor q_hyper_latent = outputs[2];
       torch::Tensor hyper_indexes  = outputs[3];
       outputs.clear();
 
-#ifdef USE_CUDA
-      torch::cuda::synchronize();
-#endif
-      time_compressor += get_time(t1).count();
 
-      auto t2 = get_start_time();
       std::vector<torch::Tensor> hyper_outputs =
           hyper_decompressor_model_->run({q_hyper_latent.to(torch::kFloat32)});
       torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
       hyper_outputs.clear();
-#ifdef USE_CUDA
-      torch::cuda::synchronize();
-#endif
-      time_hyper += get_time(t2).count();
 
       all_q_latent.push_back(q_latent);
       all_latent_indexes.push_back(latent_indexes);
@@ -336,7 +304,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       all_hyper_indexes.push_back(hyper_indexes);
       total_latent_codes += q_latent.sizes()[0];
 
-      auto t3 = get_start_time();
+
       torch::Tensor q_latent_with_offset =
           q_latent.to(torch::kFloat32) + mean;
 
@@ -351,12 +319,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
               {q_latent_with_offset.reshape(new_shape).to(torch::kFloat32)});
       torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
       decompressor_outputs.clear();
-#ifdef USE_CUDA
-      torch::cuda::synchronize();
-#endif
-      time_decompressor += get_time(t3).count();
-
-      auto t4 = get_start_time();
       torch::Tensor norm_output   = reshape_batch_2d_3d(raw_output, num_input_samples);
       torch::Tensor denorm_output = norm_output * batched_scales + batched_offsets;
 
@@ -368,10 +330,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
                     .slice(0, index_accessor[ii][2], index_accessor[ii][3])
                     .copy_(denorm_output.select(0, ii).squeeze(0));
       }
-#ifdef USE_CUDA
-      torch::cuda::synchronize();
-#endif
-      time_recon += get_time(t4).count();
 
       batch_inputs.clear();
       batch_offsets_vec.clear();
@@ -393,10 +351,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   all_hyper_indexes.clear();
 
   auto start_transfer = get_start_time();
-  torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, /*non_blocking=*/true);
-  torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU, /*non_blocking=*/true);
-  torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU, /*non_blocking=*/true);
-  torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, /*non_blocking=*/true);
+  torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
+  torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
+  torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
+  torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
+
 #ifdef USE_CUDA
   torch::cuda::synchronize();
 #endif
@@ -479,6 +438,32 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
 
+    // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
+    result.use_lbrc = false;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
+    // hard code for the cpu
+
+    if (result.use_lbrc) {
+        torch::Tensor original_cpu =
+            dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
+        torch::Tensor recon_cpu =
+            recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
+        recon_deblk = torch::Tensor();
+        dataset.clear();
+
+        result.lbrcMetaData.block_size = {60, 120, 120};
+        result.lbrcMetaData.zstd_level = 21;
+        result.lbrcMetaData.quant_iter = 16;
+
+        caesar::lbrc::compress(
+            original_cpu, recon_cpu,
+            static_cast<double>(rel_eb),
+            result.lbrcMetaData,
+            result.lbrc_blocks,
+            get_allocated_cores());
+
+        return result;
+    }
+    // ---- GAE path  ----------------------------------------
   auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
   recon_deblk = torch::Tensor();
 
@@ -507,10 +492,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::string codec_alg   = "Zstd";
   std::pair<int, int> patch_size = {8, 8};
 
-  auto inf_time = get_time(start_inf);
-  std::cout << "Inference time: " << inf_time.count() << " s\n";
-
-  auto start_GAE = get_start_time();
   PCACompressor pca_compressor(rel_eb, quan_factor,
                                device_.is_cuda() ? "cuda" : "cpu",
                                codec_alg, patch_size);
@@ -536,9 +517,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
 
   } 
-
-  auto GAE_time = get_time(start_GAE);
-  std::cout << "GAE time: " << GAE_time.count() << " s\n";
 
   return result;
 }
