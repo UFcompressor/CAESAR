@@ -479,6 +479,32 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
 
+    // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
+    result.use_lbrc = false;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
+    // hard code for the cpu
+
+    if (result.use_lbrc) {
+        torch::Tensor original_cpu =
+            dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
+        torch::Tensor recon_cpu =
+            recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
+        recon_deblk = torch::Tensor();
+        dataset.clear();
+
+        result.lbrcMetaData.block_size = {60, 120, 120};
+        result.lbrcMetaData.zstd_level = 21;
+        result.lbrcMetaData.quant_iter = 16;
+
+        caesar::lbrc::compress(
+            original_cpu, recon_cpu,
+            static_cast<double>(rel_eb),
+            result.lbrcMetaData,
+            result.lbrc_blocks,
+            get_allocated_cores());
+
+        return result;
+    }
+    // ---- GAE path  ----------------------------------------
   auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
   recon_deblk = torch::Tensor();
 

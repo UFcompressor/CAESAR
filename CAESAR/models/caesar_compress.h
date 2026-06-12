@@ -1,5 +1,5 @@
 #pragma once
-
+#include "lbrc.h"
 #include <torch/torch.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <vector>
@@ -37,18 +37,23 @@ struct CompressionMetaData {
 
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
-    std::vector<std::string> encoded_hyper_latents;
+    std::vector<std::string> encoded_hyper_latents;    
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
+
+    // LBRC compressed data
+    std::vector<LBRCBlock> lbrc_blocks; 
+    LBRCMetaData    lbrcMetaData;
+    
     // record metadata for decompression
     CompressionMetaData compressionMetaData;
     GAEMetaData gaeMetaData;
 
-
+    bool use_lbrc = true;   
     int num_samples;
     int num_batches;
 };
-
+ 
 class Compressor {
 public:
     explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
