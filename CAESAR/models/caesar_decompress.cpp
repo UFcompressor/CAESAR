@@ -197,6 +197,8 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor denorm_output =
         norm_output * batched_scales + batched_offsets;
 
+std::cout << "denorm_output min=" << denorm_output.min().item<float>()
+          << " max=" << denorm_output.max().item<float>() << std::endl;
     torch::Tensor indexes_cpu =
         indexes_tensor.narrow(0, (long)sample_start, (long)cur_samples)
             .to(torch::kCPU);
@@ -220,7 +222,28 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   offsets_tensor = torch::Tensor();
   scales_tensor = torch::Tensor();
   indexes_tensor = torch::Tensor();
+    if (!meta.filtered_blocks.empty()) {
+    const int64_t S       = static_cast<int64_t>(meta.data_input_shape[1]);
+    const int64_t T       = static_cast<int64_t>(meta.data_input_shape[2]);
+    const int64_t nf      = 8;
+    const int64_t samples = T / nf;
+    const int64_t SS      = S * samples;
 
+
+
+    for (const auto& pair : meta.filtered_blocks) {
+      const int64_t label  = pair.first;
+      const float   value  = pair.second;
+      const int64_t v      = label / SS;
+      const int64_t remain = label % SS;
+      const int64_t s      = remain / samples;
+      const int64_t blk    = remain % samples;
+      recon_tensor.select(0, v)
+                  .select(0, s)
+                  .slice(0, blk * nf, (blk + 1) * nf)
+                  .fill_(value);
+    }
+  }
   auto [b1_i32, b2_i32, pad_i32] = meta.block_info;
 
   int64_t block_info_1 = b1_i32;
@@ -252,6 +275,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
 // GAE path  ----------------------------------------
   if (comp_result.gaeMetaData.GAE_correction_occur) {
+    std::cout<<"GAE\n";
     std::tuple<torch::Tensor, std::vector<int>> padding_recon =
         padding(recon_tensor_deblock);
     recon_tensor_deblock = torch::Tensor();
@@ -316,7 +340,8 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
         final_recon_norm * meta.global_scale + meta.global_offset;
     return final_recon;
   } else {
-    torch::Tensor final_recon =
+    
+     torch::Tensor final_recon =
         recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
     return final_recon;
   }

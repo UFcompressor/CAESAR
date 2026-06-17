@@ -207,8 +207,9 @@ data_filtering(const torch::Tensor& data, int nFrame, const torch::Device& devic
     auto min_vals = std::get<0>(flat_blocks.min(-1, true));
     auto max_vals = std::get<0>(flat_blocks.max(-1, true));
     
-    auto is_constant = (min_vals == max_vals).squeeze(-1);
-    
+    auto first_vals = flat_blocks.select(-1, 0).unsqueeze(-1);
+auto is_constant = torch::all(flat_blocks == first_vals, -1, false).squeeze(-1);
+
     auto is_constant_cpu = is_constant.cpu();
     auto min_vals_cpu = min_vals.squeeze(-1).cpu();
     

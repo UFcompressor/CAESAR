@@ -1,9 +1,4 @@
 #include "runGaeCuda.h"
-#include "gaeFusedKernels.h"
-#include <thread>
-#include <chrono>
-#include <cstdlib>
-#include <cstring>
 
 #ifdef USE_CUDA
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -44,41 +39,6 @@ struct NvcompBatchCompressResult {
 // We chunk all inputs down to this size before submitting as one big batch.
 static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 16ULL * 1024 * 1024; // 16 MB
 
-static void parallel_zero_fill_payload(uint8_t* data, size_t size)
-{
-    if (data == nullptr || size == 0) return;
-
-    unsigned nThreads = std::thread::hardware_concurrency();
-    if (const char* envThreads = std::getenv("CAESAR_GAE_PAYLOAD_TOUCH_THREADS")) {
-        int parsed = std::atoi(envThreads);
-        if (parsed > 0) nThreads = static_cast<unsigned>(parsed);
-    }
-    if (nThreads == 0) nThreads = 8;
-    nThreads = std::min<unsigned>(nThreads, 32);
-
-    const size_t minChunk = 64ULL * 1024 * 1024;
-    if (size < minChunk || nThreads == 1) {
-        std::memset(data, 0, size);
-        return;
-    }
-
-    std::vector<std::thread> workers;
-    workers.reserve(nThreads);
-    const size_t chunk = (size + nThreads - 1) / nThreads;
-
-    for (unsigned t = 0; t < nThreads; ++t) {
-        size_t begin = static_cast<size_t>(t) * chunk;
-        if (begin >= size) break;
-        size_t end = std::min(size, begin + chunk);
-        workers.emplace_back([data, begin, end]() {
-            std::memset(data + begin, 0, end - begin);
-        });
-    }
-
-    for (auto& worker : workers) worker.join();
-}
-
-                                                                     //
 static std::vector<NvcompBatchCompressResult>
 nvcomp_batch_compress(
     const std::vector<const uint8_t*>& inputs,
@@ -87,18 +47,22 @@ nvcomp_batch_compress(
     const size_t N = inputs.size();
     std::vector<NvcompBatchCompressResult> results(N);
 
+    // Each logical buffer i gets split into ceil(sizes[i] / MAX_CHUNK) pieces.
+    // We flatten all pieces across all buffers into one giant batch.
     struct ChunkInfo {
-        size_t buf_idx;
-        size_t offset;
-        size_t chunk_size;
+        size_t buf_idx;      // which of the N input buffers this came from
+        size_t offset;       // byte offset within that buffer
+        size_t chunk_size;   // bytes in this chunk
     };
     std::vector<ChunkInfo> chunks;
-    std::vector<size_t>    chunk_start_idx(N);
+    std::vector<size_t>    chunk_start_idx(N); // index into chunks[] where buffer i starts
 
     for (size_t i = 0; i < N; i++) {
         results[i].rawBytes = sizes[i];
-        chunk_start_idx[i]  = chunks.size();
-        if (sizes[i] == 0) continue;
+        chunk_start_idx[i] = chunks.size();
+
+        if (sizes[i] == 0) continue; 
+
         size_t offset = 0;
         while (offset < sizes[i]) {
             size_t this_chunk = std::min(NVCOMP_ZSTD_MAX_CHUNK, sizes[i] - offset);
@@ -110,13 +74,14 @@ nvcomp_batch_compress(
     const size_t totalChunks = chunks.size();
     if (totalChunks == 0) return results;
 
+
     nvcompBatchedZstdCompressOpts_t comp_opts = nvcompBatchedZstdCompressDefaultOpts;
 
     size_t maxOutPerChunk = 0;
     CHECK_NVCOMP(nvcompBatchedZstdCompressGetMaxOutputChunkSize(
         NVCOMP_ZSTD_MAX_CHUNK, comp_opts, &maxOutPerChunk));
 
-    size_t totalTempBytes    = 0;
+    size_t totalTempBytes = 0;
     size_t totalUncompressed = 0;
     for (auto& c : chunks) totalUncompressed += c.chunk_size;
 
@@ -124,12 +89,8 @@ nvcomp_batch_compress(
         totalChunks, NVCOMP_ZSTD_MAX_CHUNK, comp_opts,
         &totalTempBytes, totalUncompressed));
 
-    std::cout << "[NVCOMP pipeline] totalChunks=" << totalChunks
-              << " maxOutPerChunk=" << maxOutPerChunk
-              << " tempBytes=" << totalTempBytes << "\n";
 
-    // Input pool sized to actual data, not totalChunks * 16MB
-    size_t inputPoolSize = totalUncompressed + totalChunks * 255;
+    size_t inputPoolSize  = totalChunks * NVCOMP_ZSTD_MAX_CHUNK;
     size_t outputPoolSize = totalChunks * maxOutPerChunk;
 
     void* d_input_pool   = nullptr;
@@ -151,7 +112,6 @@ nvcomp_batch_compress(
     CHECK_CUDA(cudaMalloc(&d_output_sizes, totalChunks * sizeof(size_t)));
     CHECK_CUDA(cudaMalloc(&d_statuses,     totalChunks * sizeof(nvcompStatus_t)));
 
-    // Build host-side pointer arrays using actual offsets into input pool
     std::vector<void*>  h_input_ptrs(totalChunks);
     std::vector<void*>  h_output_ptrs(totalChunks);
     std::vector<size_t> h_input_sizes(totalChunks);
@@ -159,30 +119,24 @@ nvcomp_batch_compress(
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
 
-    // Compute actual byte offset of each chunk in the input pool
-    size_t pool_offset = 0;
     for (size_t c = 0; c < totalChunks; c++) {
-        h_input_ptrs[c]  = (uint8_t*)d_input_pool  + pool_offset;
-        h_output_ptrs[c] = (uint8_t*)d_output_pool + c * maxOutPerChunk;
-        h_input_sizes[c] = chunks[c].chunk_size;
-        pool_offset += (chunks[c].chunk_size + 255) & ~size_t(255);  // round up to 256-byte
-    }
+        uint8_t* in_slot  = (uint8_t*)d_input_pool  + c * NVCOMP_ZSTD_MAX_CHUNK;
+        uint8_t* out_slot = (uint8_t*)d_output_pool + c * maxOutPerChunk;
 
-    // H2D: upload all chunks async — no sync
-    for (size_t c = 0; c < totalChunks; c++) {
-        CHECK_CUDA(cudaMemcpyAsync(
-            h_input_ptrs[c],
+        h_input_ptrs[c]  = in_slot;
+        h_output_ptrs[c] = out_slot;
+        h_input_sizes[c] = chunks[c].chunk_size;
+
+        CHECK_CUDA(cudaMemcpyAsync(in_slot,
             inputs[chunks[c].buf_idx] + chunks[c].offset,
             chunks[c].chunk_size,
             cudaMemcpyHostToDevice, stream));
     }
 
-    // H2D: upload pointer/size metadata async
     CHECK_CUDA(cudaMemcpyAsync(d_input_ptrs,  h_input_ptrs.data(),  totalChunks * sizeof(void*),  cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_output_ptrs, h_output_ptrs.data(), totalChunks * sizeof(void*),  cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_input_sizes, h_input_sizes.data(), totalChunks * sizeof(size_t), cudaMemcpyHostToDevice, stream));
 
-    // Compress entire batch — single call, fully async
     CHECK_NVCOMP(nvcompBatchedZstdCompressAsync(
         (const void* const*)d_input_ptrs,
         (const size_t*)d_input_sizes,
@@ -196,26 +150,23 @@ nvcomp_batch_compress(
         (nvcompStatus_t*)d_statuses,
         stream));
 
-    // D2H: read back sizes and statuses async on same stream — no mid-sync
+    // see if this can be removed fro later
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+
     std::vector<size_t>         h_output_sizes(totalChunks);
     std::vector<nvcompStatus_t> h_statuses(totalChunks);
 
-    CHECK_CUDA(cudaMemcpyAsync(h_output_sizes.data(), d_output_sizes,
-        totalChunks * sizeof(size_t),         cudaMemcpyDeviceToHost, stream));
-    CHECK_CUDA(cudaMemcpyAsync(h_statuses.data(),     d_statuses,
-        totalChunks * sizeof(nvcompStatus_t), cudaMemcpyDeviceToHost, stream));
-
-    // Single sync — everything above overlaps on the stream
-    CHECK_CUDA(cudaStreamSynchronize(stream));
+    CHECK_CUDA(cudaMemcpy(h_output_sizes.data(), d_output_sizes, totalChunks * sizeof(size_t),         cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_statuses.data(),     d_statuses,     totalChunks * sizeof(nvcompStatus_t), cudaMemcpyDeviceToHost));
 
     for (size_t c = 0; c < totalChunks; c++) {
         if (h_statuses[c] != nvcompSuccess)
-            throw std::runtime_error("nvcomp Zstd compress failed on chunk "
-                + std::to_string(c) + " (buffer "
-                + std::to_string(chunks[c].buf_idx) + ")");
+            throw std::runtime_error("nvcomp Zstd compress failed on chunk " + std::to_string(c)
+                + " (buffer " + std::to_string(chunks[c].buf_idx) + ")");
     }
 
-    // Assemble per-buffer results (same framing as original)
+    //      Format per buffer: [num_chunks:uint64][uncomp_size_0:uint64]...[comp_size_0:uint64]...[data...]
+    //      This lets decompression reconstruct without knowing original sizes externally.
     for (size_t i = 0; i < N; i++) {
         if (sizes[i] == 0) continue;
 
@@ -231,21 +182,30 @@ nvcomp_batch_compress(
                 (uint8_t*)d_output_pool + first * maxOutPerChunk,
                 h_output_sizes[first], cudaMemcpyDeviceToHost));
         } else {
-            size_t headerSize      = 8 + count * 8 + count * 8;
+            // Multi-chunk — write framing header then chunk data
+            // Header: [num_chunks:8][uncompressed_sizes:8*count][compressed_sizes:8*count]
+            size_t headerSize = 8 + count * 8 + count * 8;
             size_t totalCompressed = 0;
             for (size_t c = first; c < first + count; c++) totalCompressed += h_output_sizes[c];
 
             out.resize(headerSize + totalCompressed);
             uint8_t* p = out.data();
 
+            // num_chunks (little-endian uint64)
             uint64_t nc = count;
             memcpy(p, &nc, 8); p += 8;
+
+            // uncompressed chunk sizes
             for (size_t c = first; c < first + count; c++) {
-                uint64_t us = chunks[c].chunk_size; memcpy(p, &us, 8); p += 8;
+                uint64_t us = chunks[c].chunk_size;
+                memcpy(p, &us, 8); p += 8;
             }
+            // compressed chunk sizes
             for (size_t c = first; c < first + count; c++) {
-                uint64_t cs = h_output_sizes[c];    memcpy(p, &cs, 8); p += 8;
+                uint64_t cs = h_output_sizes[c];
+                memcpy(p, &cs, 8); p += 8;
             }
+            // chunk data
             for (size_t c = first; c < first + count; c++) {
                 CHECK_CUDA(cudaMemcpy(p,
                     (uint8_t*)d_output_pool + c * maxOutPerChunk,
@@ -267,438 +227,6 @@ nvcomp_batch_compress(
 
     return results;
 }
-
-
-// Batched GPU compress for inputs that already live on device.
-static std::vector<NvcompBatchCompressResult>
-nvcomp_batch_compress_device(
-    const std::vector<const uint8_t*>& device_inputs,
-    const std::vector<size_t>&         sizes)
-{
-    const size_t N = device_inputs.size();
-    std::vector<NvcompBatchCompressResult> results(N);
-
-    struct ChunkInfo {
-        size_t buf_idx;
-        size_t offset;
-        size_t chunk_size;
-    };
-
-    std::vector<ChunkInfo> chunks;
-    std::vector<size_t> chunk_start_idx(N);
-
-    for (size_t i = 0; i < N; i++) {
-        results[i].rawBytes = sizes[i];
-        chunk_start_idx[i] = chunks.size();
-        if (sizes[i] == 0) continue;
-
-        size_t offset = 0;
-        while (offset < sizes[i]) {
-            size_t this_chunk = std::min(NVCOMP_ZSTD_MAX_CHUNK, sizes[i] - offset);
-            chunks.push_back({i, offset, this_chunk});
-            offset += this_chunk;
-        }
-    }
-
-    const size_t totalChunks = chunks.size();
-    if (totalChunks == 0) return results;
-
-    nvcompBatchedZstdCompressOpts_t comp_opts = nvcompBatchedZstdCompressDefaultOpts;
-
-    size_t maxOutPerChunk = 0;
-    CHECK_NVCOMP(nvcompBatchedZstdCompressGetMaxOutputChunkSize(
-        NVCOMP_ZSTD_MAX_CHUNK, comp_opts, &maxOutPerChunk));
-
-    size_t totalTempBytes = 0;
-    size_t totalUncompressed = 0;
-    for (const auto& c : chunks) totalUncompressed += c.chunk_size;
-
-    CHECK_NVCOMP(nvcompBatchedZstdCompressGetTempSizeAsync(
-        totalChunks, NVCOMP_ZSTD_MAX_CHUNK, comp_opts,
-        &totalTempBytes, totalUncompressed));
-
-    size_t outputStride = (maxOutPerChunk + 255) & ~size_t(255);
-    size_t outputPoolSize = totalChunks * outputStride;
-
-    void* d_output_pool = nullptr;
-    void* d_temp = nullptr;
-    void* d_input_ptrs = nullptr;
-    void* d_output_ptrs = nullptr;
-    void* d_input_sizes = nullptr;
-    void* d_output_sizes = nullptr;
-    void* d_statuses = nullptr;
-
-    CHECK_CUDA(cudaMalloc(&d_output_pool, outputPoolSize));
-    if (totalTempBytes > 0)
-        CHECK_CUDA(cudaMalloc(&d_temp, totalTempBytes));
-
-    CHECK_CUDA(cudaMalloc(&d_input_ptrs, totalChunks * sizeof(void*)));
-    CHECK_CUDA(cudaMalloc(&d_output_ptrs, totalChunks * sizeof(void*)));
-    CHECK_CUDA(cudaMalloc(&d_input_sizes, totalChunks * sizeof(size_t)));
-    CHECK_CUDA(cudaMalloc(&d_output_sizes, totalChunks * sizeof(size_t)));
-    CHECK_CUDA(cudaMalloc(&d_statuses, totalChunks * sizeof(nvcompStatus_t)));
-
-    std::vector<void*> h_input_ptrs(totalChunks);
-    std::vector<void*> h_output_ptrs(totalChunks);
-    std::vector<size_t> h_input_sizes(totalChunks);
-
-    for (size_t c = 0; c < totalChunks; c++) {
-        const auto& chunk = chunks[c];
-        h_input_ptrs[c] = const_cast<uint8_t*>(
-            device_inputs[chunk.buf_idx] + chunk.offset);
-        h_output_ptrs[c] = static_cast<uint8_t*>(d_output_pool) + c * outputStride;
-        h_input_sizes[c] = chunk.chunk_size;
-    }
-
-    cudaStream_t stream;
-    CHECK_CUDA(cudaStreamCreate(&stream));
-
-    CHECK_CUDA(cudaMemcpyAsync(d_input_ptrs, h_input_ptrs.data(),
-        totalChunks * sizeof(void*), cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(d_output_ptrs, h_output_ptrs.data(),
-        totalChunks * sizeof(void*), cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(d_input_sizes, h_input_sizes.data(),
-        totalChunks * sizeof(size_t), cudaMemcpyHostToDevice, stream));
-
-    CHECK_NVCOMP(nvcompBatchedZstdCompressAsync(
-        (const void* const*)d_input_ptrs,
-        (const size_t*)d_input_sizes,
-        NVCOMP_ZSTD_MAX_CHUNK,
-        totalChunks,
-        d_temp,
-        totalTempBytes,
-        (void* const*)d_output_ptrs,
-        (size_t*)d_output_sizes,
-        comp_opts,
-        (nvcompStatus_t*)d_statuses,
-        stream));
-
-    std::vector<size_t> h_output_sizes(totalChunks);
-    std::vector<nvcompStatus_t> h_statuses(totalChunks);
-
-    CHECK_CUDA(cudaMemcpyAsync(h_output_sizes.data(), d_output_sizes,
-        totalChunks * sizeof(size_t), cudaMemcpyDeviceToHost, stream));
-    CHECK_CUDA(cudaMemcpyAsync(h_statuses.data(), d_statuses,
-        totalChunks * sizeof(nvcompStatus_t), cudaMemcpyDeviceToHost, stream));
-
-    CHECK_CUDA(cudaStreamSynchronize(stream));
-
-    for (size_t c = 0; c < totalChunks; c++) {
-        if (h_statuses[c] != nvcompSuccess) {
-            throw std::runtime_error("nvcomp device Zstd compress failed on chunk "
-                + std::to_string(c) + " (buffer "
-                + std::to_string(chunks[c].buf_idx) + ")");
-        }
-        if (h_output_sizes[c] > maxOutPerChunk) {
-            throw std::runtime_error("nvcomp device Zstd output exceeded bound");
-        }
-    }
-
-    for (size_t i = 0; i < N; i++) {
-        if (sizes[i] == 0) continue;
-
-        size_t first = chunk_start_idx[i];
-        size_t count = 0;
-        for (size_t c = first; c < totalChunks && chunks[c].buf_idx == i; c++) count++;
-
-        std::vector<uint8_t>& out = results[i].compressed;
-
-        if (count == 1) {
-            out.resize(h_output_sizes[first]);
-            CHECK_CUDA(cudaMemcpy(out.data(),
-                static_cast<uint8_t*>(d_output_pool) + first * outputStride,
-                h_output_sizes[first], cudaMemcpyDeviceToHost));
-        } else {
-            size_t headerSize = 8 + count * 8 + count * 8;
-            size_t totalCompressed = 0;
-            for (size_t c = first; c < first + count; c++) totalCompressed += h_output_sizes[c];
-
-            out.resize(headerSize + totalCompressed);
-            uint8_t* q = out.data();
-
-            uint64_t nc = count;
-            std::memcpy(q, &nc, 8); q += 8;
-            for (size_t c = first; c < first + count; c++) {
-                uint64_t us = chunks[c].chunk_size;
-                std::memcpy(q, &us, 8); q += 8;
-            }
-            for (size_t c = first; c < first + count; c++) {
-                uint64_t cs = h_output_sizes[c];
-                std::memcpy(q, &cs, 8); q += 8;
-            }
-            for (size_t c = first; c < first + count; c++) {
-                CHECK_CUDA(cudaMemcpy(q,
-                    static_cast<uint8_t*>(d_output_pool) + c * outputStride,
-                    h_output_sizes[c], cudaMemcpyDeviceToHost));
-                q += h_output_sizes[c];
-            }
-        }
-    }
-
-    cudaFree(d_output_pool);
-    if (d_temp) cudaFree(d_temp);
-    cudaFree(d_input_ptrs);
-    cudaFree(d_output_ptrs);
-    cudaFree(d_input_sizes);
-    cudaFree(d_output_sizes);
-    cudaFree(d_statuses);
-    cudaStreamDestroy(stream);
-
-    return results;
-}
-
-
-
-// Batched GPU compress directly into the final contiguous CAESAR payload.
-// Payload format is unchanged:
-// [4 x uint64_t sizes][processMask][prefixMask][maskLength][coeffInt]
-static std::vector<size_t>
-nvcomp_batch_compress_device_to_payload(
-    const std::vector<const uint8_t*>& device_inputs,
-    const std::vector<size_t>& sizes,
-    std::vector<uint8_t>& payload)
-{
-    const bool profileDirect =
-        std::getenv("CAESAR_GAE_LOSSLESS_PROFILE") != nullptr;
-    auto directStart = std::chrono::high_resolution_clock::now();
-    auto directLast = directStart;
-    auto printDirectProfile = [&](const char* name) {
-        if (!profileDirect) return;
-        auto now = std::chrono::high_resolution_clock::now();
-        double dt = std::chrono::duration<double>(now - directLast).count();
-        double total = std::chrono::duration<double>(now - directStart).count();
-        std::cout << "[GAE DIRECT PAYLOAD PROFILE] " << name
-                  << " time=" << dt << " s total=" << total << " s\n";
-        directLast = now;
-    };
-
-    const size_t N = device_inputs.size();
-    std::vector<size_t> compressedSizes(N, 0);
-
-    struct ChunkInfo {
-        size_t buf_idx;
-        size_t offset;
-        size_t chunk_size;
-    };
-
-    std::vector<ChunkInfo> chunks;
-    std::vector<size_t> chunk_start_idx(N);
-
-    for (size_t i = 0; i < N; i++) {
-        chunk_start_idx[i] = chunks.size();
-        if (sizes[i] == 0) continue;
-
-        size_t offset = 0;
-        while (offset < sizes[i]) {
-            size_t this_chunk = std::min(NVCOMP_ZSTD_MAX_CHUNK, sizes[i] - offset);
-            chunks.push_back({i, offset, this_chunk});
-            offset += this_chunk;
-        }
-    }
-
-    const size_t totalChunks = chunks.size();
-    if (totalChunks == 0) {
-        payload.clear();
-        return compressedSizes;
-    }
-
-    nvcompBatchedZstdCompressOpts_t comp_opts = nvcompBatchedZstdCompressDefaultOpts;
-
-    size_t maxOutPerChunk = 0;
-    CHECK_NVCOMP(nvcompBatchedZstdCompressGetMaxOutputChunkSize(
-        NVCOMP_ZSTD_MAX_CHUNK, comp_opts, &maxOutPerChunk));
-
-    size_t totalTempBytes = 0;
-    size_t totalUncompressed = 0;
-    for (const auto& c : chunks) totalUncompressed += c.chunk_size;
-
-    CHECK_NVCOMP(nvcompBatchedZstdCompressGetTempSizeAsync(
-        totalChunks, NVCOMP_ZSTD_MAX_CHUNK, comp_opts,
-        &totalTempBytes, totalUncompressed));
-
-    size_t outputStride = (maxOutPerChunk + 255) & ~size_t(255);
-    size_t outputPoolSize = totalChunks * outputStride;
-    printDirectProfile("setup_chunks_queries");
-
-    void* d_output_pool = nullptr;
-    void* d_temp = nullptr;
-    void* d_input_ptrs = nullptr;
-    void* d_output_ptrs = nullptr;
-    void* d_input_sizes = nullptr;
-    void* d_output_sizes = nullptr;
-    void* d_statuses = nullptr;
-
-    CHECK_CUDA(cudaMalloc(&d_output_pool, outputPoolSize));
-    if (totalTempBytes > 0)
-        CHECK_CUDA(cudaMalloc(&d_temp, totalTempBytes));
-
-    CHECK_CUDA(cudaMalloc(&d_input_ptrs, totalChunks * sizeof(void*)));
-    CHECK_CUDA(cudaMalloc(&d_output_ptrs, totalChunks * sizeof(void*)));
-    CHECK_CUDA(cudaMalloc(&d_input_sizes, totalChunks * sizeof(size_t)));
-    CHECK_CUDA(cudaMalloc(&d_output_sizes, totalChunks * sizeof(size_t)));
-    CHECK_CUDA(cudaMalloc(&d_statuses, totalChunks * sizeof(nvcompStatus_t)));
-    printDirectProfile("cuda_mallocs");
-
-    std::vector<void*> h_input_ptrs(totalChunks);
-    std::vector<void*> h_output_ptrs(totalChunks);
-    std::vector<size_t> h_input_sizes(totalChunks);
-
-    for (size_t c = 0; c < totalChunks; c++) {
-        const auto& chunk = chunks[c];
-        h_input_ptrs[c] = const_cast<uint8_t*>(
-            device_inputs[chunk.buf_idx] + chunk.offset);
-        h_output_ptrs[c] = static_cast<uint8_t*>(d_output_pool) + c * outputStride;
-        h_input_sizes[c] = chunk.chunk_size;
-    }
-
-    cudaStream_t stream;
-    CHECK_CUDA(cudaStreamCreate(&stream));
-
-    CHECK_CUDA(cudaMemcpyAsync(d_input_ptrs, h_input_ptrs.data(),
-        totalChunks * sizeof(void*), cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(d_output_ptrs, h_output_ptrs.data(),
-        totalChunks * sizeof(void*), cudaMemcpyHostToDevice, stream));
-    CHECK_CUDA(cudaMemcpyAsync(d_input_sizes, h_input_sizes.data(),
-        totalChunks * sizeof(size_t), cudaMemcpyHostToDevice, stream));
-
-    CHECK_NVCOMP(nvcompBatchedZstdCompressAsync(
-        (const void* const*)d_input_ptrs,
-        (const size_t*)d_input_sizes,
-        NVCOMP_ZSTD_MAX_CHUNK,
-        totalChunks,
-        d_temp,
-        totalTempBytes,
-        (void* const*)d_output_ptrs,
-        (size_t*)d_output_sizes,
-        comp_opts,
-        (nvcompStatus_t*)d_statuses,
-        stream));
-
-    std::vector<size_t> h_output_sizes(totalChunks);
-    std::vector<nvcompStatus_t> h_statuses(totalChunks);
-
-    CHECK_CUDA(cudaMemcpyAsync(h_output_sizes.data(), d_output_sizes,
-        totalChunks * sizeof(size_t), cudaMemcpyDeviceToHost, stream));
-    CHECK_CUDA(cudaMemcpyAsync(h_statuses.data(), d_statuses,
-        totalChunks * sizeof(nvcompStatus_t), cudaMemcpyDeviceToHost, stream));
-
-    CHECK_CUDA(cudaStreamSynchronize(stream));
-    printDirectProfile("nvcomp_and_size_sync");
-
-    for (size_t c = 0; c < totalChunks; c++) {
-        if (h_statuses[c] != nvcompSuccess) {
-            throw std::runtime_error("nvcomp direct payload failed on chunk "
-                + std::to_string(c) + " (buffer "
-                + std::to_string(chunks[c].buf_idx) + ")");
-        }
-        if (h_output_sizes[c] > maxOutPerChunk) {
-            throw std::runtime_error("nvcomp direct payload output exceeded bound");
-        }
-    }
-
-    for (size_t i = 0; i < N; i++) {
-        if (sizes[i] == 0) continue;
-
-        size_t first = chunk_start_idx[i];
-        size_t count = 0;
-        for (size_t c = first; c < totalChunks && chunks[c].buf_idx == i; c++) count++;
-
-        if (count == 1) {
-            compressedSizes[i] = h_output_sizes[first];
-        } else {
-            size_t totalCompressed = 0;
-            for (size_t c = first; c < first + count; c++) totalCompressed += h_output_sizes[c];
-            compressedSizes[i] = 8 + count * 8 + count * 8 + totalCompressed;
-        }
-    }
-
-    size_t totalCompressedPayloadBytes = 0;
-    for (size_t sz : compressedSizes) totalCompressedPayloadBytes += sz;
-
-    const size_t totalPayloadBytes = 4 * sizeof(uint64_t) + totalCompressedPayloadBytes;
-    bool parallelTouchPayload = true;
-    if (const char* disableParallelTouch = std::getenv("CAESAR_GAE_DISABLE_PARALLEL_TOUCH_PAYLOAD")) {
-        if (std::string(disableParallelTouch) == "1") parallelTouchPayload = false;
-    }
-
-    payload.clear();
-    if (parallelTouchPayload) {
-        payload.reserve(totalPayloadBytes);
-
-        struct VecHack : public std::vector<uint8_t> {
-            using std::vector<uint8_t>::_M_impl;
-        };
-        reinterpret_cast<VecHack&>(payload)._M_impl._M_finish =
-            reinterpret_cast<VecHack&>(payload)._M_impl._M_start + totalPayloadBytes;
-
-        parallel_zero_fill_payload(payload.data(), payload.size());
-        printDirectProfile("payload_parallel_touch_resize");
-    } else {
-        payload.resize(totalPayloadBytes);
-        printDirectProfile("payload_resize");
-    }
-
-    uint8_t* out = payload.data();
-    for (size_t sz : compressedSizes) {
-        uint64_t v = static_cast<uint64_t>(sz);
-        std::memcpy(out, &v, sizeof(uint64_t));
-        out += sizeof(uint64_t);
-    }
-
-    for (size_t i = 0; i < N; i++) {
-        if (sizes[i] == 0) continue;
-
-        size_t first = chunk_start_idx[i];
-        size_t count = 0;
-        for (size_t c = first; c < totalChunks && chunks[c].buf_idx == i; c++) count++;
-
-        if (count == 1) {
-            CHECK_CUDA(cudaMemcpy(out,
-                static_cast<uint8_t*>(d_output_pool) + first * outputStride,
-                h_output_sizes[first],
-                cudaMemcpyDeviceToHost));
-            out += h_output_sizes[first];
-        } else {
-            uint64_t nc = static_cast<uint64_t>(count);
-            std::memcpy(out, &nc, sizeof(uint64_t));
-            out += sizeof(uint64_t);
-
-            for (size_t c = first; c < first + count; c++) {
-                uint64_t us = static_cast<uint64_t>(chunks[c].chunk_size);
-                std::memcpy(out, &us, sizeof(uint64_t));
-                out += sizeof(uint64_t);
-            }
-
-            for (size_t c = first; c < first + count; c++) {
-                uint64_t cs = static_cast<uint64_t>(h_output_sizes[c]);
-                std::memcpy(out, &cs, sizeof(uint64_t));
-                out += sizeof(uint64_t);
-            }
-
-            for (size_t c = first; c < first + count; c++) {
-                CHECK_CUDA(cudaMemcpy(out,
-                    static_cast<uint8_t*>(d_output_pool) + c * outputStride,
-                    h_output_sizes[c],
-                    cudaMemcpyDeviceToHost));
-                out += h_output_sizes[c];
-            }
-        }
-    }
-    printDirectProfile("direct_d2h_into_payload");
-
-    cudaFree(d_output_pool);
-    if (d_temp) cudaFree(d_temp);
-    cudaFree(d_input_ptrs);
-    cudaFree(d_output_ptrs);
-    cudaFree(d_input_sizes);
-    cudaFree(d_output_sizes);
-    cudaFree(d_statuses);
-    cudaStreamDestroy(stream);
-    printDirectProfile("cleanup");
-
-    return compressedSizes;
-}
-
 
 // Batched GPU decompress — handles both single-chunk and multi-chunk framing
 static std::vector<std::vector<uint8_t>>
@@ -889,9 +417,6 @@ PCA& PCA::fit(const torch::Tensor& x) {
     mean_ = torch::mean(xDevice, 0);
     auto xCentered = xDevice - mean_;
 
-    // Normalize by std to handle tiny value ranges
-    auto scale = torch::std(xCentered) + 1e-8f;
-    xCentered = xCentered / scale;
 
     auto C = torch::matmul(xCentered.transpose(0, 1), xCentered) / (xCentered.size(0) - 1);
 
@@ -1028,69 +553,38 @@ torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask ,
 }
 
 std::vector<uint8_t> BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
-    torch::Tensor bits = bitArray.dtype() == torch::kUInt8
-        ? bitArray.flatten()
-        : bitArray.to(torch::kUInt8).flatten();
-
-    int64_t numBits = bits.numel();
-    int64_t numBytes = (numBits + 7) / 8;
-    int64_t paddedBits = numBytes * 8;
-
-    if (paddedBits != numBits) {
-        torch::Tensor padded = torch::zeros({paddedBits}, bits.options());
-        padded.narrow(0, 0, numBits).copy_(bits);
-        bits = padded;
+    torch::Tensor bits;
+    if (bitArray.dtype() != torch::kUInt8) {
+        bits = bitArray.to(torch::kUInt8);
+    }
+    else {
+        bits = bitArray;
     }
 
-    torch::Tensor weights = torch::tensor(
-        {128, 64, 32, 16, 8, 4, 2, 1},
-        torch::TensorOptions().dtype(torch::kUInt8).device(bits.device()));
+    bits = bits.contiguous().cpu();
 
-    torch::Tensor packed = (bits.reshape({numBytes, 8}) * weights)
-        .sum(1)
-        .to(torch::kUInt8)
-        .contiguous()
-        .cpu();
-
-    std::vector<uint8_t> out(numBytes);
-    std::memcpy(out.data(), packed.data_ptr<uint8_t>(), numBytes);
-    return out;
-}
-
-
-static torch::Tensor bitsToBytesTensor(const torch::Tensor& bitArray) {
-    torch::Tensor bits = bitArray.dtype() == torch::kUInt8
-        ? bitArray.flatten()
-        : bitArray.to(torch::kUInt8).flatten();
-
+    auto data = bits.data_ptr<uint8_t>();
     int64_t numBits = bits.numel();
-    int64_t numBytes = (numBits + 7) / 8;
-    int64_t paddedBits = numBytes * 8;
 
-    if (paddedBits != numBits) {
-        torch::Tensor padded = torch::zeros({paddedBits}, bits.options());
-        padded.narrow(0, 0, numBits).copy_(bits);
-        bits = padded;
+    int64_t numBytes = (numBits + 7) / 8;
+
+    std::vector<uint8_t> packed(numBytes , 0);
+
+    for (int64_t byteIdx = 0; byteIdx < numBytes; ++byteIdx) {
+        uint8_t byte = 0;
+        for (int bitIdx = 0; bitIdx < 8; ++bitIdx) {
+            int64_t globalBitIdx = byteIdx * 8 + bitIdx;
+            if (globalBitIdx < numBits) {
+                if (data[globalBitIdx]) {
+                    byte |= (1 << (7 - bitIdx));
+                }
+            }
+        }
+        packed[byteIdx] = byte;
     }
 
-    torch::Tensor weights = torch::tensor(
-        {128, 64, 32, 16, 8, 4, 2, 1},
-        torch::TensorOptions().dtype(torch::kUInt8).device(bits.device()));
-
-    return (bits.reshape({numBytes, 8}) * weights)
-        .sum(1)
-        .to(torch::kUInt8)
-        .contiguous();
+    return packed;
 }
-
-static size_t tensorByteSize(const torch::Tensor& tensor) {
-    return static_cast<size_t>(tensor.numel() * tensor.element_size());
-}
-
-static const uint8_t* tensorBytePtr(const torch::Tensor& tensor) {
-    return reinterpret_cast<const uint8_t*>(tensor.data_ptr());
-}
-
 
 torch::Tensor BitUtils::bytesToBits(const std::vector<uint8_t>& byteSeq , int64_t numBits) {
     int64_t totalBits = byteSeq.size() * 8;
@@ -1145,12 +639,6 @@ PCACompressor::PCACompressor(double nrmse ,
     errorBound_(nrmse* std::sqrt(vectorSize_)) ,
     error_(nrmse) {
 
-    std::cout << "PCACompressor initialized with:" << std::endl;
-    std::cout << "  NRMSE: " << nrmse << std::endl;
-    std::cout << "  Quantization factor: " << quanFactor << std::endl;
-    std::cout << "  Device: " << device << std::endl;
-    std::cout << "  Patch size: (" << patchSize.first << ", " << patchSize.second << ")" << std::endl;
-    std::cout << "  Error bound: " << errorBound_ << std::endl;
 }
 
 PCACompressor::~PCACompressor() {
@@ -1161,20 +649,6 @@ PCACompressor::~PCACompressor() {
 
 GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
     torch::Tensor reconsData) {
-
-    const bool profileGae =
-        std::getenv("CAESAR_GAE_COMPRESS_PROFILE") != nullptr;
-    auto gaeProfileStart = std::chrono::high_resolution_clock::now();
-    auto gaeProfileLast = gaeProfileStart;
-    auto printGaeProfile = [&](const char* name) {
-        if (!profileGae) return;
-        auto now = std::chrono::high_resolution_clock::now();
-        double dt = std::chrono::duration<double>(now - gaeProfileLast).count();
-        double total = std::chrono::duration<double>(now - gaeProfileStart).count();
-        std::cout << "[GAE COMPRESS PROFILE] " << name
-                  << " time=" << dt << " s total=" << total << " s\n";
-        gaeProfileLast = now;
-    };
 
     auto inputShape = originalData.sizes();
 
@@ -1208,11 +682,9 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
     else {
         originalDataDevice = block2Vector(originalDataDevice , patchSize_);
         reconsDataDevice = block2Vector(reconsDataDevice , patchSize_);
-    printGaeProfile("prepare_vectors");
     }
 
     torch::Tensor residualPca = originalDataDevice - reconsDataDevice;
-    printGaeProfile("residual");
 
     originalDataDevice = torch::Tensor();
     reconsDataDevice = torch::Tensor();
@@ -1226,7 +698,7 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
 
     MainData mainData;
     mainData.processMask = norms > errorBound_;
-    printGaeProfile("process_mask");
+    std::cout<<"errorBound_ "<<errorBound_<<std::endl;
     norms = torch::Tensor();
 
     if (torch::sum(mainData.processMask).item<int64_t>() <= 0) {
@@ -1249,7 +721,6 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
 
     auto indices = torch::nonzero(mainData.processMask).squeeze(1);
     residualPca = torch::index_select(residualPca , 0 , indices);
-    printGaeProfile("filter_residual");
     indices = torch::Tensor();
 
     if (residualPca.size(0) < 2) {
@@ -1272,10 +743,16 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
 
     PCA pca(-1 , device_.str());
     pca.fit(residualPca);
-    printGaeProfile("pca_fit_float");
     torch::Tensor pcaBasis = pca.components();
 
+
+    std::cout<<"pcaBasis size" <<std::endl;
+    for (auto s : pcaBasis.sizes()) {
+    std::cout << s << " ";
+}
+std::cout << std::endl;
     if (pcaBasis.size(0) == 0 || pcaBasis.size(1) == 0) {
+      std::cout<<"this path"<<std::endl;
         MetaData metaData;
         metaData.GAE_correction_occur = false;
         metaData.pcaBasis = torch::empty({ 0, vectorSize_ } , torch::kFloat32);
@@ -1294,30 +771,31 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
     }
 
     torch::Tensor allCoeff = torch::matmul(residualPca , pcaBasis.transpose(0 , 1));
-    printGaeProfile("coeff_matmul");
     torch::Tensor reconstructedResidual = torch::matmul(allCoeff , pcaBasis);
     torch::Tensor reconError = torch::abs(reconstructedResidual - residualPca);
     double reconErrorMax = reconError.max().item<double>();
-    printGaeProfile("pca_error_check");
     reconstructedResidual = torch::Tensor();
     reconError = torch::Tensor();
     allCoeff = torch::Tensor();
 
+
+    std::cout<<"reconErrorMax "<<reconErrorMax<<std::endl;
     if (reconErrorMax > error_ || error_ < 10.0 * static_cast<double>(std::numeric_limits<float>::epsilon())) {
-#ifdef USE_CUDA
-        int device;
-        cudaGetDevice(&device);
-        cudaDeviceProp prop;
-        cudaGetDeviceProperties(&prop, device);
-        double leftGiB = gpu_used_gb();
-        if ((prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - 2.0 < leftGiB) {
-            std::cerr << "[WARN] GAE near memory limit: "
-                      << leftGiB << " GiB used on GPU "
-                      << " GiB left on GPU " << (prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - leftGiB << " GiB.\n"
-                      << "[WARN] Consider: larger error bound, smaller dataset chunks,\n"
-                      << "[WARN] or multiple GPUs. Attempting anyway...\n";
-        }
+   #ifdef USE_CUDA
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    double leftGiB = gpu_used_gb();
+    if ((prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - 2.0 < leftGiB) {
+    std::cerr << "[WARN] GAE near memory limit: "
+              << leftGiB << " GiB used on GPU "
+              << " GiB left on GPU " << (prop.totalGlobalMem / (1024.0 * 1024 * 1024)) - leftGiB << " GiB.\n"
+              << "[WARN] Consider: larger error bound, smaller dataset chunks,\n"
+              << "[WARN] or multiple GPUs. Attempting anyway...\n";
+}
 #endif
+
         residualPca = residualPca.to(torch::kDouble);
         pca.fit(residualPca);
         pcaBasis = pca.components();
@@ -1329,203 +807,49 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
     cleanupGPUMemory();
 #endif
 
-    torch::Tensor allCoeffPower = allCoeff.pow(2);
-    torch::Tensor sortIndex     = torch::argsort(allCoeffPower, 1, true).to(torch::kInt32);
-    printGaeProfile("argsort");
+    torch::Tensor allCoeffPower   = allCoeff.pow(2);
+    torch::Tensor sortIndex       = torch::argsort(allCoeffPower , 1 , true);
+    torch::Tensor allCoeffSorted  = torch::gather(allCoeff , 1 , sortIndex);
+    torch::Tensor quanCoeffSorted = torch::round(allCoeffSorted / quanBin_) * quanBin_;
 
-    torch::Tensor finalMask;
-    const bool useFusedMask =
-        std::getenv("CAESAR_GAE_FUSED_MASK") != nullptr &&
-        std::string(std::getenv("CAESAR_GAE_FUSED_MASK")) == "1";
+    torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower , 1 , sortIndex)
+                                    - (allCoeffSorted - quanCoeffSorted).pow(2);
+    allCoeffSorted = torch::Tensor();
 
-#if defined(USE_CUDA)
-    if (useFusedMask && allCoeff.is_cuda() && sortIndex.is_cuda() &&
-        allCoeff.scalar_type() == torch::kFloat32 &&
-        sortIndex.scalar_type() == torch::kInt32) {
-        finalMask = torch::empty(
-            {allCoeff.size(0), allCoeff.size(1)},
-            torch::TensorOptions().dtype(torch::kBool).device(device_));
+    torch::Tensor stepErrors   = torch::ones_like(allCoeffPowerDesc);
+    torch::Tensor remainErrors = torch::sum(allCoeffPower , 1);
+    allCoeffPower = torch::Tensor();
 
-        bool ok = caesarGaeBuildFinalMask(
-            allCoeff.data_ptr<float>(),
-            sortIndex.data_ptr<int32_t>(),
-            finalMask.data_ptr<bool>(),
-            allCoeff.size(0),
-            allCoeff.size(1),
-            quanBin_,
-            errorBound_);
-
-        if (!ok) {
-            throw std::runtime_error("caesarGaeBuildFinalMask launch failed");
-        }
-
-        printGaeProfile("fused_final_mask");
-
-        const bool compareFusedMask =
-            std::getenv("CAESAR_GAE_FUSED_MASK_COMPARE") != nullptr &&
-            std::string(std::getenv("CAESAR_GAE_FUSED_MASK_COMPARE")) == "1";
-
-        if (compareFusedMask) {
-            int64_t compareRows = std::min<int64_t>(allCoeff.size(0), 4096);
-            if (const char* envRows = std::getenv("CAESAR_GAE_FUSED_MASK_COMPARE_ROWS")) {
-                int64_t parsed = std::atoll(envRows);
-                if (parsed > 0) compareRows = std::min<int64_t>(allCoeff.size(0), parsed);
-            }
-
-            torch::Tensor allCoeffCmp = allCoeff.narrow(0, 0, compareRows);
-            torch::Tensor sortIndexCmp = sortIndex.narrow(0, 0, compareRows);
-            torch::Tensor allCoeffPowerCmp = allCoeffPower.narrow(0, 0, compareRows);
-            torch::Tensor finalMaskCmp = finalMask.narrow(0, 0, compareRows);
-
-            torch::Tensor allCoeffSorted = torch::gather(allCoeffCmp, 1, sortIndexCmp.to(torch::kLong));
-            torch::Tensor quanCoeffSorted = allCoeffSorted.div(quanBin_).round();
-
-            torch::Tensor quantError = quanCoeffSorted.mul(quanBin_);
-            quantError.sub_(allCoeffSorted).pow_(2);
-
-            torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPowerCmp, 1, sortIndexCmp.to(torch::kLong));
-            allCoeffPowerDesc.sub_(quantError);
-
-            torch::Tensor totalPower = torch::sum(allCoeffPowerCmp, 1).unsqueeze(1);
-            torch::Tensor stepErrors = totalPower - torch::cumsum(allCoeffPowerDesc, 1);
-            torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
-
-            torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt), 1);
-            auto batchIndices = torch::arange(mask.size(0),
-                torch::TensorOptions().device(device_));
-            mask.index_put_({batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1)}, true);
-
-            torch::Tensor selectedCoeffQBool = (quanCoeffSorted != 0) & mask;
-            torch::Tensor oldFinalMask = torch::zeros(
-                {selectedCoeffQBool.size(0), selectedCoeffQBool.size(1)},
-                torch::TensorOptions().dtype(torch::kBool).device(device_));
-            oldFinalMask.scatter_(1, sortIndexCmp.to(torch::kLong), selectedCoeffQBool);
-
-            int64_t diffCount = torch::sum(finalMaskCmp != oldFinalMask).item<int64_t>();
-            int64_t fusedCount = torch::sum(finalMaskCmp).item<int64_t>();
-            int64_t oldCount = torch::sum(oldFinalMask).item<int64_t>();
-
-            std::cout << "[GAE FUSED MASK COMPARE] rows=" << compareRows
-                      << " diff=" << diffCount
-                      << " fused_count=" << fusedCount
-                      << " old_count=" << oldCount << "\n";
-
-            if (diffCount > 0) {
-                torch::Tensor mismatch = torch::nonzero(finalMaskCmp != oldFinalMask);
-                auto first = mismatch.index({0}).to(torch::kCPU);
-                int64_t row0 = first.index({0}).item<int64_t>();
-                int64_t col0 = first.index({1}).item<int64_t>();
-
-                torch::Tensor rowSort = sortIndexCmp.index({row0}).to(torch::kCPU);
-                int64_t rank0 = -1;
-                for (int64_t r = 0; r < rowSort.numel(); ++r) {
-                    if (rowSort.index({r}).item<int64_t>() == col0) {
-                        rank0 = r;
-                        break;
-                    }
-                }
-
-                bool fusedVal = finalMaskCmp.index({row0, col0}).item<bool>();
-                bool oldVal = oldFinalMask.index({row0, col0}).item<bool>();
-
-                std::cout << "[GAE FUSED MASK FIRST_DIFF] row=" << row0
-                          << " col=" << col0
-                          << " rank=" << rank0
-                          << " fused=" << fusedVal
-                          << " old=" << oldVal << "\n";
-
-                if (rank0 >= 0) {
-                    auto stepCpu = stepErrors.index({row0}).to(torch::kCPU);
-                    auto maskCpu = mask.index({row0}).to(torch::kCPU);
-                    auto sortCpu = sortIndexCmp.index({row0}).to(torch::kCPU);
-                    auto coeffCpu = allCoeffCmp.index({row0}).to(torch::kCPU);
-                    auto qCpu = quanCoeffSorted.index({row0}).to(torch::kCPU);
-
-                    int64_t firstFalse = firstFalseIdx.index({row0}).item<int64_t>();
-                    int64_t sortedCol = sortCpu.index({rank0}).item<int64_t>();
-                    double coeff = coeffCpu.index({sortedCol}).item<float>();
-                    double q = qCpu.index({rank0}).item<float>();
-                    double step = stepCpu.index({rank0}).item<float>();
-                    bool oldMaskAtRank = maskCpu.index({rank0}).item<bool>();
-
-                    std::cout << "[GAE FUSED MASK DIFF_DETAIL] row=" << row0
-                              << " rank=" << rank0
-                              << " sorted_col=" << sortedCol
-                              << " firstFalse=" << firstFalse
-                              << " coeff=" << coeff
-                              << " q=" << q
-                              << " stepError=" << step
-                              << " threshold=" << (errorBound_ * errorBound_)
-                              << " oldMaskAtRank=" << oldMaskAtRank << "\n";
-                }
-            }
-
-            printGaeProfile("fused_mask_compare_old_path");
-        }
-
-        allCoeffPower = torch::Tensor();
-        sortIndex = torch::Tensor();
-    } else
-#endif
-    {
-        if (useFusedMask) {
-            std::cout << "[GAE FUSED MASK SKIP] allCoeff_cuda=" << allCoeff.is_cuda()
-                      << " sortIndex_cuda=" << sortIndex.is_cuda()
-                      << " allCoeff_dtype=" << allCoeff.scalar_type()
-                      << " sortIndex_dtype=" << sortIndex.scalar_type()
-                      << " rows=" << allCoeff.size(0)
-                      << " cols=" << allCoeff.size(1)
-                      << "\n";
-        }
-        torch::Tensor allCoeffSorted = torch::gather(allCoeff, 1, sortIndex.to(torch::kLong));
-        torch::Tensor quanCoeffSorted = allCoeffSorted.div(quanBin_).round();
-
-        torch::Tensor quantError = quanCoeffSorted.mul(quanBin_);
-        quantError.sub_(allCoeffSorted).pow_(2);
-
-        torch::Tensor allCoeffPowerDesc = torch::gather(allCoeffPower, 1, sortIndex.to(torch::kLong));
-        allCoeffPowerDesc.sub_(quantError);
-        printGaeProfile("coeff_quant_error");
-        allCoeffSorted = torch::Tensor();
-        quantError = torch::Tensor();
-
-        torch::Tensor totalPower = torch::sum(allCoeffPower, 1).unsqueeze(1);
-        allCoeffPower = torch::Tensor();
-#ifdef USE_CUDA
-        cleanupGPUMemory();
-#endif
-
-        torch::Tensor stepErrors = totalPower - torch::cumsum(allCoeffPowerDesc, 1);
-        printGaeProfile("cumsum_step_errors");
-        allCoeffPowerDesc = torch::Tensor();
-        totalPower        = torch::Tensor();
-
-        torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
-        printGaeProfile("final_mask_threshold");
-        stepErrors = torch::Tensor();
-
-        torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt), 1);
-        auto batchIndices = torch::arange(mask.size(0),
-            torch::TensorOptions().device(device_));
-        mask.index_put_({batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1)}, true);
-        printGaeProfile("final_mask_index_put");
-        firstFalseIdx = torch::Tensor();
-        batchIndices  = torch::Tensor();
-
-        torch::Tensor selectedCoeffQBool = (quanCoeffSorted != 0) & mask;
-        printGaeProfile("selected_coeff_bool");
-        mask             = torch::Tensor();
-
-        quanCoeffSorted  = torch::Tensor();
-
-        finalMask = torch::zeros(
-            {selectedCoeffQBool.size(0), selectedCoeffQBool.size(1)},
-            torch::TensorOptions().dtype(torch::kBool).device(device_));
-        finalMask.scatter_(1, sortIndex.to(torch::kLong), selectedCoeffQBool);
-        printGaeProfile("final_mask_scatter");
-        selectedCoeffQBool = torch::Tensor();
-        sortIndex          = torch::Tensor();
+    for (int64_t i = 0; i < stepErrors.size(1); ++i) {
+        remainErrors = remainErrors - allCoeffPowerDesc.select(1 , i);
+        stepErrors.select(1 , i) = remainErrors;
     }
+  std::cout << "stepErrors sum = "
+          << stepErrors.sum().item<double>()
+          << std::endl;
+
+    allCoeffPowerDesc = torch::Tensor();
+    remainErrors = torch::Tensor();
+
+    torch::Tensor mask = stepErrors > (errorBound_ * errorBound_);
+    stepErrors = torch::Tensor();
+
+    torch::Tensor firstFalseIdx = torch::argmin(mask.to(torch::kInt) , 1);
+    auto batchIndices = torch::arange(mask.size(0) ,
+        torch::TensorOptions().device(device_));
+    mask.index_put_({ batchIndices.unsqueeze(1), firstFalseIdx.unsqueeze(1) } , true);
+    firstFalseIdx = torch::Tensor();
+    batchIndices = torch::Tensor();
+
+    torch::Tensor selectedCoeffQBool = (quanCoeffSorted * mask) != 0;
+    quanCoeffSorted = torch::Tensor();
+
+    torch::Tensor finalMask = torch::zeros(
+        {selectedCoeffQBool.size(0), selectedCoeffQBool.size(1)} ,
+        torch::TensorOptions().dtype(torch::kBool).device(device_));
+    finalMask.scatter_(1 , sortIndex , selectedCoeffQBool);
+    selectedCoeffQBool = torch::Tensor();
+    sortIndex = torch::Tensor();
 #ifdef USE_CUDA
     cleanupGPUMemory();
 #endif
@@ -1533,97 +857,59 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData ,
     torch::Tensor coeffIntFlatten = torch::round(
         allCoeff.masked_select(finalMask) / quanBin_
     );
-    printGaeProfile("coeff_masked_select");
-    allCoeff        = torch::Tensor();   
-#ifdef USE_CUDA
-cleanupGPUMemory();
-#endif
+    allCoeff = torch::Tensor();
 
-    const bool directCoeffInt =
-        std::getenv("CAESAR_GAE_DIRECT_COEFFINT") != nullptr &&
-        std::string(std::getenv("CAESAR_GAE_DIRECT_COEFFINT")) == "1";
-    const bool requestDirectCoeffInt16 =
-        std::getenv("CAESAR_GAE_DIRECT_COEFFINT16") != nullptr &&
-        std::string(std::getenv("CAESAR_GAE_DIRECT_COEFFINT16")) == "1";
-    bool usedDirectCoeffInt16 = false;
-
+    std::vector<at::Tensor> inverse_parts;
+    std::vector<at::Tensor> unique_parts;
     int64_t chunk_size = 1LL << 30;
-    int64_t numel      = coeffIntFlatten.numel();
+    int64_t numel = coeffIntFlatten.numel();
+    int64_t offset = 0;
 
-    torch::Tensor uniqueVals;
-    torch::Tensor inverseIndices;
+    for (int64_t start = 0; start < numel; start += chunk_size) {
+        int64_t current_chunk_size = std::min(chunk_size , numel - start);
+        auto chunk = coeffIntFlatten.narrow(0 , start , current_chunk_size);
+        auto partial_unique = at::_unique(chunk , true , true);
 
-    if (requestDirectCoeffInt16) {
-        double coeffMin = coeffIntFlatten.min().item<double>();
-        double coeffMax = coeffIntFlatten.max().item<double>();
-        if (coeffMin >= -32768.0 && coeffMax <= 32767.0) {
-            uniqueVals = torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32).device(device_));
-            inverseIndices = coeffIntFlatten.to(torch::kInt16).contiguous();
-            usedDirectCoeffInt16 = true;
-        } else {
-            std::cout << "[GAE DIRECT COEFFINT16] disabled: quantized coeff range=["
-                      << coeffMin << "," << coeffMax << "] exceeds int16\n";
-        }
+        unique_parts.push_back(std::get<0>(partial_unique));
+        auto inv = std::get<1>(partial_unique) + offset;
+        inverse_parts.push_back(inv);
+        offset += std::get<0>(partial_unique).size(0);
     }
 
-    if (!usedDirectCoeffInt16 && directCoeffInt) {
-        uniqueVals = torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32).device(device_));
-        inverseIndices = coeffIntFlatten.to(torch::kInt32).contiguous();
-    }
-    else if (!usedDirectCoeffInt16 && numel <= chunk_size) {
-        auto unique_result = at::_unique(coeffIntFlatten, true, true);
-        uniqueVals     = std::get<0>(unique_result);
-        inverseIndices = std::get<1>(unique_result);
-    }
-    else {
-        std::vector<at::Tensor> inverse_parts;
-        std::vector<at::Tensor> unique_parts;
-        int64_t offset = 0;
-
-        for (int64_t start = 0; start < numel; start += chunk_size) {
-            int64_t current_chunk_size = std::min(chunk_size, numel - start);
-            auto chunk          = coeffIntFlatten.narrow(0, start, current_chunk_size);
-            auto partial_unique = at::_unique(chunk, true, true);
-
-            unique_parts.push_back(std::get<0>(partial_unique));
-            auto inv = std::get<1>(partial_unique) + offset;
-            inverse_parts.push_back(inv);
-            offset += std::get<0>(partial_unique).size(0);
-        }
-
-        torch::Tensor all_uniques = torch::cat(unique_parts, 0);
-        unique_parts.clear();
-        unique_parts.shrink_to_fit();
+    coeffIntFlatten = torch::Tensor();
 #ifdef USE_CUDA
-        cleanupGPUMemory();
+    cleanupGPUMemory();
 #endif
 
-        torch::Tensor all_inverses = torch::cat(inverse_parts, 0);
-        inverse_parts.clear();
-        inverse_parts.shrink_to_fit();
+    torch::Tensor all_uniques = torch::cat(unique_parts , 0);
+    unique_parts.clear();
+    unique_parts.shrink_to_fit();
 #ifdef USE_CUDA
-        cleanupGPUMemory();
+    cleanupGPUMemory();
 #endif
 
-        auto final_unique   = at::_unique(all_uniques, true, true);
-        uniqueVals          = std::get<0>(final_unique);
-        torch::Tensor remap = std::get<1>(final_unique);
-        all_uniques         = torch::Tensor();
+    torch::Tensor all_inverses = torch::cat(inverse_parts , 0);
+    inverse_parts.clear();
+    inverse_parts.shrink_to_fit();
+#ifdef USE_CUDA
+    cleanupGPUMemory();
+#endif
 
-        inverseIndices = remap.index_select(0, all_inverses);
-        remap          = torch::Tensor();
-        all_inverses   = torch::Tensor();
-    }
+    auto final_unique = at::_unique(all_uniques , true , true);
+    torch::Tensor uniqueVals = std::get<0>(final_unique);
+    torch::Tensor remap = std::get<1>(final_unique);
+    all_uniques = torch::Tensor();
 
-    coeffIntFlatten   = torch::Tensor();  
+    torch::Tensor inverseIndices = remap.index_select(0 , all_inverses);
+    remap = torch::Tensor();
+    all_inverses = torch::Tensor();
+
     mainData.coeffInt = inverseIndices;
-    printGaeProfile(usedDirectCoeffInt16 ? "direct_coeffInt16" : (directCoeffInt ? "direct_coeffInt" : "unique_inverse"));
 #ifdef USE_CUDA
-cleanupGPUMemory();
+    cleanupGPUMemory();
 #endif
 
     auto prefixResult = indexMaskPrefix(finalMask);
-    printGaeProfile("indexMaskPrefix");
     mainData.prefixMask = prefixResult.first;
     mainData.maskLength = prefixResult.second;
 
@@ -1640,11 +926,10 @@ cleanupGPUMemory();
     metaData.nVec = mainData.processMask.size(0);
     metaData.prefixLength = mainData.prefixMask.size(0);
 
-    pcaBasis   = torch::Tensor();
+    pcaBasis = torch::Tensor();
     uniqueVals = torch::Tensor();
 
     auto compressResult = compressLossless(metaData , mainData);
-    printGaeProfile("compressLossless");
     metaData.dataBytes = compressResult.second;
 
     return { metaData, std::move(compressResult.first), compressResult.second };
@@ -1673,12 +958,7 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
         mainData.maskLength ,
         metaData.pcaBasis.size(0));
 
-    torch::Tensor coeffInt;
-    if (metaData.uniqueVals.numel() == 0) {
-        coeffInt = mainData.coeffInt.to(torch::kFloat32);
-    } else {
-        coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
-    }
+    torch::Tensor coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
 
     torch::Tensor coeff = torch::zeros(indexMask.sizes() ,
         torch::TensorOptions().dtype(torch::kFloat32).device(device_));
@@ -1694,6 +974,12 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
         reconsDevice.index({ mainData.processMask }) + pcaReconstruction);
     pcaReconstruction = torch::Tensor();
 
+    int64_t n_processed = torch::sum(mainData.processMask).item<int64_t>();
+int64_t n_total = mainData.processMask.size(0);
+std::cout << "GAE: " << n_processed << "/" << n_total 
+          << " patches need correction, errorBound_=" << errorBound_
+          << " quanBin_=" << quanBin_ << std::endl;
+
     if (needsReshape) {
         reconsDevice = vector2Block(reconsDevice , inputShape.vec() , patchSize_);
     }
@@ -1701,261 +987,72 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
     return reconsDevice;
 }
 
-
-struct ByteView {
-    const uint8_t* data;
-    size_t size;
-};
-
 std::pair<std::unique_ptr<CompressedData> , int64_t>
 PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainData)
 {
     auto compressedData = std::make_unique<CompressedData>();
+    int64_t totalBytes = 0;
 
-    const bool profileLossless =
-        std::getenv("CAESAR_GAE_LOSSLESS_PROFILE") != nullptr;
-    auto losslessStart = std::chrono::high_resolution_clock::now();
-    auto lastProfilePoint = losslessStart;
-    auto printLosslessProfile = [&](const char* name) {
-        if (!profileLossless) return;
-        auto now = std::chrono::high_resolution_clock::now();
-        double dt = std::chrono::duration<double>(now - lastProfilePoint).count();
-        double total = std::chrono::duration<double>(now - losslessStart).count();
-        std::cout << "[GAE LOSSLESS PROFILE] " << name
-                  << " time=" << dt << " s total=" << total << " s\n";
-        lastProfilePoint = now;
-    };
-
-    torch::Tensor processMaskPacked = bitsToBytesTensor(mainData.processMask);
-    printLosslessProfile("pack_processMask");
-    torch::Tensor prefixMaskPacked = bitsToBytesTensor(mainData.prefixMask);
-    printLosslessProfile("pack_prefixMask");
-    torch::Tensor maskLengthPacked = mainData.maskLength.contiguous();
-    printLosslessProfile("pack_maskLength_contiguous");
+    auto processMaskBytes = BitUtils::bitsToBytes(mainData.processMask.to(torch::kUInt8));
+    auto prefixMaskBytes = BitUtils::bitsToBytes(mainData.prefixMask.to(torch::kUInt8));
+    auto maskLengthBytes = serializeTensor(mainData.maskLength);
 
     torch::Tensor coeffIntConverted;
     int64_t nUniqueVals = metaData.uniqueVals.size(0);
-    if (nUniqueVals == 0)
-        coeffIntConverted = mainData.coeffInt.contiguous();
-    else if (nUniqueVals < 256)
-        coeffIntConverted = mainData.coeffInt.to(torch::kUInt8).contiguous();
+    if (nUniqueVals < 256)
+        coeffIntConverted = mainData.coeffInt.to(torch::kUInt8);
     else if (nUniqueVals < 32768)
-        coeffIntConverted = mainData.coeffInt.to(torch::kInt16).contiguous();
+        coeffIntConverted = mainData.coeffInt.to(torch::kInt16);
     else
-        coeffIntConverted = mainData.coeffInt.to(torch::kInt32).contiguous();
+        coeffIntConverted = mainData.coeffInt.to(torch::kInt32);
+    auto coeffIntBytes = serializeTensor(coeffIntConverted);
 
-    printLosslessProfile("convert_coeffInt");
-    const size_t raw_process_mask_bytes = tensorByteSize(processMaskPacked);
-    const size_t raw_prefix_mask_bytes = tensorByteSize(prefixMaskPacked);
-    const size_t raw_mask_length_bytes = tensorByteSize(maskLengthPacked);
-    const size_t raw_coeff_int_bytes = tensorByteSize(coeffIntConverted);
+    const int compressionLevel = 3;
 
-    std::vector<uint8_t> processMaskCompressed, prefixMaskCompressed, maskLengthCompressed, coeffIntCompressed;
+    size_t raw_process_mask_bytes = 0;
+    size_t raw_prefix_mask_bytes  = 0;
+    size_t raw_mask_length_bytes  = 0;
+    size_t raw_coeff_int_bytes    = 0;
+    
+    bool use_nvcomp = false;
+#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+use_nvcomp = device_.is_cuda();
+#endif
+    
+#ifdef USE_CUDA
+#else
+#endif
+
+#ifdef ENABLE_NVCOMP
+#else
+#endif
+    std::vector<uint8_t> processMaskCompressed , prefixMaskCompressed , maskLengthCompressed , coeffIntCompressed;
     std::vector<size_t> compressedSizes;
 
-    bool use_nvcomp = false;
-    bool use_hybrid = false;
+    #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+    if (use_nvcomp)
+    {
 
-#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-    use_nvcomp = device_.is_cuda();
-    if (const char* useCpuZstd = std::getenv("CAESAR_GAE_USE_CPU_ZSTD")) {
-        if (std::string(useCpuZstd) == "1") use_nvcomp = false;
-    }
-    if (const char* hybridNvcomp = std::getenv("CAESAR_GAE_HYBRID_NVCOMP")) {
-        if (std::string(hybridNvcomp) == "1") {
-            use_hybrid = device_.is_cuda();
-            use_nvcomp = false;
-        }
-    }
-#endif
-    if (const char* forceCpu = std::getenv("CAESAR_GAE_FORCE_CPU_ZSTD")) {
-        if (std::string(forceCpu) == "1") {
-            use_nvcomp = false;
-            use_hybrid = false;
-        }
-    }
+        std::vector<const uint8_t*> ptrs  = { processMaskBytes.data(), prefixMaskBytes.data(), maskLengthBytes.data(), coeffIntBytes.data() };
+        std::vector<size_t>         sizes = { processMaskBytes.size(), prefixMaskBytes.size(), maskLengthBytes.size(), coeffIntBytes.size() };
 
-    std::vector<uint8_t> cpuProcess, cpuPrefix, cpuMaskLength, cpuCoeffInt;
-    std::vector<size_t> cpuSizes;
+        auto batchResults = nvcomp_batch_compress(ptrs, sizes );
 
-    auto run_cpu_zstd = [&]() {
-        torch::Tensor maskLengthBytes = torch::from_blob(
-            maskLengthPacked.data_ptr(),
-            {static_cast<int64_t>(raw_mask_length_bytes)},
-            torch::TensorOptions().dtype(torch::kUInt8).device(maskLengthPacked.device()));
+        raw_process_mask_bytes = sizes[0];
+        raw_prefix_mask_bytes  = sizes[1];
+        raw_mask_length_bytes  = sizes[2];
+        raw_coeff_int_bytes    = sizes[3];
 
-        torch::Tensor coeffIntBytes = torch::from_blob(
-            coeffIntConverted.data_ptr(),
-            {static_cast<int64_t>(raw_coeff_int_bytes)},
-            torch::TensorOptions().dtype(torch::kUInt8).device(coeffIntConverted.device()));
+        processMaskCompressed = std::move(batchResults[0].compressed);
+        prefixMaskCompressed  = std::move(batchResults[1].compressed);
+        maskLengthCompressed  = std::move(batchResults[2].compressed);
+        coeffIntCompressed    = std::move(batchResults[3].compressed);
 
-        torch::Tensor allBytesCpu = torch::cat(
-            {processMaskPacked, prefixMaskPacked, maskLengthBytes, coeffIntBytes}, 0)
-            .cpu()
-            .contiguous();
-
-        const uint8_t* base = allBytesCpu.data_ptr<uint8_t>();
-        ByteView processMaskView{base, raw_process_mask_bytes};
-        ByteView prefixMaskView{processMaskView.data + processMaskView.size, raw_prefix_mask_bytes};
-        ByteView maskLengthView{prefixMaskView.data + prefixMaskView.size, raw_mask_length_bytes};
-        ByteView coeffIntView{maskLengthView.data + maskLengthView.size, raw_coeff_int_bytes};
-
-        int compressionLevel = 2;
-        if (const char* envLevel = std::getenv("CAESAR_GAE_ZSTD_LEVEL")) {
-            int parsedLevel = std::atoi(envLevel);
-            if (parsedLevel >= 1 && parsedLevel <= 19) compressionLevel = parsedLevel;
-        }
-
-        auto zstd_compress_mt = [&](ByteView in, std::vector<uint8_t>& out,
-                                    int level, int workers) -> size_t
-        {
-            if (in.size == 0) {
-                out.clear();
-                return 0;
-            }
-
-#if !defined(ZSTD_VERSION_NUMBER) || (ZSTD_VERSION_NUMBER < 10400)
-            throw std::runtime_error("zstd too old: need >= 1.4.0 for multithread");
-#endif
-
-            ZSTD_CCtx* cctx = ZSTD_createCCtx();
-            if (!cctx) throw std::runtime_error("ZSTD_createCCtx failed");
-
-            size_t s1 = ZSTD_CCtx_setParameter(cctx, ZSTD_c_nbWorkers, workers);
-            if (ZSTD_isError(s1)) {
-                ZSTD_freeCCtx(cctx);
-                throw std::runtime_error(std::string("ZSTD_c_nbWorkers set failed: ") + ZSTD_getErrorName(s1));
-            }
-
-            size_t s2 = ZSTD_CCtx_setParameter(cctx, ZSTD_c_compressionLevel, level);
-            if (ZSTD_isError(s2)) {
-                ZSTD_freeCCtx(cctx);
-                throw std::runtime_error(std::string("ZSTD_c_compressionLevel set failed: ") + ZSTD_getErrorName(s2));
-            }
-
-            out.resize(ZSTD_compressBound(in.size));
-            size_t compSize = ZSTD_compress2(cctx, out.data(), out.size(), in.data, in.size);
-            ZSTD_freeCCtx(cctx);
-
-            if (ZSTD_isError(compSize))
-                throw std::runtime_error(std::string("zstd compress2 failed: ") + ZSTD_getErrorName(compSize));
-
-            out.resize(compSize);
-            return compSize;
-        };
-
-        int workers = std::min(get_allocated_cores(), 5);
-        if (const char* envWorkers = std::getenv("CAESAR_GAE_ZSTD_WORKERS")) {
-            int parsedWorkers = std::atoi(envWorkers);
-            if (parsedWorkers > 0) workers = std::min(parsedWorkers, get_allocated_cores());
-        }
-
-        size_t processMaskCompSize = zstd_compress_mt(processMaskView, cpuProcess, compressionLevel, workers);
-        size_t prefixMaskCompSize = zstd_compress_mt(prefixMaskView, cpuPrefix, compressionLevel, workers);
-        size_t maskLengthCompSize = zstd_compress_mt(maskLengthView, cpuMaskLength, compressionLevel, workers);
-        size_t coeffIntCompSize = zstd_compress_mt(coeffIntView, cpuCoeffInt, compressionLevel, workers);
-
-        cpuSizes = {processMaskCompSize, prefixMaskCompSize, maskLengthCompSize, coeffIntCompSize};
-    };
-
-    std::vector<uint8_t> nvProcess, nvPrefix, nvMaskLength, nvCoeffInt;
-    std::vector<size_t> nvSizes;
-    bool usedDirectPayload = false;
-
-#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-    auto run_nvcomp = [&]() {
-        torch::Tensor maskLengthBytes = torch::from_blob(
-            maskLengthPacked.data_ptr(),
-            {static_cast<int64_t>(raw_mask_length_bytes)},
-            torch::TensorOptions().dtype(torch::kUInt8).device(maskLengthPacked.device()));
-
-        torch::Tensor coeffIntBytes = torch::from_blob(
-            coeffIntConverted.data_ptr(),
-            {static_cast<int64_t>(raw_coeff_int_bytes)},
-            torch::TensorOptions().dtype(torch::kUInt8).device(coeffIntConverted.device()));
-
-        std::vector<const uint8_t*> ptrs = {
-            processMaskPacked.data_ptr<uint8_t>(),
-            prefixMaskPacked.data_ptr<uint8_t>(),
-            maskLengthBytes.data_ptr<uint8_t>(),
-            coeffIntBytes.data_ptr<uint8_t>()
-        };
-
-        std::vector<size_t> rawSizes = {
-            raw_process_mask_bytes,
-            raw_prefix_mask_bytes,
-            raw_mask_length_bytes,
-            raw_coeff_int_bytes
-        };
-
-        auto batchResults = nvcomp_batch_compress_device(ptrs, rawSizes);
-
-        nvProcess = std::move(batchResults[0].compressed);
-        nvPrefix = std::move(batchResults[1].compressed);
-        nvMaskLength = std::move(batchResults[2].compressed);
-        nvCoeffInt = std::move(batchResults[3].compressed);
-
-        nvSizes = {nvProcess.size(), nvPrefix.size(), nvMaskLength.size(), nvCoeffInt.size()};
-    };
-      auto run_nvcomp_direct_payload = [&]() {
-          torch::Tensor maskLengthBytes = torch::from_blob(
-              maskLengthPacked.data_ptr(),
-              {static_cast<int64_t>(raw_mask_length_bytes)},
-              torch::TensorOptions().dtype(torch::kUInt8).device(maskLengthPacked.device()));
-
-          torch::Tensor coeffIntBytes = torch::from_blob(
-              coeffIntConverted.data_ptr(),
-              {static_cast<int64_t>(raw_coeff_int_bytes)},
-              torch::TensorOptions().dtype(torch::kUInt8).device(coeffIntConverted.device()));
-
-          std::vector<const uint8_t*> ptrs = {
-              processMaskPacked.data_ptr<uint8_t>(),
-              prefixMaskPacked.data_ptr<uint8_t>(),
-              maskLengthBytes.data_ptr<uint8_t>(),
-              coeffIntBytes.data_ptr<uint8_t>()
-          };
-
-          std::vector<size_t> rawSizes = {
-              raw_process_mask_bytes,
-              raw_prefix_mask_bytes,
-              raw_mask_length_bytes,
-              raw_coeff_int_bytes
-          };
-
-          compressedSizes = nvcomp_batch_compress_device_to_payload(
-              ptrs, rawSizes, compressedData->data);
-          usedDirectPayload = true;
-      };
-#endif
-
-    if (use_hybrid) {
-        std::cout << "[GAE Coeff Compression] HYBRID CPU ZSTD + NVCOMP, choosing smaller blocks\n";
-        run_cpu_zstd();
-        printLosslessProfile("cpu_zstd_compress");
-#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-        run_nvcomp();
-        printLosslessProfile("nvcomp_batch_compress");
-#else
-        throw std::runtime_error("Hybrid nvCOMP requested but nvCOMP is not enabled");
-#endif
-
-        std::vector<std::vector<uint8_t>*> cpuBlocks = {&cpuProcess, &cpuPrefix, &cpuMaskLength, &cpuCoeffInt};
-        std::vector<std::vector<uint8_t>*> nvBlocks = {&nvProcess, &nvPrefix, &nvMaskLength, &nvCoeffInt};
-
-        std::vector<const char*> names = {"processMask", "prefixMask", "maskLength", "coeffInt"};
-        for (size_t i = 0; i < 4; ++i) {
-            const bool chooseNv = nvSizes[i] <= cpuSizes[i];
-            std::cout << "[GAE HYBRID] " << names[i]
-                      << " cpu=" << cpuSizes[i]
-                      << " nvcomp=" << nvSizes[i]
-                      << " chosen=" << (chooseNv ? "nvcomp" : "cpu")
-                      << "\n";
-        }
-
-        processMaskCompressed = (nvSizes[0] <= cpuSizes[0]) ? std::move(nvProcess) : std::move(cpuProcess);
-        prefixMaskCompressed = (nvSizes[1] <= cpuSizes[1]) ? std::move(nvPrefix) : std::move(cpuPrefix);
-        maskLengthCompressed = (nvSizes[2] <= cpuSizes[2]) ? std::move(nvMaskLength) : std::move(cpuMaskLength);
-        coeffIntCompressed = (nvSizes[3] <= cpuSizes[3]) ? std::move(nvCoeffInt) : std::move(cpuCoeffInt);
+        // Free raw buffers
+        processMaskBytes.clear(); processMaskBytes.shrink_to_fit();
+        prefixMaskBytes.clear();  prefixMaskBytes.shrink_to_fit();
+        maskLengthBytes.clear();  maskLengthBytes.shrink_to_fit();
+        coeffIntBytes.clear();    coeffIntBytes.shrink_to_fit();
 
         compressedSizes = {
             processMaskCompressed.size(),
@@ -1964,95 +1061,113 @@ PCACompressor::compressLossless(const MetaData& metaData , const MainData& mainD
             coeffIntCompressed.size()
         };
     }
-    else if (use_nvcomp) {
-        std::cout << "[GAE Coeff Compression] NVCOMP ZSTD batched with all raw inputs on GPU\n";
-#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-          bool directPayload = true;
-          if (const char* disableDirectPayload = std::getenv("CAESAR_GAE_DISABLE_DIRECT_PAYLOAD")) {
-              if (std::string(disableDirectPayload) == "1") directPayload = false;
-          }
-          if (directPayload) {
-              run_nvcomp_direct_payload();
-            printLosslessProfile("nvcomp_direct_payload");
-        } else {
-            run_nvcomp();
-            printLosslessProfile("nvcomp_batch_compress");
-            processMaskCompressed = std::move(nvProcess);
-            prefixMaskCompressed = std::move(nvPrefix);
-            maskLengthCompressed = std::move(nvMaskLength);
-            coeffIntCompressed = std::move(nvCoeffInt);
-            compressedSizes = nvSizes;
-        }
-#else
-        throw std::runtime_error("nvCOMP requested but nvCOMP is not enabled");
 #endif
-    }
-    else {
-        std::cout << "[GAE Coeff Compression] CPU ZSTD is used (zstdmt)\n";
-        run_cpu_zstd();
-        printLosslessProfile("cpu_zstd_compress");
-        std::cout << "Using "
-                  << (std::getenv("CAESAR_GAE_ZSTD_WORKERS") ? std::getenv("CAESAR_GAE_ZSTD_WORKERS") : "5")
-                  << " threads for zstd compression\n";
-        processMaskCompressed = std::move(cpuProcess);
-        prefixMaskCompressed = std::move(cpuPrefix);
-        maskLengthCompressed = std::move(cpuMaskLength);
-        coeffIntCompressed = std::move(cpuCoeffInt);
-        compressedSizes = cpuSizes;
-    }
 
-    std::cout << "[GAE LOSSLESS SIZES] raw="
-              << raw_process_mask_bytes << ","
-              << raw_prefix_mask_bytes << ","
-              << raw_mask_length_bytes << ","
-              << raw_coeff_int_bytes << " comp="
-              << compressedSizes[0] << ","
-              << compressedSizes[1] << ","
-              << compressedSizes[2] << ","
-              << compressedSizes[3] << "\n";
+    if (!use_nvcomp)
+    {
 
-    if (!usedDirectPayload) {
-        const size_t totalCompressedPayloadBytes =
-            processMaskCompressed.size() +
-            prefixMaskCompressed.size() +
-            maskLengthCompressed.size() +
-            coeffIntCompressed.size();
-
-        compressedData->data.clear();
-        compressedData->data.resize(4 * sizeof(size_t) + totalCompressedPayloadBytes);
-        printLosslessProfile("payload_resize");
-
-        uint8_t* out = compressedData->data.data();
-        for (size_t size : compressedSizes) {
-            for (int i = 0; i < 8; ++i) {
-                *out++ = static_cast<uint8_t>((size >> (i * 8)) & 0xFF);
+        auto zstd_compress_mt = [&](const std::vector<uint8_t>& in,
+                                    std::vector<uint8_t>& out,
+                                    int level,
+                                    int workers) -> size_t
+        {
+            if (in.empty()) {
+                out.clear();
+                return 0;
             }
-        }
-        printLosslessProfile("payload_header");
 
-        std::memcpy(out, processMaskCompressed.data(), processMaskCompressed.size());
-        out += processMaskCompressed.size();
-        printLosslessProfile("payload_copy_processMask");
+            // sanity: require zstd >= 1.4.0 for ZSTD_c_nbWorkers
+            #if !defined(ZSTD_VERSION_NUMBER) || (ZSTD_VERSION_NUMBER < 10400)
+                throw std::runtime_error("zstd too old: need >= 1.4.0 for multithread (ZSTD_c_nbWorkers)");
+            #endif
 
-        std::memcpy(out, prefixMaskCompressed.data(), prefixMaskCompressed.size());
-        out += prefixMaskCompressed.size();
-        printLosslessProfile("payload_copy_prefixMask");
+            ZSTD_CCtx* cctx = ZSTD_createCCtx();
+            if (!cctx) throw std::runtime_error("ZSTD_createCCtx failed");
 
-        std::memcpy(out, maskLengthCompressed.data(), maskLengthCompressed.size());
-        out += maskLengthCompressed.size();
-        printLosslessProfile("payload_copy_maskLength");
+            // enable multithread
+            size_t s1 = ZSTD_CCtx_setParameter(cctx, ZSTD_c_nbWorkers, workers);
+            if (ZSTD_isError(s1)) {
+                ZSTD_freeCCtx(cctx);
+                throw std::runtime_error(std::string("ZSTD_c_nbWorkers set failed: ") + ZSTD_getErrorName(s1));
+            }
 
-        std::memcpy(out, coeffIntCompressed.data(), coeffIntCompressed.size());
-        printLosslessProfile("payload_copy_coeffInt");
-    } else {
-        printLosslessProfile("payload_already_direct");
+            // set compression level
+            size_t s2 = ZSTD_CCtx_setParameter(cctx, ZSTD_c_compressionLevel, level);
+            if (ZSTD_isError(s2)) {
+                ZSTD_freeCCtx(cctx);
+                throw std::runtime_error(std::string("ZSTD_c_compressionLevel set failed: ") + ZSTD_getErrorName(s2));
+            }
+
+            // allocate output
+            size_t bound = ZSTD_compressBound(in.size());
+            out.resize(bound);
+
+            // compress
+            size_t compSize = ZSTD_compress2(cctx, out.data(), out.size(), in.data(), in.size());
+
+            ZSTD_freeCCtx(cctx);
+
+            if (ZSTD_isError(compSize)) {
+                throw std::runtime_error(std::string("zstd compress2 failed: ") + ZSTD_getErrorName(compSize));
+            }
+
+            out.resize(compSize);
+            return compSize;
+        };
+
+        const int workers = get_allocated_cores();  // default 
+        size_t processMaskCompSize = zstd_compress_mt(processMaskBytes, processMaskCompressed, compressionLevel, workers);
+        size_t prefixMaskCompSize  = zstd_compress_mt(prefixMaskBytes,  prefixMaskCompressed,  compressionLevel, workers);
+        size_t maskLengthCompSize  = zstd_compress_mt(maskLengthBytes,  maskLengthCompressed,  compressionLevel, workers);
+        size_t coeffIntCompSize    = zstd_compress_mt(coeffIntBytes,    coeffIntCompressed,    compressionLevel, workers);
+        
+        raw_process_mask_bytes = processMaskBytes.size();
+        raw_prefix_mask_bytes  = prefixMaskBytes.size();
+        raw_mask_length_bytes  = maskLengthBytes.size();
+        raw_coeff_int_bytes    = coeffIntBytes.size();
+        
+        // free raw buffers after compression finished
+        processMaskBytes.clear(); processMaskBytes.shrink_to_fit();
+        prefixMaskBytes.clear();  prefixMaskBytes.shrink_to_fit();
+        maskLengthBytes.clear();  maskLengthBytes.shrink_to_fit();
+        coeffIntBytes.clear();    coeffIntBytes.shrink_to_fit();
+
+        compressedSizes = {
+            processMaskCompSize,
+            prefixMaskCompSize,
+            maskLengthCompSize,
+            coeffIntCompSize
+        };
     }
+
+    size_t comp_process_mask_bytes = processMaskCompressed.size();
+    size_t comp_prefix_mask_bytes  = prefixMaskCompressed.size();
+    size_t comp_mask_length_bytes  = maskLengthCompressed.size();
+    size_t comp_coeff_int_bytes    = coeffIntCompressed.size();
+
+    auto CR = [](size_t rawb, size_t compb) -> double {
+        return compb ? (double)rawb / (double)compb : 0.0;
+    };
+
+    for (size_t size : compressedSizes) {
+        for (int i = 0; i < 8; ++i) {
+            compressedData->data.push_back((size >> (i * 8)) & 0xFF);
+        }
+    }
+
+    compressedData->data.insert(compressedData->data.end() ,
+        processMaskCompressed.begin() , processMaskCompressed.end());
+    compressedData->data.insert(compressedData->data.end() ,
+        prefixMaskCompressed.begin() , prefixMaskCompressed.end());
+    compressedData->data.insert(compressedData->data.end() ,
+        maskLengthCompressed.begin() , maskLengthCompressed.end());
+    compressedData->data.insert(compressedData->data.end() ,
+        coeffIntCompressed.begin() , coeffIntCompressed.end());
 
     compressedData->coeffIntBytes = raw_coeff_int_bytes;
-    compressedData->dataBytes = compressedData->data.size();
-    printLosslessProfile("compressLossless_total");
-
-    return {std::move(compressedData), compressedData->dataBytes};
+    totalBytes = compressedData->data.size();
+    compressedData->dataBytes = totalBytes;
+    return { std::move(compressedData), totalBytes };
 }
 
 MainData PCACompressor::decompressLossless(
@@ -2081,14 +1196,10 @@ MainData PCACompressor::decompressLossless(
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
     use_nvcomp = device_.is_cuda();
 #endif
-    if (const char* forceCpu = std::getenv("CAESAR_GAE_FORCE_CPU_ZSTD")) {
-        if (std::string(forceCpu) == "1") use_nvcomp = false;
-    }
 
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
     if (use_nvcomp)
     {
-        std::cout << "[GAE Coeff Decompression] NVCOMP ZSTD batched\n";
 
         size_t processMaskOrigSize = (metaData.nVec + 7) / 8;
         size_t prefixMaskOrigSize  = (metaData.prefixLength + 7) / 8;
@@ -2130,8 +1241,7 @@ MainData PCACompressor::decompressLossless(
             int64_t nUniqueVals = metaData.uniqueVals.size(0);
             torch::ScalarType coeffDtype;
             size_t elementSize;
-            if      (nUniqueVals == 0)    { coeffDtype = torch::kInt16;  elementSize = 2; }
-            else if (nUniqueVals < 256)   { coeffDtype = torch::kUInt8;  elementSize = 1; }
+            if      (nUniqueVals < 256)   { coeffDtype = torch::kUInt8;  elementSize = 1; }
             else if (nUniqueVals < 32768) { coeffDtype = torch::kInt16;  elementSize = 2; }
             else                          { coeffDtype = torch::kInt32;  elementSize = 4; }
 
@@ -2145,7 +1255,6 @@ MainData PCACompressor::decompressLossless(
     }
 #endif
 
-    std::cout << "[GAE Coeff Decompression] CPU ZSTD is used\n";
 
     // processMask
     size_t processMaskOrigSize = (metaData.nVec + 7) / 8;
@@ -2194,8 +1303,7 @@ MainData PCACompressor::decompressLossless(
     int64_t nUniqueVals = metaData.uniqueVals.size(0);
     torch::ScalarType coeffDtype;
     size_t elementSize;
-    if      (nUniqueVals == 0)    { coeffDtype = torch::kInt16;  elementSize = sizeof(int16_t);  }
-    else if (nUniqueVals < 256)   { coeffDtype = torch::kUInt8;  elementSize = sizeof(uint8_t);  }
+    if      (nUniqueVals < 256)   { coeffDtype = torch::kUInt8;  elementSize = sizeof(uint8_t);  }
     else if (nUniqueVals < 32768) { coeffDtype = torch::kInt16;  elementSize = sizeof(int16_t);  }
     else                          { coeffDtype = torch::kInt32;  elementSize = sizeof(int32_t);  }
 
@@ -2247,14 +1355,6 @@ torch::Tensor PCACompressor::deserializeTensor(const std::vector<uint8_t>& bytes
 }
 
 void PCACompressor::cleanupGPUMemory() {
-
-    const char* disable =
-        std::getenv("CAESAR_DO_NOT_EMPTY_CUDA_CACHE");
-
-    if (disable && std::string(disable) == "1") {
-        return;
-    }
-
 #ifdef USE_CUDA
     if (device_.is_cuda()) {
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)

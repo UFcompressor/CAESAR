@@ -464,20 +464,31 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         return result;
     }
     // ---- GAE path  ----------------------------------------
+  torch::Tensor original_full = dataset.original_data();
+
+  // crop reflected tail frames (pad_T) before computing global stats
+  int64_t T_full = original_full.size(2);
+  torch::Tensor original_for_stats = (pad_T > 0)
+      ? original_full.index({torch::indexing::Slice(), torch::indexing::Slice(),
+                              torch::indexing::Slice(0, T_full - pad_T)})
+      : original_full;
+
+  torch::Tensor stats =
+      torch::stack({original_for_stats.max(), original_for_stats.min(),
+                    original_for_stats.mean()});
+  float global_scale  = stats[0].item<float>() - stats[1].item<float>();
+  std::cout<<"global_scale "<<global_scale <<std::endl;
+  float global_offset = stats[2].item<float>();
+  std::cout<<"global_offset "<< global_offset<<std::endl;
+
   auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
   recon_deblk = torch::Tensor();
 
-  auto [padded_original_tensor, dummy_pad] = padding(dataset.original_data());
-
+  auto [padded_original_tensor, dummy_pad] = padding(original_full);
   dataset.clear();
 
   result.gaeMetaData.padding_recon_info = padding_recon_info;
 
-  torch::Tensor stats =
-      torch::stack({padded_original_tensor.max(), padded_original_tensor.min(),
-                    padded_original_tensor.mean()});
-  float global_scale  = stats[0].item<float>() - stats[1].item<float>();
-  float global_offset = stats[2].item<float>();
   result.compressionMetaData.global_scale  = global_scale;
   result.compressionMetaData.global_offset = global_offset;
 
@@ -500,7 +511,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       padded_original_tensor_norm, padded_recon_tensor_norm);
   padded_original_tensor_norm = torch::Tensor();
 
-  result.gaeMetaData.GAE_correction_occur =
+    result.gaeMetaData.GAE_correction_occur =
       gae_compression_result.metaData.GAE_correction_occur;
 
   result.gaeMetaData.quanBin       = gae_compression_result.metaData.quanBin;
@@ -508,13 +519,26 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   result.gaeMetaData.prefixLength  = gae_compression_result.metaData.prefixLength;
   result.gaeMetaData.dataBytes     = gae_compression_result.metaData.dataBytes;
   result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
-  result.gae_comp_data             = std::move(gae_compression_result.compressedData->data);
+  result.gae_comp_data             = gae_compression_result.compressedData->data;
 
   if (result.gaeMetaData.GAE_correction_occur) {
-    result.gaeMetaData.pcaBasis =
+        result.gaeMetaData.pcaBasis =
         tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
     result.gaeMetaData.uniqueVals =
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
+
+    MetaData gae_record_metaData;
+    gae_record_metaData.pcaBasis     = gae_compression_result.metaData.pcaBasis.to(device_);
+    gae_record_metaData.uniqueVals   = gae_compression_result.metaData.uniqueVals.to(device_);
+    gae_record_metaData.quanBin      = result.gaeMetaData.quanBin;
+    gae_record_metaData.nVec         = result.gaeMetaData.nVec;
+    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
+    gae_record_metaData.dataBytes    = result.gaeMetaData.dataBytes;
+
+    CompressedData gae_record_compressedData;
+    gae_record_compressedData.data          = result.gae_comp_data;
+    gae_record_compressedData.dataBytes     = result.gaeMetaData.dataBytes;
+    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
 
   } 
 

@@ -29,21 +29,6 @@ It encodes data into a compact latent space and uses learned priors for informat
 
 ---
 
-## Build Targets: CPU vs. GPU
-
-Before following the build instructions, apply the patch for your target platform. Each build is an **optimized configuration** — please read the assumptions documented in each directory before proceeding.
-
-### CPU Build
-
-```bash
-git apply CPU/cpu_build.patch
-```
-
-### GPU Build (NVIDIA only)
-
-```bash
-git apply GPU/gpu.patch
-```
 
 Each folder contains two documents:
 
