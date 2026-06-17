@@ -41,9 +41,6 @@ endif()
 
 set(NVCOMP_FOUND OFF)
 
-if(USE_CUDA AND CUDA_FOUND)
-    enable_language(CUDA)
-endif()
 
 if(USE_CUDA)
     message(STATUS "Checking for nvcomp (NVIDIA specific)...")
@@ -65,7 +62,6 @@ set(CAESAR_SRC
     models/caesar_decompress.cpp
     models/model_utils.cpp
     models/runGaeCuda.cpp
-    models/gaeFusedKernels.cu
     models/lbrc.cpp
     data_utils.cpp
 )
