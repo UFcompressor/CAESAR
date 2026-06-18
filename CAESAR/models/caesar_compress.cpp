@@ -393,6 +393,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     });
   }
   for (auto& t : threads) t.join();
+  int64_t total = cpu_latent_indexes.size(0);
+result.latent_indexes.resize(total);
+for (int64_t j = 0; j < total; ++j) {
+    result.latent_indexes[j] = tensor_to_vector<int32_t>(
+        cpu_latent_indexes.select(0, j).reshape(-1));
+}
+
 
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
