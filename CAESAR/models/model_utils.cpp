@@ -11,6 +11,13 @@
 #include <mach-o/dyld.h>
 #endif
 
+static fs::path normalize_path(fs::path path) {
+#ifdef _WIN32
+    path.make_preferred();
+#endif
+    return path;
+}
+
 fs::path get_executable_path() {
 #ifdef _WIN32
     char result[MAX_PATH];
@@ -39,7 +46,7 @@ fs::path get_model_file(const std::string& filename) {
     if (env_p) {
         fs::path model_path = fs::path(env_p) / filename;
         if (fs::exists(model_path)) {
-            return model_path;
+            return normalize_path(model_path);
         }
         std::cerr << "Warning: CAESAR_MODEL_DIR is set but file not found at: "
             << model_path << std::endl;
@@ -51,17 +58,17 @@ fs::path get_model_file(const std::string& filename) {
 
         fs::path model_path = exe_dir / "exported_model" / filename;
         if (fs::exists(model_path)) {
-            return fs::canonical(model_path);
+            return normalize_path(fs::canonical(model_path));
         }
 
         model_path = exe_dir / ".." / "exported_model" / filename;
         if (fs::exists(model_path)) {
-            return fs::canonical(model_path);
+            return normalize_path(fs::canonical(model_path));
         }
 
         model_path = exe_dir / ".." / ".." / "exported_model" / filename;
         if (fs::exists(model_path)) {
-            return fs::canonical(model_path);
+            return normalize_path(fs::canonical(model_path));
         }
     }
     catch (const std::exception& e) {
@@ -72,7 +79,7 @@ fs::path get_model_file(const std::string& filename) {
 #ifdef DEFAULT_CAESAR_MODEL_DIR
     fs::path install_path = fs::path(DEFAULT_CAESAR_MODEL_DIR) / filename;
     if (fs::exists(install_path)) {
-        return install_path;
+        return normalize_path(install_path);
     }
 #endif
 
