@@ -120,10 +120,6 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 
   total_bytes += get_vector_data_size(result.gae_comp_data);
 
-  total_bytes += sizeof(result.num_samples);
-
-  total_bytes += sizeof(result.num_batches);
-
   const auto& meta = result.compressionMetaData;
 
   // std::vector<float> offsets

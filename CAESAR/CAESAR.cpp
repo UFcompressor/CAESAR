@@ -48,12 +48,6 @@ void save_complete_metadata(const std::string& filename,
   file.write(reinterpret_cast<const char*>(&padding_info.was_padded),
              sizeof(padding_info.was_padded));
 
-  // Save num_samples and num_batches
-  file.write(reinterpret_cast<const char*>(&comp.num_samples),
-             sizeof(comp.num_samples));
-  file.write(reinterpret_cast<const char*>(&comp.num_batches),
-             sizeof(comp.num_batches));
-
   // Save CompressionMetaData
   const auto& meta = comp.compressionMetaData;
 
@@ -176,12 +170,6 @@ CompressionResult load_complete_metadata(const std::string& filename,
   file.read(reinterpret_cast<char*>(&padding_info.W), sizeof(padding_info.W));
   file.read(reinterpret_cast<char*>(&padding_info.was_padded),
             sizeof(padding_info.was_padded));
-
-  // Load num_samples and num_batches
-  file.read(reinterpret_cast<char*>(&comp.num_samples),
-            sizeof(comp.num_samples));
-  file.read(reinterpret_cast<char*>(&comp.num_batches),
-            sizeof(comp.num_batches));
 
   // Load CompressionMetaData
   CompressionMetaData meta;
@@ -637,12 +625,6 @@ int decompress_file(const std::string& input_base,
 
   comp.encoded_latents = loaded_latents;
   comp.encoded_hyper_latents = loaded_hyper;
-
-  if (verbose) {
-    std::cout << "Loaded metadata:\n";
-    std::cout << "  Number of samples: " << comp.num_samples << "\n";
-    std::cout << "  Number of batches: " << comp.num_batches << "\n";
-  }
 
   std::cout << "Metadata loaded successfully\n";
 

@@ -184,10 +184,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
   ScientificDataset dataset(config);
 
-  auto start_inf = get_start_time();
   CompressionResult result;
-  result.num_samples = 0;
-  result.num_batches = 0;
 
   int64_t pad_T = dataset.get_pad_T();
   result.compressionMetaData.pad_T = pad_T;
@@ -277,7 +274,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
       int64_t num_input_samples = static_cast<int64_t>(batch_inputs.size());
 
-      auto t0 = get_start_time();
       torch::Tensor batched_input = torch::cat(batch_inputs, 0);
       torch::Tensor batched_offsets =
           torch::tensor(batch_offsets_vec,
@@ -339,8 +335,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       batch_offsets_vec.clear();
       batch_scales_vec.clear();
       batch_indexes.clear();
-      result.num_samples += num_input_samples;
-      result.num_batches++;
     }
   }
 
@@ -354,7 +348,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   all_q_hyper_latent.clear();
   all_hyper_indexes.clear();
 
-  auto start_transfer = get_start_time();
   torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
   torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
   torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
@@ -377,7 +370,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   threads.reserve(workers);
   const int64_t chunk = (total_latent_codes + workers - 1) / workers;
 
-  auto start_encoding = get_start_time();
   for (int w = 0; w < workers; ++w) {
     int64_t start = w * chunk;
     int64_t end   = std::min(start + chunk, total_latent_codes);
@@ -481,9 +473,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       torch::stack({original_for_stats.max(), original_for_stats.min(),
                     original_for_stats.mean()});
   float global_scale  = stats[0].item<float>() - stats[1].item<float>();
-  std::cout<<"global_scale "<<global_scale <<std::endl;
   float global_offset = stats[2].item<float>();
-  std::cout<<"global_offset "<< global_offset<<std::endl;
 
   auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
   recon_deblk = torch::Tensor();
