@@ -56,19 +56,15 @@ fs::path get_model_file(const std::string& filename) {
         fs::path exe_path = get_executable_path();
         fs::path exe_dir = exe_path.parent_path();
 
-        fs::path model_path = exe_dir / "exported_model" / filename;
-        if (fs::exists(model_path)) {
-            return normalize_path(fs::canonical(model_path));
-        }
-
-        model_path = exe_dir / ".." / "exported_model" / filename;
-        if (fs::exists(model_path)) {
-            return normalize_path(fs::canonical(model_path));
-        }
-
-        model_path = exe_dir / ".." / ".." / "exported_model" / filename;
-        if (fs::exists(model_path)) {
-            return normalize_path(fs::canonical(model_path));
+        for (int up = 0; up <= 3; ++up) {
+            fs::path model_path = exe_dir;
+            for (int i = 0; i < up; ++i) {
+                model_path /= "..";
+            }
+            model_path /= "exported_model" / filename;
+            if (fs::exists(model_path)) {
+                return normalize_path(fs::canonical(model_path));
+            }
         }
     }
     catch (const std::exception& e) {
