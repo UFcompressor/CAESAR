@@ -365,9 +365,13 @@ jobs:
 
       - name: Run test_caesarCD
         run: |
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
           Push-Location build/tests/Debug
           New-Item -ItemType Directory -Force -Path output
-          .\test_caesarCD.exe
+          cmd /c "`"$vcvars`" && test_caesarCD.exe"
+          if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
           Pop-Location
 
       - name: Run test_runGaeCuda
