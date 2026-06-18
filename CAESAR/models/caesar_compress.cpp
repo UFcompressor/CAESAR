@@ -110,6 +110,10 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
     int down  = dh - top;
     int left  = dw / 2;
     int right = dw - left;
+    
+    if (dh == 0 && dw == 0) {
+        return { data, { 0, 0, 0, 0 } };
+    }
 
     auto leading_dims = data.sizes().vec();
     int leading_size = 1;
