@@ -57,8 +57,6 @@ struct CompressionResult {
     GAEMetaData gaeMetaData;
 
     bool use_lbrc = true;   
-    int num_samples;
-    int num_batches;
 };
  
 class Compressor {

@@ -1154,9 +1154,6 @@ MainData PCACompressor::decompressLossless(
     #define CHECK_ZSTD_BLOCK(name, off, csz) do { \
       if ((off) + (csz) > compressedData.data.size()) \
         throw std::runtime_error(std::string("OOB block: ") + (name)); \
-      const uint8_t* p = compressedData.data.data() + (off); \
-      std::printf("[DBG] %s off=%zu csz=%zu magic=%02x %02x %02x %02x\n", \
-                  (name), (size_t)(off), (size_t)(csz), p[0], p[1], p[2], p[3]); \
     } while(0)
 
     std::vector<size_t> compressedSizes(4);

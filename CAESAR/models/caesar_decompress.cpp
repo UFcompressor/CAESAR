@@ -197,8 +197,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor denorm_output =
         norm_output * batched_scales + batched_offsets;
 
-std::cout << "denorm_output min=" << denorm_output.min().item<float>()
-          << " max=" << denorm_output.max().item<float>() << std::endl;
     torch::Tensor indexes_cpu =
         indexes_tensor.narrow(0, (long)sample_start, (long)cur_samples)
             .to(torch::kCPU);
@@ -275,7 +273,6 @@ std::cout << "denorm_output min=" << denorm_output.min().item<float>()
 
 // GAE path  ----------------------------------------
   if (comp_result.gaeMetaData.GAE_correction_occur) {
-    std::cout<<"GAE\n";
     std::tuple<torch::Tensor, std::vector<int>> padding_recon =
         padding(recon_tensor_deblock);
     recon_tensor_deblock = torch::Tensor();
