@@ -110,27 +110,26 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
     int64_t T = sizes[2];
     int64_t H = sizes[3];
     int64_t W = sizes[4];
-
     int64_t H_target = static_cast<int64_t>(std::ceil((double)H / hBlock)) * hBlock;
     int64_t dH = H_target - H;
     int64_t top  = dH / 2;
     int64_t down = dH - top;
     int64_t nH   = H_target / hBlock;
-
     int64_t W_target = static_cast<int64_t>(std::ceil((double)W / wBlock)) * wBlock;
     int64_t dW = W_target - W;
     int64_t left  = dW / 2;
     int64_t right = dW - left;
     int64_t nW    = W_target / wBlock;
 
-    auto reshaped = data.view({V * S, T, H, W});
+    int64_t extra_h = 0;
+    int64_t extra_w = 0;
 
+    auto reshaped = data.view({V * S, T, H, W});
     torch::Tensor padded;
     if (left == 0 && right == 0 && top == 0 && down == 0) {
         padded = reshaped;
     }
     else {
-        // Pre-zero-pad only if reflection padding would be impossible
         if (top >= H || down >= H || left >= W || right >= W) {
             int64_t pre_h = std::max({top - H + 1, down - H + 1, INT64_C(0)});
             int64_t pre_w = std::max({left - W + 1, right - W + 1, INT64_C(0)});
@@ -141,28 +140,25 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
             );
             H = reshaped.size(2);
             W = reshaped.size(3);
-
-            // Recompute targets/padding with updated H and W
             H_target = static_cast<int64_t>(std::ceil((double)H / hBlock)) * hBlock;
             dH = H_target - H;
             top  = dH / 2;
             down = dH - top;
             nH   = H_target / hBlock;
-
             W_target = static_cast<int64_t>(std::ceil((double)W / wBlock)) * wBlock;
             dW = W_target - W;
             left  = dW / 2;
             right = dW - left;
             nW    = W_target / wBlock;
-        }
 
+            extra_h = pre_h;
+            extra_w = pre_w;
+        }
         constexpr int64_t INT32_MAX_VAL = std::numeric_limits<int32_t>::max();
         int64_t elems_per_slice = T * H_target * W_target;
         int64_t safe_batch = std::max(INT64_C(1), INT32_MAX_VAL / elems_per_slice);
-
         std::vector<torch::Tensor> chunks;
         chunks.reserve((V * S + safe_batch - 1) / safe_batch);
-
         for (int64_t i = 0; i < V * S; i += safe_batch) {
             int64_t end = std::min(i + safe_batch, V * S);
             auto chunk = reshaped.slice(0, i, end);
@@ -173,16 +169,14 @@ blockHW(const torch::Tensor& data, std::pair<int64_t, int64_t> block_size) {
             );
             chunks.push_back(std::move(padded_chunk));
         }
-
         padded = torch::cat(chunks, 0);
     }
-
     auto restored = padded.view({V, S, T, H_target, W_target});
     auto blocked  = restored.reshape({V, S, T, nH, hBlock, nW, wBlock})
                              .permute({0, 1, 3, 5, 2, 4, 6})
                              .reshape({V, S * nH * nW, T, hBlock, wBlock});
 
-    std::vector<int64_t> padding = {top, down, left, right};
+    std::vector<int64_t> padding = {top + extra_h, down + extra_h, left + extra_w, right + extra_w};
     return {blocked, {nH, nW, padding}};
 }
 
