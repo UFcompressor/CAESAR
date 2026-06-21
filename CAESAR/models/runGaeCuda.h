@@ -1,11 +1,9 @@
 #pragma once
 #include <iostream>
 #include <fstream>
-#include <vector>
 #include <string>
 #include <cmath>
 #include <ctime>
-#include <chrono>
 #include <memory>
 #include <cstdlib>
 #include <map>
@@ -14,7 +12,6 @@
 #include <utility>
 #include <cassert>
 #include <cstdint>
-#include <torch/torch.h>
 #include <torch/script.h>
 #include <unordered_map>
 #include <algorithm>
@@ -64,8 +61,8 @@ torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask ,
 
 class BitUtils {
 public:
-    static std::vector<uint8_t> bitsToBytes(const torch::Tensor& bitArray);
-    static torch::Tensor bytesToBits(const std::vector<uint8_t>& byteSeq , int64_t numBits = -1);
+    static torch::Tensor bitsToBytes(const torch::Tensor& bitArray);
+    static torch::Tensor bytesToBits(const torch::Tensor& byteSeq , int64_t numBits = -1);
 private:
     static uint8_t packByte(const uint8_t* bits);
     static void unpackByte(uint8_t byte , uint8_t* bits);
@@ -132,10 +129,5 @@ private:
     int vectorSize_;
     double errorBound_;
     double error_;
-    torch::Tensor toCPUContiguous(const torch::Tensor& tensor);
-    std::vector<uint8_t> serializeTensor(const torch::Tensor& tensor);
-    torch::Tensor deserializeTensor(const std::vector<uint8_t>& bytes ,
-        const std::vector<int64_t>& shape ,
-        torch::ScalarType dtype);
     void cleanupGPUMemory();
 };

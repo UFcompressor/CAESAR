@@ -110,6 +110,10 @@ std::tuple<torch::Tensor , std::vector<int>> padding(
     int down  = dh - top;
     int left  = dw / 2;
     int right = dw - left;
+    
+    if (dh == 0 && dw == 0) {
+        return { data, { 0, 0, 0, 0 } };
+    }
 
     auto leading_dims = data.sizes().vec();
     int leading_size = 1;
@@ -180,10 +184,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
   ScientificDataset dataset(config);
 
-  auto start_inf = get_start_time();
   CompressionResult result;
-  result.num_samples = 0;
-  result.num_batches = 0;
 
   int64_t pad_T = dataset.get_pad_T();
   result.compressionMetaData.pad_T = pad_T;
@@ -273,7 +274,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
       int64_t num_input_samples = static_cast<int64_t>(batch_inputs.size());
 
-      auto t0 = get_start_time();
       torch::Tensor batched_input = torch::cat(batch_inputs, 0);
       torch::Tensor batched_offsets =
           torch::tensor(batch_offsets_vec,
@@ -335,8 +335,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       batch_offsets_vec.clear();
       batch_scales_vec.clear();
       batch_indexes.clear();
-      result.num_samples += num_input_samples;
-      result.num_batches++;
     }
   }
 
@@ -350,7 +348,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   all_q_hyper_latent.clear();
   all_hyper_indexes.clear();
 
-  auto start_transfer = get_start_time();
   torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
   torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
   torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
@@ -373,7 +370,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   threads.reserve(workers);
   const int64_t chunk = (total_latent_codes + workers - 1) / workers;
 
-  auto start_encoding = get_start_time();
   for (int w = 0; w < workers; ++w) {
     int64_t start = w * chunk;
     int64_t end   = std::min(start + chunk, total_latent_codes);
@@ -438,18 +434,27 @@ for (int64_t j = 0; j < total; ++j) {
   for (int32_t v : std::get<2>(result.compressionMetaData.block_info))
     block_info_3.push_back(static_cast<int64_t>(v));
 
+    std::cout << "recon_tensor before deblock: " << recon_tensor.sizes() << std::endl;
+  std::cout << "block_info_1 (nH): " << block_info_1
+            << " block_info_2 (nW): " << block_info_2
+            << " block_info_3 (pad t/d/l/r): ["
+            << block_info_3[0] << "," << block_info_3[1] << ","
+            << block_info_3[2] << "," << block_info_3[3] << "]" << std::endl;
+
   torch::Tensor recon_deblk =
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
+    std::cout << "recon_deblk after deblock: " << recon_deblk.sizes() << std::endl;
   recon_tensor = torch::Tensor();
 #ifdef USE_CUDA
   c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
 
     // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
-    result.use_lbrc = false;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
+    result.use_lbrc = true;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
     // hard code for the cpu
 
     if (result.use_lbrc) {
+      std::cout<<"lbrc"<<std::endl;
         torch::Tensor original_cpu =
             dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
         torch::Tensor recon_cpu =
@@ -457,8 +462,6 @@ for (int64_t j = 0; j < total; ++j) {
         recon_deblk = torch::Tensor();
         dataset.clear();
 
-        result.lbrcMetaData.block_size = {60, 120, 120};
-        result.lbrcMetaData.zstd_level = 21;
         result.lbrcMetaData.quant_iter = 16;
 
         caesar::lbrc::compress(
@@ -484,9 +487,7 @@ for (int64_t j = 0; j < total; ++j) {
       torch::stack({original_for_stats.max(), original_for_stats.min(),
                     original_for_stats.mean()});
   float global_scale  = stats[0].item<float>() - stats[1].item<float>();
-  std::cout<<"global_scale "<<global_scale <<std::endl;
   float global_offset = stats[2].item<float>();
-  std::cout<<"global_offset "<< global_offset<<std::endl;
 
   auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
   recon_deblk = torch::Tensor();

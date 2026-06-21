@@ -193,20 +193,6 @@ CAESAR resolves model files in the following priority order:
 export CAESAR_MODEL_DIR=/path/to/your/models
 ```
 
-The following environment variables can be set to tune runtime behavior:
-
-| Variable                         | Description                                                                                                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAESAR_GAE_ZSTD_LEVEL`          | Sets the Zstandard compression level for the GAE stage. Accepts an integer from **1–19**. Higher levels produce better compression ratios but run more slowly.    |
-| `CAESAR_DO_NOT_EMPTY_CUDA_CACHE` | When set, CAESAR skips clearing the CUDA cache between operations. This can provide a minor speedup but increases memory pressure and may cause issues on larger datasets. |
-
-```bash
-export CAESAR_GAE_ZSTD_LEVEL=9
-export CAESAR_DO_NOT_EMPTY_CUDA_CACHE=1
-```
-
----
-
 ## Dependencies
 
 ### Core
