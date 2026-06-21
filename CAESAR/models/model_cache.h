@@ -139,6 +139,7 @@ private:
         std::make_unique<torch::inductor::AOTIModelPackageLoader>(
             model_path.string()
         );
+        std::cout << "[MODEL] Loaded compressor model from " << model_path << std::endl;
 
     compressor_model_loaded_ = true;
 }

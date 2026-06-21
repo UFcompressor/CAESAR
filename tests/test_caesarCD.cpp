@@ -189,6 +189,11 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 int main() {
   try {
     
+    std::set_terminate([]() {
+    std::cerr << "FATAL: std::terminate() was called - "
+                 "likely an uncaught exception on a non-main thread.\n";
+    std::abort();
+});
     const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
     const std::string raw_path = "TCf48.bin.f32";
     const std::string out_dir = "./output/";
