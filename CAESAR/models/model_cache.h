@@ -14,8 +14,16 @@ public:
 
 
     static ModelCache& instance() {
+#ifdef _WIN32
+        // AOTIModelPackageLoader's destructor crashes during Windows process
+        // teardown. Intentionally leak the singleton so it is never destructed;
+        // the OS reclaims everything on process exit.
+        static ModelCache* instance_ptr = new ModelCache();
+        return *instance_ptr;
+#else
         static ModelCache instance;
         return instance;
+#endif
     }
 
     void clear() {
@@ -123,18 +131,24 @@ private:
     ~ModelCache() = default;
 
     void load_compressor_model() {
-        compressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-            get_model_file("caesar_compressor.pt2").string()
+    auto model_path = get_model_file("caesar_compressor.pt2");
+
+    compressor_model_ =
+        std::make_unique<torch::inductor::AOTIModelPackageLoader>(
+            model_path.string()
         );
-        compressor_model_loaded_ = true;
-    }
+
+    compressor_model_loaded_ = true;
+}
 
     void load_hyper_decompressor_model() {
-        hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
-            get_model_file("caesar_hyper_decompressor.pt2").string()
-        );
-        hyper_decompressor_model_loaded_ = true;
-    }
+    auto model_path = get_model_file("caesar_hyper_decompressor.pt2");
+
+    hyper_decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
+        model_path.string()
+    );
+    hyper_decompressor_model_loaded_ = true;
+}
 
     void load_decompressor_model() {
         decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(

@@ -1,8 +1,10 @@
 name: Cross-Platform Build and Test
 
 on:
- push:
+  push:
+    branches: ['*']
   pull_request:
+    branches: ['*']
 
 jobs:
   build-test:
@@ -59,9 +61,7 @@ jobs:
             grep -v "^$" > temp_requirements.txt
 
           pip install --no-cache-dir -r temp_requirements.txt
-
           pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
           pip install compressai==1.2.6 imageio==2.37.0
           rm temp_requirements.txt
 
@@ -81,9 +81,7 @@ jobs:
             grep -v "^$" > temp_requirements.txt
 
           pip install -r temp_requirements.txt
-
           pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
           pip install compressai==1.2.6 imageio==2.37.0
           rm temp_requirements.txt
 
@@ -151,7 +149,6 @@ jobs:
           chmod +x test_caesarCD || true
 
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            echo "Running on macOS - setting environment variables"
             export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
             export OMP_NUM_THREADS=1
           fi
@@ -165,7 +162,6 @@ jobs:
           chmod +x test_runGaeCuda || true
 
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            echo "Running on macOS - setting environment variables"
             export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
             export OMP_NUM_THREADS=1
           fi
@@ -179,14 +175,223 @@ jobs:
           chmod +x test_padding || true
 
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            echo "Running on macOS - setting environment variables"
             export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
             export OMP_NUM_THREADS=1
           fi
 
           ./test_padding
 
+      - name: Run test_LBRC
+        shell: bash
+        run: |
+          cd build/tests
+          chmod +x test_LBRC || true
+
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
+            export OMP_NUM_THREADS=1
+          fi
+
+          ./test_LBRC
+
       - name: Check test results
         shell: bash
         run: |
-          echo "Test completed successfully on ${{ matrix.os }}!" 
+          echo "Test completed successfully on ${{ matrix.os }}!"
+
+  build-test-windows:
+    timeout-minutes: 90
+    runs-on: windows-latest
+
+    env:
+      CAESAR_MODEL_DIR: ${{ github.workspace }}/exported_model
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Enable long paths
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: "3.10"
+          activate-environment: compress_env
+          auto-activate-base: false
+
+      - name: Install Python deps
+        run: |
+          $lines = Get-Content requirements.txt | Where-Object {
+            $_ -notmatch "^torch" -and
+            $_ -notmatch "^torchvision" -and
+            $_ -notmatch "^--extra-index-url" -and
+            $_ -notmatch "^cupy" -and
+            $_ -notmatch "^nvidia" -and
+            $_ -notmatch "^compressai" -and
+            $_ -notmatch "^imageio" -and
+            $_ -notmatch "^\s*$"
+          }
+          $lines | Set-Content temp_requirements.txt
+          conda run -n compress_env python -m pip install --upgrade pip wheel setuptools
+          conda run -n compress_env python -m pip install --no-cache-dir -r temp_requirements.txt
+          Remove-Item temp_requirements.txt
+
+      - name: Install PyTorch
+        run: |
+          conda run -n compress_env python -m pip install torch==2.12.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install compressai and imageio
+        run: |
+          $env:TEMP = "D:\T"
+          $env:TMP = "D:\T"
+          New-Item -ItemType Directory -Force -Path D:\T
+
+          git clone https://github.com/InterDigitalInc/CompressAI.git D:\cai
+          Push-Location D:\cai
+
+          Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw -Encoding UTF8
+            if ($content -match '"-std=c\+\+17"' -or $content -match '"-O3"') {
+              $content = $content -replace '"-std=c\+\+17"', '"/std:c++17"'
+              $content = $content -replace '"-O3"', '"/O2"'
+              Set-Content $_.FullName $content -Encoding UTF8
+            }
+          }
+
+          conda run -n compress_env python -m pip install pybind11 wheel setuptools
+          conda run -n compress_env python setup.py bdist_wheel --dist-dir D:\cai\dist
+
+          $wheel = Get-ChildItem D:\cai\dist\compressai-*.whl | Select-Object -First 1
+          conda run -n compress_env python -m pip install $wheel.FullName
+
+          Pop-Location
+
+          conda run -n compress_env python -m pip install imageio==2.37.0
+
+      - name: Install cmake and zstd
+        run: |
+          conda install -n compress_env -y -c conda-forge cmake zstd
+
+      - name: Download pretrained models
+        run: |
+          New-Item -ItemType Directory -Force -Path pretrained | Out-Null
+          $url = "https://huggingface.co/E53klasky/UFL_CAESAR_MODELS/resolve/main/caesar_v.pt"
+          $out = "pretrained/caesar_v.pt"
+          Write-Host "Downloading caesar_v.pt from Hugging Face..."
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          $size = (Get-Item $out).Length
+          Write-Host "caesar_v.pt size: $size bytes"
+          if ($size -lt 1MB) { Write-Error "Model file too small - likely an error page"; exit 1 }
+          Write-Host "Download successful."
+
+      - name: Verify torch install
+        run: |
+          conda run -n compress_env python -c "import torch; print(torch.__version__)"
+
+      - name: Prepare CAESAR models
+        run: |
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+          $python = (conda run -n compress_env python -c "import sys; print(sys.executable)").Trim()
+          Write-Host "Using python: $python"
+
+          cmd /c "`"$vcvars`" && `"$python`" CAESAR_compressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          cmd /c "`"$vcvars`" && `"$python`" CAESAR_hyper_decompressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          cmd /c "`"$vcvars`" && `"$python`" CAESAR_decompressor.py cpu"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify exported models
+        run: |
+          Write-Host "=== Contents of exported_model/ ==="
+          Get-ChildItem -Path "${{ github.workspace }}/exported_model" | ForEach-Object {
+            Write-Host ("{0,-50} {1,10} bytes" -f $_.Name, $_.Length)
+          }
+          $required = @(
+            "caesar_compressor.pt2",
+            "caesar_hyper_decompressor.pt2",
+            "caesar_decompressor.pt2",
+            "vbr_quantized_cdf.bin",
+            "vbr_cdf_length.bin",
+            "vbr_offset.bin",
+            "gs_quantized_cdf.bin",
+            "gs_cdf_length.bin",
+            "gs_offset.bin"
+          )
+          $missing = $false
+          foreach ($f in $required) {
+            $p = "${{ github.workspace }}/exported_model/$f"
+            if (!(Test-Path $p) -or (Get-Item $p).Length -eq 0) {
+              Write-Host "MISSING or EMPTY: $f"
+              $missing = $true
+            }
+          }
+          if ($missing) { exit 1 }
+          Write-Host "All required model files present."
+
+      - name: Configure CMake
+        run: |
+          $TORCH_PATH = (conda run -n compress_env python -c "import torch; print(torch.utils.cmake_prefix_path)") 2>$null
+          $TORCH_PATH = $TORCH_PATH.Trim()
+          echo "Torch CMake path: $TORCH_PATH"
+          New-Item -ItemType Directory -Force -Path build
+          Push-Location build
+          cmake .. `
+            -DCMAKE_PREFIX_PATH="$TORCH_PATH" `
+            -DBUILD_TESTS=ON `
+            -DCMAKE_BUILD_TYPE=Release
+          Pop-Location
+
+      - name: Build project
+        run: |
+          Push-Location build
+          cmake --build . --config Release --parallel
+          Pop-Location
+
+      - name: Generate dummy test data
+        run: |
+          conda run -n compress_env python tests/gen_data.py build/tests/Release --filename TCf48.bin.f32
+
+      - name: Run test_caesarCD
+        run: |
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+          Push-Location build/tests/Release
+          New-Item -ItemType Directory -Force -Path output
+          cmd /c "`"$vcvars`" && test_caesarCD.exe"
+          if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+          Pop-Location
+
+      - name: Run test_runGaeCuda
+        run: |
+          Push-Location build/tests/Release
+          .\test_runGaeCuda.exe
+          Pop-Location
+
+      - name: Run test_padding
+        run: |
+          Push-Location build/tests/Release
+          .\test_padding.exe
+          Pop-Location
+
+      - name: Run test_LBRC
+        run: |
+          Push-Location build/tests/Release
+          .\test_LBRC.exe
+          Pop-Location
+
+      - name: Check test results
+        run: |
+          echo "Test completed successfully on windows-latest!"

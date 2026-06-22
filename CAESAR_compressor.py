@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
-
+from pathlib import Path
 from pyCAESAR.models.network_components import (
     ResnetBlock,
     FlexiblePrior,
@@ -490,18 +490,11 @@ with torch.no_grad():
     model = model.to(device)
     example_inputs = (torch.randn(8, 1, 8, 256, 256, device=device).float(),)
     batch_dim = torch.export.Dim("batch", min=1, max=255)
-    # [Optional] Specify the first dimension of the input x as dynamic.
     exported = torch.export.export(
         model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}
     )
-    # [Note] In this example we directly feed the exported module to aoti_compile_and_package.
-    # Depending on your use case, e.g. if your training platform and inference platform
-    # are different, you may choose to save the exported model using torch.export.save and
-    # then load it back using torch.export.load on your inference platform to run AOT compilation.
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-        # [Optional] Specify the generated shared library path. If not specified,
-        # the generated artifact is stored in your system temp directory.
-        package_path=os.path.join(os.getcwd(), f"exported_model/{model_name}.pt2"),
+      package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
     print(f"Compressed model saved to exported_model/{model_name}.pt2")

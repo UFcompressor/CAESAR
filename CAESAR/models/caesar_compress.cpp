@@ -389,6 +389,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     });
   }
   for (auto& t : threads) t.join();
+//   int64_t total = cpu_latent_indexes.size(0);
+// result.latent_indexes.resize(total);
+// for (int64_t j = 0; j < total; ++j) {
+//     result.latent_indexes[j] = tensor_to_vector<int32_t>(
+//         cpu_latent_indexes.select(0, j).reshape(-1));
+// }
+
 
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
@@ -427,16 +434,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   for (int32_t v : std::get<2>(result.compressionMetaData.block_info))
     block_info_3.push_back(static_cast<int64_t>(v));
 
-    std::cout << "recon_tensor before deblock: " << recon_tensor.sizes() << std::endl;
-  std::cout << "block_info_1 (nH): " << block_info_1
-            << " block_info_2 (nW): " << block_info_2
-            << " block_info_3 (pad t/d/l/r): ["
-            << block_info_3[0] << "," << block_info_3[1] << ","
-            << block_info_3[2] << "," << block_info_3[3] << "]" << std::endl;
-
   torch::Tensor recon_deblk =
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
-    std::cout << "recon_deblk after deblock: " << recon_deblk.sizes() << std::endl;
+
   recon_tensor = torch::Tensor();
 #ifdef USE_CUDA
   c10::cuda::CUDACachingAllocator::emptyCache();
@@ -447,7 +447,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     // hard code for the cpu
 
     if (result.use_lbrc) {
-      std::cout<<"lbrc"<<std::endl;
         torch::Tensor original_cpu =
             dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
         torch::Tensor recon_cpu =

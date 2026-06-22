@@ -66,7 +66,11 @@ set(CAESAR_SRC
     data_utils.cpp
 )
 
-add_library(caesar SHARED ${CAESAR_SRC})
+if(MSVC)
+    add_library(caesar STATIC ${CAESAR_SRC})
+else()
+    add_library(caesar SHARED ${CAESAR_SRC})
+endif()
 
 target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
@@ -86,7 +90,7 @@ if(NVCOMP_FOUND)
     message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
-# TODO: Mark model type - Currently only CAESAR_V is implemented
+# todo: fix this to read in the file and set it to just some model name
 target_compile_definitions(caesar PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 
@@ -114,9 +118,11 @@ if(USE_CUDA)
 endif()
 
 target_compile_options(caesar PRIVATE
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3  -mtune=native -fprefetch-loop-arrays>
-    $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
 
 if(USE_CUDA)
@@ -148,13 +154,18 @@ endif()
 target_compile_definitions(caesar_cli PRIVATE MODEL_CAESAR_V_ONLY)
 
 target_compile_options(caesar_cli PRIVATE
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -mtune=native>
-    $<$<CONFIG:Profile>:-O3 -g -fno-omit-frame-pointer>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native>
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
 
-set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
-
+if(MSVC)
+    set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar_cli)
+else()
+    set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar)
+endif()
 
 install(TARGETS caesar
     LIBRARY DESTINATION lib
@@ -176,7 +187,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/models/pretrained")
     )
 endif()
 
-# install model_name.txt if it exists
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
         DESTINATION share/caesar/models
@@ -184,9 +194,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt" CAESAR_MODEL_NAME)
     string(STRIP "${CAESAR_MODEL_NAME}" CAESAR_MODEL_NAME)
 else()
-  message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
+    message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
 endif()
-
 
 message(STATUS "")
 message(STATUS "========================================")

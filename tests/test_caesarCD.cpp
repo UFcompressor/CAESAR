@@ -187,8 +187,14 @@ size_t calculate_metadata_size(const CompressionResult& result) {
 }
 
 int main() {
+   std::cout.setf(std::ios::unitbuf);
   try {
     
+    std::set_terminate([]() {
+    std::cerr << "FATAL: std::terminate() was called - "
+                 "likely an uncaught exception on a non-main thread.\n";
+    std::abort();
+});
     const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
     const std::string raw_path = "TCf48.bin.f32";
     const std::string out_dir = "./output/";
@@ -246,6 +252,7 @@ int main() {
     raw_5d = torch::Tensor();
 
     float rel_eb = 0.0001f;
+    std::cout<<"error bound for compression: "<<rel_eb<<"\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
     CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
@@ -349,12 +356,25 @@ int main() {
 
     std::cout << "=== Quality Metrics ===" << "\n";
     std::cout << "NRMSE: " << nrmse << "\n";
+    std::cout << "Relative error bound: " << rel_eb << "\n";
+    bool passed = nrmse <= rel_eb;
+    std::cout << "Result: " << (passed ? "PASS" : "FAIL") << "\n";
     std::cout << "Compression Ratio (CR): " << CR << "\n";
-    std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
+    if (passed) {
+      std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";
+    } else {
+      std::cerr << "\n  TEST FAILED: Decompressed data does not match original within acceptable error bounds.\n";
+#ifndef _WIN32
+      ModelCache& cache = ModelCache::instance();
+      cache.clear();
+#endif
+      return 1;
+    }
 
-    
+#ifndef _WIN32
     ModelCache& cache = ModelCache::instance();
     cache.clear();
+#endif
     return 0;
 
   } catch (const std::exception& e) {
