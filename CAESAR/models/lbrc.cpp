@@ -1,5 +1,11 @@
 #include "lbrc.h"
-
+/*
+ * The LBRC algorithm implemented here is based on:
+ * Zhu, L., Ranka, S., and Rangarajan, A.
+ * "Residual Modeling for High-Fidelity Learned Compression of Scientific Data."
+ * arXiv:2606.05389, 2026.
+ * DOI: 10.48550/arXiv.2606.05389
+ */
 namespace caesar::lbrc {
 namespace {
 struct Shape5 { int64_t B, C, T, H, W; };
