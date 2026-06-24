@@ -33,6 +33,15 @@ add_executable(test_caesarCD test_caesarCD.cpp)
 target_link_libraries(test_caesarCD PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
+
+add_executable(test_caesarC test_caesarC.cpp)
+target_link_libraries(test_caesarC PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+
+add_executable(test_caesarD test_caesarD.cpp)
+target_link_libraries(test_caesarD PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+
 add_executable(test_padding test_padding.cpp)
 target_link_libraries(test_padding PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
@@ -65,6 +74,8 @@ endif()
 
 set(TEST_TARGETS
     test_caesarCD
+    test_caesarC
+    test_caesarD
     test_padding
     test_runGaeCuda
     test_LBRC

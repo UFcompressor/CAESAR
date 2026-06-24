@@ -421,11 +421,7 @@ class CompressorMix(nn.Module):
         return q_latent, latent_indexes, q_hyper_latent, hyper_indexes, B
 
 
-device = sys.argv[1]  # Setting device (cuda or cpu for now)
-if device == "cpu":  # If GPU is not avaiable
-    device = "cpu"
-else:
-    device = "cuda"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_name = f"caesar_compressor"
 
 
