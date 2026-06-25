@@ -334,7 +334,9 @@ void compress(const torch::Tensor& original,
                                   w, std::min(w+bw, S.W)});
 
     if (workers <= 0) workers = get_allocated_cores();
-
+    
+    int zstd_level = 21;
+    double quantity_iter = 16;
     blocks.resize(slices.size());
 
     parallel_for(static_cast<int64_t>(slices.size()), workers,
@@ -347,8 +349,8 @@ void compress(const torch::Tensor& original,
                                   sl.h0, sl.h1,
                                   sl.w0, sl.w1,
                                   target_nrmse,
-                                  meta.zstd_level,
-                                  meta.quant_iter,
+                                  zstd_level,
+                                  quantity_iter,
                                   x_mean, scale);
     });
 
@@ -373,9 +375,7 @@ void compress(const torch::Tensor& original,
     meta.encoded_nrmse = target_nrmse; // conservative; exact value requires decode pass
 }
 
-// ---------------------------------------------------------------------------
-// Public: decompress
-// ---------------------------------------------------------------------------
+
 torch::Tensor decompress(const torch::Tensor&          recons,
                           const LBRCMetaData&            meta,
                           const std::vector<LBRCBlock>&  blocks,

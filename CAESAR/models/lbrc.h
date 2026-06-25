@@ -31,8 +31,6 @@ struct LBRCMetaData {
     // B,C,T,H,W of the tensor that was compressed (after deblockHW, pre-pad)
     std::vector<int32_t>   shape;        // size 5
     std::array<int64_t, 3> block_size    = {60, 120, 120}; // bt, bh, bw
-    int                    zstd_level    = 21;
-    int                    quant_iter    = 16;
 };
 
 namespace caesar::lbrc {

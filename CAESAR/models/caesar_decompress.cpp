@@ -156,10 +156,15 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
     std::vector<torch::Tensor> row_tensors;
     for (const auto& row : comp_result.latent_indexes) {
-        row_tensors.push_back(torch::tensor(row, torch::kInt32));
-    }
-    torch::Tensor latent_indexes_recon = torch::stack(row_tensors, 0);
+    auto t = torch::from_blob(
+        (void*)row.data(),
+        {(long)row.size()},
+        torch::kUInt8
+    ).clone();
 
+    row_tensors.push_back(t.to(device_));
+    }
+    torch::Tensor latent_indexes_recon = torch::stack(row_tensors, 0).to(torch::kInt32);
     torch::Tensor decoded_latents_before_offset =
         torch::zeros({(long)cur_latents, 64, 16, 16}).to(torch::kInt32);
 

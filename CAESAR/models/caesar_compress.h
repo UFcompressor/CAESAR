@@ -45,7 +45,7 @@ struct CompressionMetaData {
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
-    std::vector<std::vector<int32_t>> latent_indexes;
+    std::vector<std::vector<uint8_t>> latent_indexes;
 
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;

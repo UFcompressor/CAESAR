@@ -389,10 +389,12 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     });
   }
   for (auto& t : threads) t.join();
+
   int64_t total = cpu_latent_indexes.size(0);
+  cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
     result.latent_indexes.resize(total);
     for (int64_t j = 0; j < total; ++j) {
-        result.latent_indexes[j] = tensor_to_vector<int32_t>(
+        result.latent_indexes[j] = tensor_to_vector<uint8_t>(
             cpu_latent_indexes.select(0, j).reshape(-1));
     }
 
@@ -453,9 +455,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
             recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
         recon_deblk = torch::Tensor();
         dataset.clear();
-
-        result.lbrcMetaData.quant_iter = 16;
-
         caesar::lbrc::compress(
             original_cpu, recon_cpu,
             static_cast<double>(rel_eb),
