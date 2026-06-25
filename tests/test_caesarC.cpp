@@ -125,20 +125,11 @@ size_t calculate_metadata_size(const CompressionResult& result) {
   total_bytes += sizeof(lbrc_meta.lbrc_correction_occur);
   total_bytes += sizeof(lbrc_meta.x_mean);
   total_bytes += sizeof(lbrc_meta.scale);
-  total_bytes += sizeof(lbrc_meta.encoded_nrmse);
   total_bytes += sizeof(lbrc_meta.block_size);
-  total_bytes += sizeof(lbrc_meta.zstd_level);
-  total_bytes += sizeof(lbrc_meta.quant_iter);
-  total_bytes += lbrc_meta.shape.size() * sizeof(int32_t);
 
   for (const auto& blk : result.lbrc_blocks) {
-      total_bytes += sizeof(blk.b) + sizeof(blk.c);
-      total_bytes += sizeof(blk.t0) + sizeof(blk.t1);
-      total_bytes += sizeof(blk.h0) + sizeof(blk.h1);
-      total_bytes += sizeof(blk.w0) + sizeof(blk.w1);
       total_bytes += sizeof(blk.step);
       total_bytes += sizeof(blk.bit_count);
-      total_bytes += sizeof(blk.num);
       for (const auto& s : blk.streams)
           total_bytes += s.size();
   }
@@ -276,32 +267,16 @@ bool save_compression_result_metadata(const CompressionResult& result,
              sizeof(lbrc_meta.x_mean));
   file.write(reinterpret_cast<const char*>(&lbrc_meta.scale),
              sizeof(lbrc_meta.scale));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.encoded_nrmse),
-             sizeof(lbrc_meta.encoded_nrmse));
   file.write(reinterpret_cast<const char*>(&lbrc_meta.block_size),
              sizeof(lbrc_meta.block_size));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.zstd_level),
-             sizeof(lbrc_meta.zstd_level));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.quant_iter),
-             sizeof(lbrc_meta.quant_iter));
-  write_vector(lbrc_meta.shape);
 
   // Save lbrc_blocks
   uint64_t num_blocks = result.lbrc_blocks.size();
   file.write(reinterpret_cast<const char*>(&num_blocks), sizeof(num_blocks));
   for (const auto& blk : result.lbrc_blocks) {
-    file.write(reinterpret_cast<const char*>(&blk.b), sizeof(blk.b));
-    file.write(reinterpret_cast<const char*>(&blk.c), sizeof(blk.c));
-    file.write(reinterpret_cast<const char*>(&blk.t0), sizeof(blk.t0));
-    file.write(reinterpret_cast<const char*>(&blk.t1), sizeof(blk.t1));
-    file.write(reinterpret_cast<const char*>(&blk.h0), sizeof(blk.h0));
-    file.write(reinterpret_cast<const char*>(&blk.h1), sizeof(blk.h1));
-    file.write(reinterpret_cast<const char*>(&blk.w0), sizeof(blk.w0));
-    file.write(reinterpret_cast<const char*>(&blk.w1), sizeof(blk.w1));
     file.write(reinterpret_cast<const char*>(&blk.step), sizeof(blk.step));
     file.write(reinterpret_cast<const char*>(&blk.bit_count),
                sizeof(blk.bit_count));
-    file.write(reinterpret_cast<const char*>(&blk.num), sizeof(blk.num));
 
     uint64_t num_streams = blk.streams.size();
     file.write(reinterpret_cast<const char*>(&num_streams),

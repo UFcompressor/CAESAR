@@ -188,15 +188,8 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
             sizeof(lbrc_meta.x_mean));
   file.read(reinterpret_cast<char*>(&lbrc_meta.scale),
             sizeof(lbrc_meta.scale));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.encoded_nrmse),
-            sizeof(lbrc_meta.encoded_nrmse));
   file.read(reinterpret_cast<char*>(&lbrc_meta.block_size),
             sizeof(lbrc_meta.block_size));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.zstd_level),
-            sizeof(lbrc_meta.zstd_level));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.quant_iter),
-            sizeof(lbrc_meta.quant_iter));
-  read_vector(lbrc_meta.shape);
 
   // Load lbrc_blocks
   uint64_t num_blocks;
@@ -204,17 +197,8 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   result.lbrc_blocks.resize(num_blocks);
   for (uint64_t b = 0; b < num_blocks; ++b) {
     auto& blk = result.lbrc_blocks[b];
-    file.read(reinterpret_cast<char*>(&blk.b), sizeof(blk.b));
-    file.read(reinterpret_cast<char*>(&blk.c), sizeof(blk.c));
-    file.read(reinterpret_cast<char*>(&blk.t0), sizeof(blk.t0));
-    file.read(reinterpret_cast<char*>(&blk.t1), sizeof(blk.t1));
-    file.read(reinterpret_cast<char*>(&blk.h0), sizeof(blk.h0));
-    file.read(reinterpret_cast<char*>(&blk.h1), sizeof(blk.h1));
-    file.read(reinterpret_cast<char*>(&blk.w0), sizeof(blk.w0));
-    file.read(reinterpret_cast<char*>(&blk.w1), sizeof(blk.w1));
     file.read(reinterpret_cast<char*>(&blk.step), sizeof(blk.step));
     file.read(reinterpret_cast<char*>(&blk.bit_count), sizeof(blk.bit_count));
-    file.read(reinterpret_cast<char*>(&blk.num), sizeof(blk.num));
 
     uint64_t num_streams;
     file.read(reinterpret_cast<char*>(&num_streams), sizeof(num_streams));
