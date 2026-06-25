@@ -9,11 +9,11 @@
 
 _A C++ / LibTorch foundation model for efficient compression of scientific data_
 
-![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-1B4FA8)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-1B4FA8)
 ![C++](https://img.shields.io/badge/C++-17-E8500A)
 ![LibTorch](https://img.shields.io/badge/LibTorch-2.8%2B-1B4FA8)
 ![zstd](https://img.shields.io/badge/zstd-1.5%2B-E8500A)
-![License](https://img.shields.io/badge/license-MIT-1B4FA8)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1B4FA8)](https://github.com/UFcomrpessor/CAESAR/tree/master#Apache-2.0-1-ov-file)
 
 </div>
 
@@ -29,18 +29,6 @@ It encodes data into a compact latent space and uses learned priors for informat
 
 ---
 
-
-Each folder contains two documents:
-
-| Document     | Purpose                                                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------- |
-| `README.md`  | Architecture assumptions, known limitations, and important behavioral notes for that build target |
-| `INSTALL.md` | Step-by-step installation guide specific to that build target                                     |
-
-**Read both before building.** The CPU and GPU builds make different assumptions about floating-point precision, memory layout, and hardware availability. Mixing configurations — for example, compressing with a GPU build and decompressing with a CPU build — will produce incorrect results.
-
----
-
 ## Build Instructions
 
 ### 1. Clone the Repository
@@ -50,11 +38,7 @@ git https://github.com/UFcomrpessor/CAESAR.git
 cd CAESAR
 ```
 
-### 2. Apply Your Build Patch
-
-See [Build Targets: CPU vs. GPU](#build-targets-cpu-vs-gpu) above, and read the corresponding `README.md` and `INSTALL.md` in the `CPU/` or `GPU/` directory before continuing.
-
-### 3. Create and Activate a Python Virtual Environment
+### 2. Create and Activate a Python Virtual Environment
 
 ```bash
 python3 -m venv venv
@@ -62,7 +46,7 @@ source venv/bin/activate
 pip install --upgrade pip wheel setuptools
 ```
 
-### 4. Install Platform Dependencies
+### 3. Install Platform Dependencies
 
 <details>
 <summary>Linux (Ubuntu/Debian)</summary>
@@ -111,10 +95,27 @@ rm temp_requirements.txt
 
 </details>
 
-### 5. Download and Prepare Pretrained Models
+<details>
+<summary>Windows</summary>
+
+```powershell
+# Install CMake, zstd, and a recent MSVC toolchain (Visual Studio Build Tools) first
+
+venv\Scripts\activate
+
+findstr /v /b "torch torchvision --extra-index-url cupy nvidia" requirements.txt > temp_requirements.txt
+
+pip install --no-cache-dir -r temp_requirements.txt
+pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+pip install compressai==1.2.6 imageio==2.37.0
+del temp_requirements.txt
+```
+
+</details>
+
+### 4. Download and Prepare Pretrained Models
 
 ```bash
-chmod +x download_models.sh
 ./download_models.sh
 
 python3 CAESAR_compressor.py cpu
@@ -122,7 +123,7 @@ python3 CAESAR_hyper_decompressor.py cpu
 python3 CAESAR_decompressor.py cpu
 ```
 
-### 6. Configure and Build with CMake
+### 5. Configure and Build with CMake
 
 ```bash
 mkdir -p build && cd build
@@ -142,8 +143,6 @@ For debug builds, replace `-DCMAKE_BUILD_TYPE=Release` with `-DCMAKE_BUILD_TYPE=
 ---
 
 ## GPU Support (NVIDIA)
-
-> See [`GPU/README.md`](GPU/README.md) and [`GPU/INSTALL.md`](GPU/INSTALL.md) for the full GPU setup guide and build assumptions.
 
 GPU support requires CUDA and nvCOMP.
 
@@ -213,16 +212,6 @@ export CAESAR_MODEL_DIR=/path/to/your/models
 
 ---
 
-## Platform Support
-
-| Platform              |           CPU           |      GPU      |
-| --------------------- | :---------------------: | :-----------: |
-| Linux (Ubuntu/Debian) | Supported — recommended |  NVIDIA only  |
-| macOS                 |        Supported        | Not supported |
-| Windows               |      Not supported      | Not supported |
-
----
-
 ## Citation
 
 If you use CAESAR in your research, please cite the following works:
@@ -251,7 +240,7 @@ If you use CAESAR in your research, please cite the following works:
 
 ## Contact
 
-For questions, bug reports, or contributions, please open an issue on [GitHub](https://github.com/E53klasky/CAESAR_C/issues).
+For questions, bug reports, or contributions, please open an issue on [GitHub](https://github.com/UFcomrpessor/CAESAR/issues).
 
 ---
 
