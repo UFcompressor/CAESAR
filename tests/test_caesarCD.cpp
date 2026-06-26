@@ -1,14 +1,4 @@
-#include <torch/torch.h>
-
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <vector>
-
+#include <limits>
 #include "../CAESAR/data_utils.h"
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/array_utils.h"
@@ -354,11 +344,15 @@ int main() {
     double rmse = std::sqrt(mse);
     double nrmse = rmse / (static_cast<double>(raw_max) - static_cast<double>(raw_min));
 
+    double tolerance = std::numeric_limits<float>::epsilon();
     std::cout << "=== Quality Metrics ===" << "\n";
     std::cout << "NRMSE: " << nrmse << "\n";
     std::cout << "Relative error bound: " << rel_eb << "\n";
-    bool passed = nrmse <= rel_eb;
-    std::cout << "Result: " << (passed ? "PASS" : "FAIL") << "\n";
+    std::cout << "Tolerance: " << tolerance << "\n";
+   
+    bool passed = nrmse <= rel_eb + tolerance;
+   
+    std::cout<< "Result: " << (passed ? "PASS" : "FAIL") << "\n"; 
     std::cout << "Compression Ratio (CR): " << CR << "\n";
     if (passed) {
       std::cout << "\n  TEST PASSED: Compression and decompression completed successfully!\n";

@@ -34,7 +34,7 @@ It encodes data into a compact latent space and uses learned priors for informat
 ### 1. Clone the Repository
 
 ```bash
-git https://github.com/UFcomrpessor/CAESAR.git
+git clone https://github.com/UFcompressor/CAESAR
 cd CAESAR
 ```
 
@@ -135,7 +135,7 @@ cmake .. \
   -DBUILD_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
-cmake --build . --config Release --parallel
+make -j6
 ```
 
 For debug builds, replace `-DCMAKE_BUILD_TYPE=Release` with `-DCMAKE_BUILD_TYPE=Debug`.
