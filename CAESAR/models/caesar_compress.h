@@ -1,5 +1,6 @@
 #pragma once
 #include "lbrc.h"
+#include "nglr_model.h"
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include "model_cache.h"
 #include "array_utils.h"
@@ -15,7 +16,12 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
-
+enum class CorrectionType {
+    NONE = 0,
+    GAE  = 1,
+    LBRC = 2,
+    NGLR = 3
+};
 
 struct GAEMetaData {
     bool GAE_correction_occur;
@@ -41,24 +47,28 @@ struct CompressionMetaData {
     int64_t pad_T; // global_info
 };
 
-
 struct CompressionResult {
+    CorrectionType correction_type = CorrectionType::NONE;
+
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
-  //  std::vector<std::vector<int32_t>> latent_indexes;
 
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
 
     // LBRC compressed data
-    std::vector<LBRCBlock> lbrc_blocks; 
-    LBRCMetaData    lbrcMetaData;
-    
-    // record metadata for decompression
+    std::vector<LBRCBlock> lbrc_blocks;
+    LBRCMetaData lbrcMetaData;
+
+    // NGLR compressed data
+    caesar::nglr::NGLRMetaData nglrMetaData;
+    caesar::nglr::NGLRCompressedData nglrCompressedData;
+// record metadata for decompression
     CompressionMetaData compressionMetaData;
     GAEMetaData gaeMetaData;
 
-    bool use_lbrc = true;   
+    bool use_lbrc = false;
+    bool use_nglr = false;
 };
  
 class Compressor {
@@ -66,7 +76,12 @@ public:
     explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
     ~Compressor() = default;
 
-    CompressionResult compress(const DatasetConfig& config , int batch_size = 32 , float rel_eb = 0.1);
+    CompressionResult compress(
+    const DatasetConfig& config,
+    int batch_size = 32,
+    float rel_eb = 0.1,
+    const std::string& correction_method = "gae"
+);
 private:
     torch::Device device_;
     

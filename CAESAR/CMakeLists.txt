@@ -1,7 +1,11 @@
 find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
-
+if(CUDA_FOUND)
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+endif()
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
 endif()
@@ -64,6 +68,8 @@ set(CAESAR_SRC
     models/runGaeCuda.cpp
     models/lbrc.cpp
     data_utils.cpp
+    models/nglr_model.cpp
+    models/nglr_train.cpp
 )
 
 if(MSVC)
@@ -75,6 +81,9 @@ endif()
 target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
+if(USE_CUDA)
+    set_target_properties(caesar PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+endif()
 
 if(USE_CUDA)
     target_compile_definitions(caesar PUBLIC USE_CUDA)

@@ -1,5 +1,5 @@
 #include "caesar_decompress.h"
-
+#include "nglr_model.h"
 torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW,
                         const std::vector<int64_t>& padding);
 
@@ -184,7 +184,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
         decompressor_model_->run({reshaped_latents.to(torch::kFloat32)});
     torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
 
-
     torch::Tensor norm_output =
         reshape_batch_2d_3d(raw_output, (long)cur_samples, n_frame);
 
@@ -227,8 +226,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     const int64_t samples = T / nf;
     const int64_t SS      = S * samples;
 
-
-
     for (const auto& pair : meta.filtered_blocks) {
       const int64_t label  = pair.first;
       const float   value  = pair.second;
@@ -251,95 +248,228 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor recon_tensor_deblock =
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
   recon_tensor = torch::Tensor();
-  //  ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
-    if (comp_result.use_lbrc) {
-        torch::Tensor recon_cpu =
-            recon_tensor_deblock.to(torch::kCPU).to(torch::kFloat32).contiguous();
-        recon_tensor_deblock = torch::Tensor();
 
-        torch::Tensor corrected = caesar::lbrc::decompress(
-            recon_cpu,
-            comp_result.lbrcMetaData,
-            comp_result.lbrc_blocks,
-            get_allocated_cores());
+if (comp_result.gaeMetaData.GAE_correction_occur) {
+    std::cout << "Applying GAE correction" << std::endl;
 
-        torch::Tensor final_recon = recons_data(
-            corrected,
-            comp_result.compressionMetaData.data_input_shape,
-            comp_result.compressionMetaData.pad_T);
-
-        return final_recon;
-    }
-
-// GAE path  ----------------------------------------
-  if (comp_result.gaeMetaData.GAE_correction_occur) {
     std::tuple<torch::Tensor, std::vector<int>> padding_recon =
         padding(recon_tensor_deblock);
+
     recon_tensor_deblock = torch::Tensor();
-    torch::Tensor padded_recon_tensor = std::get<0>(padding_recon);
-    std::vector<int> padding_recon_info = std::get<1>(padding_recon);
+
+    torch::Tensor padded_recon_tensor =
+        std::get<0>(padding_recon);
+
+    std::vector<int> padding_recon_info =
+        std::get<1>(padding_recon);
+
     padding_recon = {};
 
-    float global_scale = meta.global_scale;
-    float global_offset = meta.global_offset;
+    float global_scale =
+        meta.global_scale;
+
+    float global_offset =
+        meta.global_offset;
+
     torch::Tensor padded_recon_tensor_norm =
         (padded_recon_tensor - global_offset) / global_scale;
-    padded_recon_tensor = torch::Tensor();
-    double quan_factor = 2.0;
 
+    padded_recon_tensor = torch::Tensor();
+
+    double quan_factor = 2.0;
     std::string codec_alg = "Zstd";
     std::pair<int, int> patch_size = {8, 8};
+
+    // rel_eb is not really used during GAE decompression;
+    // metadata controls reconstruction.
     double rel_eb = 1e-3;
-    PCACompressor pca_compressor(rel_eb, quan_factor,
-                                 device_.is_cuda() ? "cuda" : "cpu", codec_alg,
-                                 patch_size);
+
+    PCACompressor pca_compressor(
+        rel_eb,
+        quan_factor,
+        device_.is_cuda() ? "cuda" : "cpu",
+        codec_alg,
+        patch_size
+    );
 
     MetaData gae_record_metaData;
     CompressedData gae_record_compressedData;
 
-    int64_t pca_rows = comp_result.gaeMetaData.pcaBasis.size();
-    int64_t pca_cols = comp_result.gaeMetaData.pcaBasis[0].size();
+    int64_t pca_rows =
+        static_cast<int64_t>(comp_result.gaeMetaData.pcaBasis.size());
+
+    int64_t pca_cols =
+        static_cast<int64_t>(comp_result.gaeMetaData.pcaBasis[0].size());
 
     std::vector<float> pca_vec;
     pca_vec.reserve(pca_rows * pca_cols);
 
     for (const auto& row_vec : comp_result.gaeMetaData.pcaBasis) {
-      pca_vec.insert(pca_vec.end(), row_vec.begin(), row_vec.end());
+        pca_vec.insert(
+            pca_vec.end(),
+            row_vec.begin(),
+            row_vec.end()
+        );
     }
-    torch::Tensor pca_vec_1d = torch::tensor(pca_vec);
-    torch::Tensor pcaBasis = pca_vec_1d.reshape({pca_rows, pca_cols});
 
-    gae_record_metaData.pcaBasis = pcaBasis.to(device_);
+    torch::Tensor pca_vec_1d =
+        torch::tensor(pca_vec);
+
+    torch::Tensor pcaBasis =
+        pca_vec_1d.reshape({pca_rows, pca_cols});
+
+    gae_record_metaData.GAE_correction_occur =
+        comp_result.gaeMetaData.GAE_correction_occur;
+
+    gae_record_metaData.pcaBasis =
+        pcaBasis.to(device_);
+
     gae_record_metaData.uniqueVals =
         torch::tensor(comp_result.gaeMetaData.uniqueVals).to(device_);
-    gae_record_metaData.quanBin = comp_result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec = comp_result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = comp_result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes = comp_result.gaeMetaData.dataBytes;
 
-    gae_record_compressedData.data = comp_result.gae_comp_data;
-    gae_record_compressedData.dataBytes = comp_result.gaeMetaData.dataBytes;
+    gae_record_metaData.quanBin =
+        comp_result.gaeMetaData.quanBin;
+
+    gae_record_metaData.nVec =
+        comp_result.gaeMetaData.nVec;
+
+    gae_record_metaData.prefixLength =
+        comp_result.gaeMetaData.prefixLength;
+
+    gae_record_metaData.dataBytes =
+        comp_result.gaeMetaData.dataBytes;
+
+    gae_record_compressedData.data =
+        comp_result.gae_comp_data;
+
+    gae_record_compressedData.dataBytes =
+        comp_result.gaeMetaData.dataBytes;
+
     gae_record_compressedData.coeffIntBytes =
         comp_result.gaeMetaData.coeffIntBytes;
 
     torch::Tensor recons_gae =
-        pca_compressor.decompress(padded_recon_tensor_norm, gae_record_metaData,
-                                  gae_record_compressedData);
-    padded_recon_tensor = torch::Tensor();
+        pca_compressor.decompress(
+            padded_recon_tensor_norm,
+            gae_record_metaData,
+            gae_record_compressedData
+        );
+
+    torch::Tensor gae_diff =
+        (recons_gae - padded_recon_tensor_norm).abs();
+
+    std::cout << "GAE max correction: "
+              << gae_diff.max().item<float>()
+              << std::endl;
+
+    std::cout << "GAE mean correction: "
+              << gae_diff.mean().item<float>()
+              << std::endl;
 
     torch::Tensor recons_gae_unpadded =
-        unpadding(recons_gae, comp_result.gaeMetaData.padding_recon_info);
+        unpadding(
+            recons_gae,
+            comp_result.gaeMetaData.padding_recon_info
+        );
+
+    torch::Tensor base_unpadded =
+        unpadding(
+            padded_recon_tensor_norm,
+            comp_result.gaeMetaData.padding_recon_info
+        );
+
+    torch::Tensor unpadding_diff =
+        (recons_gae_unpadded - base_unpadded).abs();
+
+    std::cout << "After unpadding max correction: "
+              << unpadding_diff.max().item<float>()
+              << std::endl;
+
     padding_recon_info.clear();
     padding_recon_info.shrink_to_fit();
+
     torch::Tensor final_recon_norm =
-        recons_data(recons_gae_unpadded, meta.data_input_shape, meta.pad_T);
+        recons_data(
+            recons_gae_unpadded,
+            meta.data_input_shape,
+            meta.pad_T
+        );
+
     torch::Tensor final_recon =
         final_recon_norm * meta.global_scale + meta.global_offset;
+
     return final_recon;
-  } else {
-    
-     torch::Tensor final_recon =
-        recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
+}
+else if (comp_result.use_nglr &&
+         comp_result.nglrMetaData.nglr_correction_occur) {
+    std::cout << "Applying NGLR correction" << std::endl;
+
+    torch::Tensor recon_cpu =
+        recon_tensor_deblock
+            .to(torch::kCPU)
+            .to(torch::kFloat32)
+            .contiguous();
+
+    recon_tensor_deblock = torch::Tensor();
+
+    torch::Tensor corrected =
+        caesar::nglr::decompress(
+            recon_cpu,
+            comp_result.nglrMetaData,
+            comp_result.nglrCompressedData,
+            torch::kCPU
+        );
+
+    torch::Tensor final_recon =
+        recons_data(
+            corrected,
+            comp_result.compressionMetaData.data_input_shape,
+            comp_result.compressionMetaData.pad_T
+        );
+
+    return final_recon.to(device_);
+}
+//LBRC Hardcoded for now 
+else if (comp_result.use_lbrc &&
+         comp_result.lbrcMetaData.lbrc_correction_occur) {
+    std::cout << "Applying LBRC correction" << std::endl;
+
+    torch::Tensor recon_cpu =
+        recon_tensor_deblock
+            .to(torch::kCPU)
+            .to(torch::kFloat32)
+            .contiguous();
+
+    recon_tensor_deblock = torch::Tensor();
+
+    torch::Tensor corrected =
+        caesar::lbrc::decompress(
+            recon_cpu,
+            comp_result.lbrcMetaData,
+            comp_result.lbrc_blocks,
+            get_allocated_cores()
+        );
+
+    torch::Tensor final_recon =
+        recons_data(
+            corrected,
+            comp_result.compressionMetaData.data_input_shape,
+            comp_result.compressionMetaData.pad_T
+        );
+
     return final_recon;
-  }
+}
+else {
+    std::cout << "No residual correction applied" << std::endl;
+
+    torch::Tensor final_recon =
+        recons_data(
+            recon_tensor_deblock,
+            meta.data_input_shape,
+            meta.pad_T
+        );
+
+    return final_recon;
+}
+
 }

@@ -1,5 +1,5 @@
 #include "caesar_compress.h"
-
+#include "nglr_model.h"
 
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
@@ -179,7 +179,7 @@ void Compressor::load_probability_tables() {
 }
 
 CompressionResult Compressor::compress(const DatasetConfig& config,
-                                        int batch_size, float rel_eb) {
+                                        int batch_size, float rel_eb,const std::string& correction_method) {
   c10::InferenceMode guard;
 
   ScientificDataset dataset(config);
@@ -244,7 +244,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::vector<torch::Tensor> all_hyper_indexes;
   int64_t total_latent_codes = 0;
 
-
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
 
@@ -292,7 +291,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       torch::Tensor hyper_indexes  = outputs[3];
       outputs.clear();
 
-
       std::vector<torch::Tensor> hyper_outputs =
           hyper_decompressor_model_->run({q_hyper_latent.to(torch::kFloat32)});
       torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
@@ -303,7 +301,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       all_q_hyper_latent.push_back(q_hyper_latent);
       all_hyper_indexes.push_back(hyper_indexes);
       total_latent_codes += q_latent.sizes()[0];
-
 
       torch::Tensor q_latent_with_offset =
           q_latent.to(torch::kFloat32) + mean;
@@ -337,7 +334,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       batch_indexes.clear();
     }
   }
-
 
   torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
   torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
@@ -396,7 +392,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 //         cpu_latent_indexes.select(0, j).reshape(-1));
 // }
 
-
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[0]);
@@ -443,104 +438,203 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 #endif
 
     // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
-    result.use_lbrc = true;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
-    // hard code for the cpu
+    // ---- Residual correction path ----------------------------------------
+        
+if (correction_method == "none") {
+    std::cout << "Using no residual correction" << std::endl;
 
-    if (result.use_lbrc) {
-        torch::Tensor original_cpu =
-            dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
-        torch::Tensor recon_cpu =
-            recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
-        recon_deblk = torch::Tensor();
-        dataset.clear();
+    result.correction_type = CorrectionType::NONE;
+    result.use_lbrc = false;
 
-        result.lbrcMetaData.quant_iter = 16;
+    dataset.clear();
+    return result;
+}
 
-        caesar::lbrc::compress(
-            original_cpu, recon_cpu,
-            static_cast<double>(rel_eb),
-            result.lbrcMetaData,
-            result.lbrc_blocks,
-            get_allocated_cores());
+if (correction_method == "lbrc") {
+    std::cout << "Using LBRC correction" << std::endl;
 
-        return result;
-    }
-    // ---- GAE path  ----------------------------------------
-  torch::Tensor original_full = dataset.original_data();
+    result.correction_type = CorrectionType::LBRC;
+    result.use_lbrc = true;
 
-  // crop reflected tail frames (pad_T) before computing global stats
-  int64_t T_full = original_full.size(2);
-  torch::Tensor original_for_stats = (pad_T > 0)
-      ? original_full.index({torch::indexing::Slice(), torch::indexing::Slice(),
-                              torch::indexing::Slice(0, T_full - pad_T)})
-      : original_full;
+    torch::Tensor original_cpu =
+        dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
 
-  torch::Tensor stats =
-      torch::stack({original_for_stats.max(), original_for_stats.min(),
-                    original_for_stats.mean()});
-  float global_scale  = stats[0].item<float>() - stats[1].item<float>();
-  float global_offset = stats[2].item<float>();
+    torch::Tensor recon_cpu =
+        recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
 
-  auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
-  recon_deblk = torch::Tensor();
+    recon_deblk = torch::Tensor();
+    dataset.clear();
 
-  auto [padded_original_tensor, dummy_pad] = padding(original_full);
-  dataset.clear();
+    result.lbrcMetaData.quant_iter = 16;
 
-  result.gaeMetaData.padding_recon_info = padding_recon_info;
+    caesar::lbrc::compress(
+        original_cpu,
+        recon_cpu,
+        static_cast<double>(rel_eb),
+        result.lbrcMetaData,
+        result.lbrc_blocks,
+        get_allocated_cores()
+    );
 
-  result.compressionMetaData.global_scale  = global_scale;
-  result.compressionMetaData.global_offset = global_offset;
+    return result;
+}
 
-  padded_original_tensor.sub_(global_offset).div_(global_scale);
-  torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
+if (correction_method == "gae") {
+    std::cout << "Using GAE correction" << std::endl;
 
-  padded_recon_tensor.sub_(global_offset).div_(global_scale);
-  torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
+    result.correction_type = CorrectionType::GAE;
+    result.use_lbrc = false;
 
+    torch::Tensor original_full = dataset.original_data();
 
-  double quan_factor      = 2.0;
-  std::string codec_alg   = "Zstd";
-  std::pair<int, int> patch_size = {8, 8};
+    int64_t T_full = original_full.size(2);
 
-  PCACompressor pca_compressor(rel_eb, quan_factor,
-                               device_.is_cuda() ? "cuda" : "cpu",
-                               codec_alg, patch_size);
+    torch::Tensor original_for_stats = (pad_T > 0)
+        ? original_full.index({
+              torch::indexing::Slice(),
+              torch::indexing::Slice(),
+              torch::indexing::Slice(0, T_full - pad_T)
+          })
+        : original_full;
 
-  auto gae_compression_result = pca_compressor.compress(
-      padded_original_tensor_norm, padded_recon_tensor_norm);
-  padded_original_tensor_norm = torch::Tensor();
+    torch::Tensor stats =
+        torch::stack({
+            original_for_stats.max(),
+            original_for_stats.min(),
+            original_for_stats.mean()
+        });
+
+    float global_scale =
+        stats[0].item<float>() - stats[1].item<float>();
+
+    float global_offset =
+        stats[2].item<float>();
+
+    auto [padded_recon_tensor, padding_recon_info] =
+        padding(recon_deblk);
+
+    recon_deblk = torch::Tensor();
+
+    auto [padded_original_tensor, dummy_pad] =
+        padding(original_full);
+
+    dataset.clear();
+
+    result.gaeMetaData.padding_recon_info =
+        padding_recon_info;
+
+    result.compressionMetaData.global_scale =
+        global_scale;
+
+    result.compressionMetaData.global_offset =
+        global_offset;
+
+    padded_original_tensor.sub_(global_offset).div_(global_scale);
+    torch::Tensor& padded_original_tensor_norm =
+        padded_original_tensor;
+
+    padded_recon_tensor.sub_(global_offset).div_(global_scale);
+    torch::Tensor& padded_recon_tensor_norm =
+        padded_recon_tensor;
+
+    double quan_factor = 2.0;
+    std::string codec_alg = "Zstd";
+    std::pair<int, int> patch_size = {8, 8};
+
+    PCACompressor pca_compressor(
+        rel_eb,
+        quan_factor,
+        device_.is_cuda() ? "cuda" : "cpu",
+        codec_alg,
+        patch_size
+    );
+
+    auto gae_compression_result =
+        pca_compressor.compress(
+            padded_original_tensor_norm,
+            padded_recon_tensor_norm
+        );
+
+    padded_original_tensor_norm = torch::Tensor();
 
     result.gaeMetaData.GAE_correction_occur =
-      gae_compression_result.metaData.GAE_correction_occur;
+        gae_compression_result.metaData.GAE_correction_occur;
 
-  result.gaeMetaData.quanBin       = gae_compression_result.metaData.quanBin;
-  result.gaeMetaData.nVec          = gae_compression_result.metaData.nVec;
-  result.gaeMetaData.prefixLength  = gae_compression_result.metaData.prefixLength;
-  result.gaeMetaData.dataBytes     = gae_compression_result.metaData.dataBytes;
-  result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
-  result.gae_comp_data             = gae_compression_result.compressedData->data;
+    result.gaeMetaData.quanBin =
+        gae_compression_result.metaData.quanBin;
 
-  if (result.gaeMetaData.GAE_correction_occur) {
+    result.gaeMetaData.nVec =
+        gae_compression_result.metaData.nVec;
+
+    result.gaeMetaData.prefixLength =
+        gae_compression_result.metaData.prefixLength;
+
+    result.gaeMetaData.dataBytes =
+        gae_compression_result.metaData.dataBytes;
+
+    result.gaeMetaData.coeffIntBytes =
+        gae_compression_result.compressedData->coeffIntBytes;
+
+    result.gae_comp_data =
+        gae_compression_result.compressedData->data;
+
+    if (result.gaeMetaData.GAE_correction_occur) {
         result.gaeMetaData.pcaBasis =
-        tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
-    result.gaeMetaData.uniqueVals =
-        tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
+            tensor_to_2d_vector<float>(
+                gae_compression_result.metaData.pcaBasis
+            );
 
-    MetaData gae_record_metaData;
-    gae_record_metaData.pcaBasis     = gae_compression_result.metaData.pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals   = gae_compression_result.metaData.uniqueVals.to(device_);
-    gae_record_metaData.quanBin      = result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec         = result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes    = result.gaeMetaData.dataBytes;
+        result.gaeMetaData.uniqueVals =
+            tensor_to_vector<float>(
+                gae_compression_result.metaData.uniqueVals
+            );
+    }
 
-    CompressedData gae_record_compressedData;
-    gae_record_compressedData.data          = result.gae_comp_data;
-    gae_record_compressedData.dataBytes     = result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
+    return result;
+}
+if (correction_method == "nglr") {
+    std::cout << "Using NGLR correction" << std::endl;
 
-  } 
+    torch::Tensor original_cpu =
+        dataset.original_data()
+            .to(torch::kCPU)
+            .to(torch::kFloat32)
+            .contiguous();
 
-  return result;
+    torch::Tensor recon_cpu =
+        recon_deblk
+            .to(torch::kCPU)
+            .to(torch::kFloat32)
+            .contiguous();
+
+    dataset.clear();
+    recon_deblk = torch::Tensor();
+
+    caesar::nglr::NGLRResult nglr_result =
+    caesar::nglr::compress(
+        original_cpu,
+        recon_cpu,
+        static_cast<double>(rel_eb),
+        device_
+    );
+
+if (nglr_result.meta.correction_bytes == 0 ||
+    nglr_result.compressed.blocks.empty()) {
+    result.correction_type = CorrectionType::NONE;
+    result.use_lbrc = false;
+    result.use_nglr = false;
+    return result;
+}
+
+result.correction_type = CorrectionType::NGLR;
+result.use_lbrc = false;
+result.use_nglr = true;
+result.nglrMetaData = std::move(nglr_result.meta);
+result.nglrCompressedData = std::move(nglr_result.compressed);
+
+return result;
+}
+throw std::runtime_error(
+    "Unknown correction method: " + correction_method
+);
 }
