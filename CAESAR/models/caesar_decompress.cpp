@@ -86,23 +86,29 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor offsets_tensor = torch::tensor(meta.offsets, opts);
   torch::Tensor scales_tensor = torch::tensor(meta.scales, opts);
 
-  std::vector<int32_t> flat_indexes;
-  flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
-  for (const auto& v : meta.indexes)
-    flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
+  torch::Tensor indexes_tensor;
+  if (!meta.all_filtered && !meta.indexes.empty()) {
+    std::vector<int32_t> flat_indexes;
+    flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
+    for (const auto& v : meta.indexes)
+      flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
 
-  torch::TensorOptions idx_opts_cpu =
-      torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-  torch::Tensor indexes_tensor =
-      torch::from_blob(
-          flat_indexes.data(),
-          {(long)meta.indexes.size(), (long)meta.indexes[0].size()},
-          idx_opts_cpu)
-          .clone()
-          .to(device_);
+    torch::TensorOptions idx_opts_cpu =
+        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+    indexes_tensor =
+        torch::from_blob(
+            flat_indexes.data(),
+            {(long)meta.indexes.size(), (long)meta.indexes[0].size()},
+            idx_opts_cpu)
+            .clone()
+            .to(device_);
 
-  flat_indexes.clear();
-  flat_indexes.shrink_to_fit();
+    flat_indexes.clear();
+    flat_indexes.shrink_to_fit();
+  } else {
+    indexes_tensor =
+        torch::zeros({0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
+  }
 
   if (indexes_tensor.numel() > 0) {
 

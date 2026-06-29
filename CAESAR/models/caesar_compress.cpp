@@ -338,57 +338,64 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     }
   }
 
+  result.compressionMetaData.all_filtered = all_q_latent.empty();
 
-  torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
-  torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
-  torch::Tensor cat_q_hyper        = torch::cat(all_q_hyper_latent, 0);
-  torch::Tensor cat_hyper_indexes  = torch::cat(all_hyper_indexes, 0);
-  all_q_latent.clear();
-  all_latent_indexes.clear();
-  all_q_hyper_latent.clear();
-  all_hyper_indexes.clear();
+  if (!all_q_latent.empty()) {
+    torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
+    torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
+    torch::Tensor cat_q_hyper        = torch::cat(all_q_hyper_latent, 0);
+    torch::Tensor cat_hyper_indexes  = torch::cat(all_hyper_indexes, 0);
+    all_q_latent.clear();
+    all_latent_indexes.clear();
+    all_q_hyper_latent.clear();
+    all_hyper_indexes.clear();
 
-  torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
-  torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
-  torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
-  torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
+    torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
+    torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
+    torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
+    torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
 
 #ifdef USE_CUDA
-  torch::cuda::synchronize();
+    torch::cuda::synchronize();
 #endif
 
-  cat_q_latent       = torch::Tensor();
-  cat_latent_indexes = torch::Tensor();
-  cat_q_hyper        = torch::Tensor();
-  cat_hyper_indexes  = torch::Tensor();
+    cat_q_latent       = torch::Tensor();
+    cat_latent_indexes = torch::Tensor();
+    cat_q_hyper        = torch::Tensor();
+    cat_hyper_indexes  = torch::Tensor();
 
-  result.encoded_latents.resize(total_latent_codes);
-  result.encoded_hyper_latents.resize(total_latent_codes);
+    result.encoded_latents.resize(total_latent_codes);
+    result.encoded_hyper_latents.resize(total_latent_codes);
 
-  const int workers = get_allocated_cores();
-  std::vector<std::thread> threads;
-  threads.reserve(workers);
-  const int64_t chunk = (total_latent_codes + workers - 1) / workers;
+    const int workers = get_allocated_cores();
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    const int64_t chunk = (total_latent_codes + workers - 1) / workers;
 
-  for (int w = 0; w < workers; ++w) {
-    int64_t start = w * chunk;
-    int64_t end   = std::min(start + chunk, total_latent_codes);
-    if (start >= end) break;
-    threads.emplace_back([&, start, end]() {
-      RansEncoder enc;
-      for (int64_t j = start; j < end; ++j) {
-        auto latent_syms = tensor_to_vector<int32_t>(cpu_q_latent.select(0, j).reshape(-1));
-        auto latent_idxs = tensor_to_vector<int32_t>(cpu_latent_indexes.select(0, j).reshape(-1));
-        auto hyper_syms  = tensor_to_vector<int32_t>(cpu_q_hyper.select(0, j).reshape(-1));
-        auto hyper_idxs  = tensor_to_vector<int32_t>(cpu_hyper_indexes.select(0, j).reshape(-1));
-        result.encoded_latents[j] = enc.encode_with_indexes(
-            latent_syms, latent_idxs, gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
-        result.encoded_hyper_latents[j] = enc.encode_with_indexes(
-            hyper_syms, hyper_idxs, vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_);
-      }
-    });
+    for (int w = 0; w < workers; ++w) {
+      int64_t start = w * chunk;
+      int64_t end   = std::min(start + chunk, total_latent_codes);
+      if (start >= end) break;
+      threads.emplace_back([&, start, end]() {
+        RansEncoder enc;
+        for (int64_t j = start; j < end; ++j) {
+          auto latent_syms = tensor_to_vector<int32_t>(cpu_q_latent.select(0, j).reshape(-1));
+          auto latent_idxs = tensor_to_vector<int32_t>(cpu_latent_indexes.select(0, j).reshape(-1));
+          auto hyper_syms  = tensor_to_vector<int32_t>(cpu_q_hyper.select(0, j).reshape(-1));
+          auto hyper_idxs  = tensor_to_vector<int32_t>(cpu_hyper_indexes.select(0, j).reshape(-1));
+          result.encoded_latents[j] = enc.encode_with_indexes(
+              latent_syms, latent_idxs, gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
+          result.encoded_hyper_latents[j] = enc.encode_with_indexes(
+              hyper_syms, hyper_idxs, vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_);
+        }
+      });
+    }
+    for (auto& t : threads) t.join();
+  } else {
+    result.encoded_latents.clear();
+    result.encoded_hyper_latents.clear();
   }
-  for (auto& t : threads) t.join();
+
 //   int64_t total = cpu_latent_indexes.size(0);
 // result.latent_indexes.resize(total);
 // for (int64_t j = 0; j < total; ++j) {
@@ -443,7 +450,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 #endif
 
     // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!  ---------------------------------------------------------
-    result.use_lbrc = true;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
+    result.use_lbrc = false;  // hard-coded later add logic for the rel eb to make this make more else and change the decine
     // hard code for the cpu
 
     if (result.use_lbrc) {

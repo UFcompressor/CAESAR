@@ -39,6 +39,7 @@ struct CompressionMetaData {
     float global_scale; // global info
     float global_offset; // global info
     int64_t pad_T; // global_info
+    bool all_filtered = false; // all data is the same 
 };
 
 
