@@ -12,7 +12,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
 
-    timeout-minutes: 90
+    timeout-minutes: 15
     runs-on: ${{ matrix.os }}
 
     steps:
