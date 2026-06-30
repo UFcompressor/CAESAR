@@ -385,11 +385,9 @@ def remove_module_prefix(state_dict):
             new_state_dict[new_key] = v
         return new_state_dict
 
-device = sys.argv[1] # Setting device (cuda or cpu for now)
-if device == 'cpu': # If GPU is not avaiable
-    device = 'cpu'
-else: 
-    device = 'cuda'    
+device = sys.argv[1].lower()
+if device not in {"cpu", "cuda", "mps", "xpu"}:
+    raise ValueError(f"Unsupported device: {device}")
 model_name =f'caesar_hyper_decompressor'
 
 model = CompressorMix(
@@ -418,6 +416,8 @@ model.entropy_model.range_coder = RangeCoder(_quantized_cdf = quantized_cdf, _cd
 os.makedirs('./exported_model/', exist_ok=True)
 with open("./exported_model/model_name.txt", "w") as f:
     f.write("caesar_v")
+with open("./exported_model/model_device.txt", "w") as f:
+    f.write(device)
 
 model.eval()
 with torch.no_grad():

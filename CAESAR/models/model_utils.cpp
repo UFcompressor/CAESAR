@@ -1,6 +1,8 @@
 #include "model_utils.h"
 #include <cstdlib>
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -151,12 +153,67 @@ int get_allocated_cores() {
     return 4;
 }
 
-std::string get_model_name() {
-    std::ifstream f(get_model_file("model_name.txt"));
-    if (!f.is_open()) {
-        throw std::runtime_error("Could not open model_name.txt");
+static std::string read_model_text_file(const std::string& filename,
+                                        const std::string& fallback = "") {
+    try {
+        std::ifstream f(get_model_file(filename));
+        std::string value;
+        std::getline(f, value);
+        value.erase(std::remove_if(value.begin(), value.end(),
+                                   [](unsigned char c) { return std::isspace(c); }),
+                    value.end());
+        if (!value.empty()) return value;
+    } catch (const std::exception&) {
+        if (fallback.empty()) throw;
     }
-    std::string name;
-    std::getline(f, name);
+    return fallback;
+}
+
+std::string get_model_name() {
+    static const std::string name = read_model_text_file("model_name.txt");
     return name;
+}
+
+std::string get_model_device() {
+    static const std::string device = read_model_text_file("model_device.txt", "cpu");
+    return device;
+}
+
+std::string detect_runtime_device() {
+#ifdef USE_CUDA
+    if (torch::cuda::is_available()) {
+#if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
+        return "rocm";
+#else
+        return "cuda";
+#endif
+    }
+#endif
+#if __has_include(<torch/mps.h>)
+    if (torch::mps::is_available()) return "mps";
+#endif
+#if __has_include(<torch/xpu.h>)
+    if (torch::xpu::is_available()) return "xpu";
+#endif
+    return "cpu";
+}
+
+torch::Device select_model_device() {
+    const std::string model_device = get_model_device();
+    if (model_device == "cpu") return torch::Device(torch::kCPU);
+#ifdef USE_CUDA
+    if ((model_device == "cuda" || model_device == "rocm") &&
+        torch::cuda::is_available()) return torch::Device(torch::kCUDA);
+#endif
+#if __has_include(<torch/mps.h>)
+    if (model_device == "mps" && torch::mps::is_available()) {
+        return torch::Device(torch::kMPS);
+    }
+#endif
+#if __has_include(<torch/xpu.h>)
+    if (model_device == "xpu" && torch::xpu::is_available()) {
+        return torch::Device(torch::kXPU);
+    }
+#endif
+    throw std::runtime_error("CAESAR model device is not available: " + model_device);
 }

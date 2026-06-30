@@ -4,7 +4,6 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
-
 namespace fs = std::filesystem;
 
 template<typename T>

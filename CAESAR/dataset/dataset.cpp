@@ -251,8 +251,8 @@ std::unordered_map<int, int> buildReverseIdMap(
 }
 
 
-BaseDataset::BaseDataset(const DatasetConfig& config) 
-    : rng_(std::random_device{}()), device_(config.device) {
+BaseDataset::BaseDataset(const DatasetConfig& config, torch::Device device)
+    : rng_(std::random_device{}()), device_(device) {
     dataset_name = config.dataset_name;
     variable_idx = config.variable_idx;
     section_range = config.section_range;
@@ -440,8 +440,8 @@ torch::Tensor BaseDataset::apply_downsampling(torch::Tensor data, int step) {
 }
 
 
-ScientificDataset::ScientificDataset(const DatasetConfig& config)
-    : BaseDataset(config)
+ScientificDataset::ScientificDataset(const DatasetConfig& config, torch::Device device)
+    : BaseDataset(config, device)
 {
     torch::Tensor data;
 

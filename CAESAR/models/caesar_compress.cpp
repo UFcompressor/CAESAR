@@ -161,6 +161,7 @@ std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
 Compressor::Compressor(torch::Device device) : device_(device) {
     load_models();
     load_probability_tables();
+    load_text_files();
 }
 
 void Compressor::load_models() {
@@ -178,11 +179,17 @@ void Compressor::load_probability_tables() {
     gs_offset_         = ModelCache::instance().get_gs_offset();
 }
 
+// todo use this for the device we can cache the rest for adios
+void Compressor::load_text_files(){
+    model_name_   = ModelCache::instance().get_model_name();
+    device_type_   =  ModelCache::instance().get_model_device();
+}
+
 CompressionResult Compressor::compress(const DatasetConfig& config,
                                         int batch_size, float rel_eb) {
   c10::InferenceMode guard;
 
-  ScientificDataset dataset(config);
+  ScientificDataset dataset(config, device_);
 
   CompressionResult result;
 
@@ -396,14 +403,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.encoded_hyper_latents.clear();
   }
 
-//   int64_t total = cpu_latent_indexes.size(0);
-// result.latent_indexes.resize(total);
-// for (int64_t j = 0; j < total; ++j) {
-//     result.latent_indexes[j] = tensor_to_vector<int32_t>(
-//         cpu_latent_indexes.select(0, j).reshape(-1));
-// }
-
-
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[0]);
@@ -533,19 +532,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
     result.gaeMetaData.uniqueVals =
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
-
-    MetaData gae_record_metaData;
-    gae_record_metaData.pcaBasis     = gae_compression_result.metaData.pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals   = gae_compression_result.metaData.uniqueVals.to(device_);
-    gae_record_metaData.quanBin      = result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec         = result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes    = result.gaeMetaData.dataBytes;
-
-    CompressedData gae_record_compressedData;
-    gae_record_compressedData.data          = result.gae_comp_data;
-    gae_record_compressedData.dataBytes     = result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
 
   } 
 

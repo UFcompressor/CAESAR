@@ -6,6 +6,12 @@
 #include <iostream>
 #include <chrono>
 #include <torch/torch.h>
+#if __has_include(<torch/mps.h>)
+#include <torch/mps.h>
+#endif
+#if __has_include(<torch/xpu.h>)
+#include <torch/xpu.h>
+#endif
 
 #ifdef USE_CUDA
     #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -59,3 +65,6 @@ std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_
 int get_allocated_cores();
 
 std::string get_model_name();
+std::string get_model_device();
+std::string detect_runtime_device();
+torch::Device select_model_device();

@@ -39,6 +39,7 @@ torch::Tensor build_indexes_tensor(const std::vector<int32_t>& size) {
 Decompressor::Decompressor(torch::Device device) : device_(device) {
   load_models();
   load_probability_tables();
+  load_text_files();
 }
 
 void Decompressor::load_models() {
@@ -54,6 +55,12 @@ void Decompressor::load_probability_tables() {
   gs_quantized_cdf_ = ModelCache::instance().get_gs_quantized_cdf();
   gs_cdf_length_ = ModelCache::instance().get_gs_cdf_length();
   gs_offset_ = ModelCache::instance().get_gs_offset();
+}
+
+// todo use this for the device we can cache the rest for adios
+void Decompressor::load_text_files(){
+    model_name_   = ModelCache::instance().get_model_name();
+    device_type_   =  ModelCache::instance().get_model_device();
 }
 
 torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,

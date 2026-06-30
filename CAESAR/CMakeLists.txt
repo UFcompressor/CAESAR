@@ -188,7 +188,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/models/pretrained")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
+    install(FILES 
+        "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_device.txt"
         DESTINATION share/caesar/models
     )
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt" CAESAR_MODEL_NAME)

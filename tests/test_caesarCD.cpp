@@ -224,7 +224,6 @@ int main() {
 
     DatasetConfig config;
     config.memory_data = raw_5d;
-    config.device = torch::Device(torch::kCPU);
     config.variable_idx = 0;
     config.n_frame = n_frame;
     config.dataset_name = "TCf48 Dataset";

@@ -1,11 +1,8 @@
 #pragma once
-#include <torch/torch.h>
 #include <memory>
 #include <mutex>
-#include <vector>
 #include "model_utils.h"
 #include "array_utils.h"
-
 class ModelCache {
 public:
 
@@ -126,6 +123,18 @@ public:
         return gs_offset_;
     }
 
+    const std::string& get_model_name() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!text_files_loaded_) load_text_files();
+    return model_name_;
+    }
+
+    const std::string& get_model_device() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!text_files_loaded_) load_text_files();
+        return model_device_;
+    }
+
 private:
     ModelCache() = default;
     ~ModelCache() = default;
@@ -139,7 +148,7 @@ private:
         );
 
     compressor_model_loaded_ = true;
-}
+    }
 
     void load_hyper_decompressor_model() {
     auto model_path = get_model_file("caesar_hyper_decompressor.pt2");
@@ -148,7 +157,7 @@ private:
         model_path.string()
     );
     hyper_decompressor_model_loaded_ = true;
-}
+    }
 
     void load_decompressor_model() {
         decompressor_model_ = std::make_unique<torch::inductor::AOTIModelPackageLoader>(
@@ -186,6 +195,20 @@ private:
         prob_tables_loaded_ = true;
     }
 
+    void load_text_files() {
+    auto read_text = [](const fs::path& p) -> std::string {
+        std::ifstream f(p);
+        if (!f.is_open())
+            throw std::runtime_error("Cannot open: " + p.string());
+        std::string s;
+        std::getline(f, s);
+        return s;
+    };
+    model_name_   = read_text(get_model_file("model_name.txt"));
+    model_device_ = read_text(get_model_file("model_device.txt"));
+    text_files_loaded_ = true;
+    }
+
     std::unique_ptr<torch::inductor::AOTIModelPackageLoader> compressor_model_;
     std::unique_ptr<torch::inductor::AOTIModelPackageLoader> hyper_decompressor_model_;
     std::unique_ptr<torch::inductor::AOTIModelPackageLoader> decompressor_model_;
@@ -197,13 +220,15 @@ private:
     std::vector<std::vector<int32_t>> gs_quantized_cdf_;
     std::vector<int32_t> gs_cdf_length_;
     std::vector<int32_t> gs_offset_;
+    std::string model_name_;
+    std::string model_device_;
 
 
     bool compressor_model_loaded_ = false;
     bool hyper_decompressor_model_loaded_ = false;
     bool decompressor_model_loaded_ = false;
     bool prob_tables_loaded_ = false;
-
+    bool text_files_loaded_ = false;
 
     std::mutex mutex_;
 };

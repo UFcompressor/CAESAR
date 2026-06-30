@@ -525,7 +525,6 @@ int compress_file(const std::string& input_file, const std::string& output_file,
 
   DatasetConfig config;
   config.memory_data = raw_5d;
-  config.device = compress_device;
   config.variable_idx = 0;
   config.n_frame = n_frame;
   config.dataset_name = "CAESAR Compression Dataset";

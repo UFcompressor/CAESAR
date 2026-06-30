@@ -35,8 +35,6 @@ std::unordered_map<int, int> buildReverseIdMap(int visibleLen, const std::vector
 struct DatasetConfig {
     std::optional<torch::Tensor> memory_data;
 
-    torch::Device device = torch::kCPU;
-    
     std::string dataset_name = "Customized Dataset";
     int n_frame;
 
@@ -59,7 +57,7 @@ struct DatasetConfig {
 
 class BaseDataset {
 public:
-    explicit BaseDataset(const DatasetConfig& config);
+    explicit BaseDataset(const DatasetConfig& config, torch::Device device = torch::kCPU);
     virtual ~BaseDataset() = default;
 
     torch::Tensor apply_augments(torch::Tensor data);
@@ -95,7 +93,7 @@ private:
 
 class ScientificDataset : public BaseDataset {
 public:
-    explicit ScientificDataset(const DatasetConfig& config);
+    explicit ScientificDataset(const DatasetConfig& config, torch::Device device = torch::kCPU);
     void clear(); 
     ~ScientificDataset();  
 

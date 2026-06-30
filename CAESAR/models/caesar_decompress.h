@@ -36,6 +36,7 @@ class Decompressor {
 
   void load_models();
   void load_probability_tables();
+  void load_text_files();
 
   torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data,
                                     int64_t batch_size, int64_t n_frame);
@@ -55,4 +56,7 @@ class Decompressor {
   std::vector<std::vector<int32_t>> gs_quantized_cdf_;
   std::vector<int32_t> gs_cdf_length_;
   std::vector<int32_t> gs_offset_;
+
+  std::string model_name_;
+  std::string device_type_;
 };
