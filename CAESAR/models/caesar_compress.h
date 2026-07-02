@@ -39,6 +39,7 @@ struct CompressionMetaData {
     float global_scale; // global info
     float global_offset; // global info
     int64_t pad_T; // global_info
+    bool all_filtered = false; // all data is the same 
 };
 
 
@@ -81,12 +82,15 @@ private:
     
     void load_models();
     void load_probability_tables();
+    void load_text_files();
     
-
     std::vector<std::vector<int32_t>> vbr_quantized_cdf_;
     std::vector<int32_t> vbr_cdf_length_;
     std::vector<int32_t> vbr_offset_;
     std::vector<std::vector<int32_t>> gs_quantized_cdf_;
     std::vector<int32_t> gs_cdf_length_;
     std::vector<int32_t> gs_offset_;
+
+    std::string model_name_;
+    std::string device_type_;
 };

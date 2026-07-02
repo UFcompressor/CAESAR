@@ -1,4 +1,5 @@
 build/
+build_zstd/
 install/
 *.o
 *.o.d
@@ -21,10 +22,9 @@ pretrained
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-
-build/ install/
-build/
-install/
+#venv
+venv
+venv_cpu
 exported_model
 build_script_atlas.sh
 pretrained

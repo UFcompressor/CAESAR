@@ -445,7 +445,9 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = sys.argv[1].lower()
+if device not in {"cpu", "cuda", "mps", "xpu"}:
+    raise ValueError(f"Unsupported device: {device}")
 model_name = f"caesar_decompressor"
 
 model = CompressorMix(
@@ -482,6 +484,8 @@ model.entropy_model.range_coder = RangeCoder(
 os.makedirs("./exported_model/", exist_ok=True)
 with open("./exported_model/model_name.txt", "w") as f:
     f.write("caesar_v")
+with open("./exported_model/model_device.txt", "w") as f:
+    f.write(device)
 
 model.eval()
 with torch.no_grad():

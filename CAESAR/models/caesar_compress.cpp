@@ -161,6 +161,7 @@ std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
 Compressor::Compressor(torch::Device device) : device_(device) {
     load_models();
     load_probability_tables();
+    load_text_files();
 }
 
 void Compressor::load_models() {
@@ -178,11 +179,17 @@ void Compressor::load_probability_tables() {
     gs_offset_         = ModelCache::instance().get_gs_offset();
 }
 
+// todo use this for the device we can cache the rest for adios
+void Compressor::load_text_files(){
+    model_name_   = ModelCache::instance().get_model_name();
+    device_type_   =  ModelCache::instance().get_model_device();
+}
+
 CompressionResult Compressor::compress(const DatasetConfig& config,
                                         int batch_size, float rel_eb) {
   c10::InferenceMode guard;
 
-  ScientificDataset dataset(config);
+  ScientificDataset dataset(config, device_);
 
   CompressionResult result;
 
@@ -243,7 +250,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::vector<torch::Tensor> all_q_hyper_latent;
   std::vector<torch::Tensor> all_hyper_indexes;
   int64_t total_latent_codes = 0;
-
+  torch::Tensor cpu_latent_indexes;
 
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
@@ -338,57 +345,63 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     }
   }
 
+  result.compressionMetaData.all_filtered = all_q_latent.empty();
 
-  torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
-  torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
-  torch::Tensor cat_q_hyper        = torch::cat(all_q_hyper_latent, 0);
-  torch::Tensor cat_hyper_indexes  = torch::cat(all_hyper_indexes, 0);
-  all_q_latent.clear();
-  all_latent_indexes.clear();
-  all_q_hyper_latent.clear();
-  all_hyper_indexes.clear();
+  if (!all_q_latent.empty()) {
+    torch::Tensor cat_q_latent       = torch::cat(all_q_latent, 0);
+    torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
+    torch::Tensor cat_q_hyper        = torch::cat(all_q_hyper_latent, 0);
+    torch::Tensor cat_hyper_indexes  = torch::cat(all_hyper_indexes, 0);
+    all_q_latent.clear();
+    all_latent_indexes.clear();
+    all_q_hyper_latent.clear();
+    all_hyper_indexes.clear();
 
-  torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
-  torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
-  torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
-  torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
+    torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
+    cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
+    torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
+    torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
 
 #ifdef USE_CUDA
-  torch::cuda::synchronize();
+    torch::cuda::synchronize();
 #endif
 
-  cat_q_latent       = torch::Tensor();
-  cat_latent_indexes = torch::Tensor();
-  cat_q_hyper        = torch::Tensor();
-  cat_hyper_indexes  = torch::Tensor();
+    cat_q_latent       = torch::Tensor();
+    cat_latent_indexes = torch::Tensor();
+    cat_q_hyper        = torch::Tensor();
+    cat_hyper_indexes  = torch::Tensor();
 
-  result.encoded_latents.resize(total_latent_codes);
-  result.encoded_hyper_latents.resize(total_latent_codes);
+    result.encoded_latents.resize(total_latent_codes);
+    result.encoded_hyper_latents.resize(total_latent_codes);
 
-  const int workers = get_allocated_cores();
-  std::vector<std::thread> threads;
-  threads.reserve(workers);
-  const int64_t chunk = (total_latent_codes + workers - 1) / workers;
+    const int workers = get_allocated_cores();
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    const int64_t chunk = (total_latent_codes + workers - 1) / workers;
 
-  for (int w = 0; w < workers; ++w) {
-    int64_t start = w * chunk;
-    int64_t end   = std::min(start + chunk, total_latent_codes);
-    if (start >= end) break;
-    threads.emplace_back([&, start, end]() {
-      RansEncoder enc;
-      for (int64_t j = start; j < end; ++j) {
-        auto latent_syms = tensor_to_vector<int32_t>(cpu_q_latent.select(0, j).reshape(-1));
-        auto latent_idxs = tensor_to_vector<int32_t>(cpu_latent_indexes.select(0, j).reshape(-1));
-        auto hyper_syms  = tensor_to_vector<int32_t>(cpu_q_hyper.select(0, j).reshape(-1));
-        auto hyper_idxs  = tensor_to_vector<int32_t>(cpu_hyper_indexes.select(0, j).reshape(-1));
-        result.encoded_latents[j] = enc.encode_with_indexes(
-            latent_syms, latent_idxs, gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
-        result.encoded_hyper_latents[j] = enc.encode_with_indexes(
-            hyper_syms, hyper_idxs, vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_);
-      }
-    });
+    for (int w = 0; w < workers; ++w) {
+      int64_t start = w * chunk;
+      int64_t end   = std::min(start + chunk, total_latent_codes);
+      if (start >= end) break;
+      threads.emplace_back([&, start, end]() {
+        RansEncoder enc;
+        for (int64_t j = start; j < end; ++j) {
+          auto latent_syms = tensor_to_vector<int32_t>(cpu_q_latent.select(0, j).reshape(-1));
+          auto latent_idxs = tensor_to_vector<int32_t>(cpu_latent_indexes.select(0, j).reshape(-1));
+          auto hyper_syms  = tensor_to_vector<int32_t>(cpu_q_hyper.select(0, j).reshape(-1));
+          auto hyper_idxs  = tensor_to_vector<int32_t>(cpu_hyper_indexes.select(0, j).reshape(-1));
+          result.encoded_latents[j] = enc.encode_with_indexes(
+              latent_syms, latent_idxs, gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
+          result.encoded_hyper_latents[j] = enc.encode_with_indexes(
+              hyper_syms, hyper_idxs, vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_);
+        }
+      });
+    }
+    for (auto& t : threads) t.join();
+  } else {
+    result.encoded_latents.clear();
+    result.encoded_hyper_latents.clear();
   }
-  for (auto& t : threads) t.join();
 
   int64_t total = cpu_latent_indexes.size(0);
   cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
@@ -397,6 +410,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         result.latent_indexes[j] = tensor_to_vector<uint8_t>(
             cpu_latent_indexes.select(0, j).reshape(-1));
     }
+
 
 
   if (!result.compressionMetaData.filtered_blocks.empty()) {
@@ -525,19 +539,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
     result.gaeMetaData.uniqueVals =
         tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
-
-    MetaData gae_record_metaData;
-    gae_record_metaData.pcaBasis     = gae_compression_result.metaData.pcaBasis.to(device_);
-    gae_record_metaData.uniqueVals   = gae_compression_result.metaData.uniqueVals.to(device_);
-    gae_record_metaData.quanBin      = result.gaeMetaData.quanBin;
-    gae_record_metaData.nVec         = result.gaeMetaData.nVec;
-    gae_record_metaData.prefixLength = result.gaeMetaData.prefixLength;
-    gae_record_metaData.dataBytes    = result.gaeMetaData.dataBytes;
-
-    CompressedData gae_record_compressedData;
-    gae_record_compressedData.data          = result.gae_comp_data;
-    gae_record_compressedData.dataBytes     = result.gaeMetaData.dataBytes;
-    gae_record_compressedData.coeffIntBytes = result.gaeMetaData.coeffIntBytes;
 
   } 
 

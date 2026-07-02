@@ -420,8 +420,10 @@ class CompressorMix(nn.Module):
 
         return q_latent, latent_indexes, q_hyper_latent, hyper_indexes, B
 
+device = sys.argv[1].lower()
+if device not in {"cpu", "cuda", "mps", "xpu"}:
+    raise ValueError(f"Unsupported device: {device}")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_name = f"caesar_compressor"
 
 
@@ -471,6 +473,8 @@ gs_offset = model.entropy_model.range_coder.gaussian._offset
 os.makedirs("./exported_model/", exist_ok=True)
 with open("./exported_model/model_name.txt", "w") as f:
     f.write("caesar_v")
+with open("./exported_model/model_device.txt", "w") as f:
+    f.write(device)
 
 quantized_cdf.detach().cpu().numpy().tofile("exported_model/vbr_quantized_cdf.bin")
 cdf_length.detach().cpu().numpy().tofile("exported_model/vbr_cdf_length.bin")

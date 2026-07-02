@@ -39,6 +39,7 @@ torch::Tensor build_indexes_tensor(const std::vector<int32_t>& size) {
 Decompressor::Decompressor(torch::Device device) : device_(device) {
   load_models();
   load_probability_tables();
+  load_text_files();
 }
 
 void Decompressor::load_models() {
@@ -54,6 +55,12 @@ void Decompressor::load_probability_tables() {
   gs_quantized_cdf_ = ModelCache::instance().get_gs_quantized_cdf();
   gs_cdf_length_ = ModelCache::instance().get_gs_cdf_length();
   gs_offset_ = ModelCache::instance().get_gs_offset();
+}
+
+// todo use this for the device we can cache the rest for adios
+void Decompressor::load_text_files(){
+    model_name_   = ModelCache::instance().get_model_name();
+    device_type_   =  ModelCache::instance().get_model_device();
 }
 
 torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
@@ -87,23 +94,29 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor offsets_tensor = torch::tensor(meta.offsets, opts);
   torch::Tensor scales_tensor = torch::tensor(meta.scales, opts);
 
-  std::vector<int32_t> flat_indexes;
-  flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
-  for (const auto& v : meta.indexes)
-    flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
+  torch::Tensor indexes_tensor;
+  if (!meta.all_filtered && !meta.indexes.empty()) {
+    std::vector<int32_t> flat_indexes;
+    flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
+    for (const auto& v : meta.indexes)
+      flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
 
-  torch::TensorOptions idx_opts_cpu =
-      torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-  torch::Tensor indexes_tensor =
-      torch::from_blob(
-          flat_indexes.data(),
-          {(long)meta.indexes.size(), (long)meta.indexes[0].size()},
-          idx_opts_cpu)
-          .clone()
-          .to(device_);
+    torch::TensorOptions idx_opts_cpu =
+        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+    indexes_tensor =
+        torch::from_blob(
+            flat_indexes.data(),
+            {(long)meta.indexes.size(), (long)meta.indexes[0].size()},
+            idx_opts_cpu)
+            .clone()
+            .to(device_);
 
-  flat_indexes.clear();
-  flat_indexes.shrink_to_fit();
+    flat_indexes.clear();
+    flat_indexes.shrink_to_fit();
+  } else {
+    indexes_tensor =
+        torch::zeros({0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
+  }
 
   if (indexes_tensor.numel() > 0) {
     int64_t rows_to_print = std::min((int64_t)3, indexes_tensor.size(0));
