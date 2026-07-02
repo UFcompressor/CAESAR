@@ -1,0 +1,169 @@
+diff --git a/CAESAR/CAESAR.cpp b/CAESAR/CAESAR.cpp
+index b3a2711..04a2ea9 100644
+--- a/CAESAR/CAESAR.cpp
++++ b/CAESAR/CAESAR.cpp
+@@ -392,9 +392,21 @@ std::vector<int64_t> parse_shape(const std::string& shape_str) {
+ }
+ 
+ torch::Device auto_select_device() {
++#ifdef USE_CUDA
+   if (torch::cuda::is_available()) {
+     return torch::Device(torch::kCUDA, 0);
+   }
++#endif
++#if __has_include(<torch/mps.h>)
++  if (torch::mps::is_available()) {
++    return torch::Device(torch::kMPS);
++  }
++#endif
++#if __has_include(<torch/xpu.h>)
++  if (torch::xpu::is_available()) {
++    return torch::Device(torch::kXPU);
++  }
++#endif
+   return torch::Device(torch::kCPU);
+ }
+ 
+@@ -411,6 +423,28 @@ torch::Device parse_device(const std::string& device_str) {
+       return torch::Device(torch::kCUDA, device_id);
+     }
+     return torch::Device(torch::kCUDA, 0);
++  } else if (device_str == "mps") {
++#if __has_include(<torch/mps.h>)
++    if (!torch::mps::is_available()) {
++      std::cerr << "Warning: MPS not available, using CPU\n";
++      return torch::Device(torch::kCPU);
++    }
++    return torch::Device(torch::kMPS);
++#else
++    std::cerr << "Warning: MPS support unavailable in this build, using CPU\n";
++    return torch::Device(torch::kCPU);
++#endif
++  } else if (device_str == "xpu") {
++#if __has_include(<torch/xpu.h>)
++    if (!torch::xpu::is_available()) {
++      std::cerr << "Warning: XPU not available, using CPU\n";
++      return torch::Device(torch::kCPU);
++    }
++    return torch::Device(torch::kXPU);
++#else
++    std::cerr << "Warning: XPU support unavailable in this build, using CPU\n";
++    return torch::Device(torch::kCPU);
++#endif
+   }
+   throw std::runtime_error("Invalid device string: " + device_str);
+ }
+diff --git a/CAESAR/models/caesar_compress.cpp b/CAESAR/models/caesar_compress.cpp
+index 394ea08..af8d015 100644
+--- a/CAESAR/models/caesar_compress.cpp
++++ b/CAESAR/models/caesar_compress.cpp
+@@ -365,6 +365,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
+ #ifdef USE_CUDA
+     torch::cuda::synchronize();
+ #endif
++#if __has_include(<torch/mps.h>)
++    if (device_.is_mps()) {
++        torch::mps::synchronize();
++    }
++#endif
+ 
+     cat_q_latent       = torch::Tensor();
+     cat_latent_indexes = torch::Tensor();
+@@ -498,20 +503,23 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
+   result.compressionMetaData.global_scale  = global_scale;
+   result.compressionMetaData.global_offset = global_offset;
+ 
+-  padded_original_tensor.sub_(global_offset).div_(global_scale);
++  padded_original_tensor = padded_original_tensor.sub(global_offset).div(global_scale);
+   torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
+ 
+-  padded_recon_tensor.sub_(global_offset).div_(global_scale);
++  padded_recon_tensor = padded_recon_tensor.sub(global_offset).div(global_scale);
+   torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
+ 
+ 
+   double quan_factor      = 2.0;
+   std::string codec_alg   = "Zstd";
+   std::pair<int, int> patch_size = {8, 8};
++std::string pca_device_str =
++    device_.is_cuda() ? "cuda" :
++    device_.is_mps()  ? "mps"  : "cpu";
+ 
+   PCACompressor pca_compressor(rel_eb, quan_factor,
+-                               device_.is_cuda() ? "cuda" : "cpu",
+-                               codec_alg, patch_size);
++                             pca_device_str,
++                             codec_alg, patch_size);
+ 
+   auto gae_compression_result = pca_compressor.compress(
+       padded_original_tensor_norm, padded_recon_tensor_norm);
+diff --git a/CAESAR/models/runGaeCuda.cpp b/CAESAR/models/runGaeCuda.cpp
+index 6222d0e..1e84e36 100644
+--- a/CAESAR/models/runGaeCuda.cpp
++++ b/CAESAR/models/runGaeCuda.cpp
+@@ -600,7 +600,9 @@ PCACompressor::PCACompressor(double nrmse ,
+     const std::string& codecAlgorithm ,
+     std::pair<int , int> patchSize)
+     : quanBin_(nrmse* quanFactor) ,
+-    device_(device.rfind("cuda", 0) == 0 ? torch::kCUDA : torch::kCPU) ,
++    device_(device.rfind("cuda", 0) == 0 ? torch::kCUDA :
++            device.rfind("mps", 0) == 0 ? torch::kMPS :
++            device.rfind("xpu", 0) == 0 ? torch::kXPU : torch::kCPU) ,
+     codecAlgorithm_(codecAlgorithm) ,
+     patchSize_(patchSize) ,
+     vectorSize_(patchSize.first* patchSize.second) ,
+@@ -924,17 +926,36 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
+     torch::Tensor indexMask = indexMaskReverse(mainData.prefixMask ,
+         mainData.maskLength ,
+         metaData.pcaBasis.size(0));
++    indexMask = indexMask.to(device_);
+ 
+-    torch::Tensor coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
++    torch::Tensor indexIndices = mainData.coeffInt.to(torch::kLong);
++    if (indexIndices.device() != device_) {
++        indexIndices = indexIndices.to(device_);
++    }
++
++    torch::Tensor coeffInt = metaData.uniqueVals;
++    if (coeffInt.device() != device_) {
++        coeffInt = coeffInt.to(device_);
++    }
++    coeffInt = coeffInt.index({ indexIndices }).to(torch::kFloat32).to(device_);
+ 
+     torch::Tensor coeff = torch::zeros(indexMask.sizes() ,
+         torch::TensorOptions().dtype(torch::kFloat32).device(device_));
+ 
+-    coeff.masked_scatter_(indexMask , coeffInt * metaData.quanBin);
++    torch::Tensor scatterValues = coeffInt * metaData.quanBin;
++    if (scatterValues.device() != device_) {
++        scatterValues = scatterValues.to(device_);
++    }
++
++    coeff.masked_scatter_(indexMask , scatterValues);
+     coeffInt = torch::Tensor();
+     indexMask = torch::Tensor();
+ 
+-    torch::Tensor pcaReconstruction = torch::matmul(coeff , metaData.pcaBasis.to(torch::kFloat32));
++    torch::Tensor pcaBasisDevice = metaData.pcaBasis.to(torch::kFloat32);
++    if (pcaBasisDevice.device() != device_) {
++        pcaBasisDevice = pcaBasisDevice.to(device_);
++    }
++    torch::Tensor pcaReconstruction = torch::matmul(coeff , pcaBasisDevice);
+     coeff = torch::Tensor();
+ 
+     reconsDevice.index_put_({ mainData.processMask } ,
+diff --git a/tests/test_caesarCD.cpp b/tests/test_caesarCD.cpp
+index 50de48e..7096703 100644
+--- a/tests/test_caesarCD.cpp
++++ b/tests/test_caesarCD.cpp
+@@ -216,8 +216,8 @@ int main() {
+ 
+     raw = torch::Tensor();
+ 
+-    torch::Device compression_device = torch::Device(torch::kCPU);
+-    torch::Device decompression_device = torch::Device(torch::kCPU);
++    torch::Device compression_device = torch::Device(torch::kMPS);
++    torch::Device decompression_device = torch::Device(torch::kMPS);
+ 
+     std::cout << "\n===== COMPRESSION =====\n";
+     Compressor compressor(compression_device);
