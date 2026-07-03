@@ -365,6 +365,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 #ifdef USE_CUDA
     torch::cuda::synchronize();
 #endif
+#if __has_include(<torch/mps.h>)
+    if (device_.is_mps()) {
+        torch::mps::synchronize();
+    }
+#endif
 
     cat_q_latent       = torch::Tensor();
     cat_latent_indexes = torch::Tensor();
@@ -494,24 +499,30 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   dataset.clear();
 
   result.gaeMetaData.padding_recon_info = padding_recon_info;
-
   result.compressionMetaData.global_scale  = global_scale;
   result.compressionMetaData.global_offset = global_offset;
 
-  padded_original_tensor.sub_(global_offset).div_(global_scale);
+  if (device_.is_mps()) {
+      padded_original_tensor = (padded_original_tensor - global_offset) / global_scale;
+      padded_recon_tensor    = (padded_recon_tensor - global_offset) / global_scale;
+  } else {
+      padded_original_tensor.sub_(global_offset).div_(global_scale);
+      padded_recon_tensor.sub_(global_offset).div_(global_scale);
+  }
+
   torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
-
-  padded_recon_tensor.sub_(global_offset).div_(global_scale);
   torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
-
 
   double quan_factor      = 2.0;
   std::string codec_alg   = "Zstd";
   std::pair<int, int> patch_size = {8, 8};
+std::string pca_device_str =
+    device_.is_cuda() ? "cuda" :
+    device_.is_mps()  ? "mps"  : "cpu";
 
   PCACompressor pca_compressor(rel_eb, quan_factor,
-                               device_.is_cuda() ? "cuda" : "cpu",
-                               codec_alg, patch_size);
+                             pca_device_str,
+                             codec_alg, patch_size);
 
   auto gae_compression_result = pca_compressor.compress(
       padded_original_tensor_norm, padded_recon_tensor_norm);

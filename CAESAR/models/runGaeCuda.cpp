@@ -600,7 +600,9 @@ PCACompressor::PCACompressor(double nrmse ,
     const std::string& codecAlgorithm ,
     std::pair<int , int> patchSize)
     : quanBin_(nrmse* quanFactor) ,
-    device_(device.rfind("cuda", 0) == 0 ? torch::kCUDA : torch::kCPU) ,
+    device_(device.rfind("cuda", 0) == 0 ? torch::kCUDA :
+            device.rfind("mps", 0) == 0 ? torch::kMPS :
+            device.rfind("xpu", 0) == 0 ? torch::kXPU : torch::kCPU) ,
     codecAlgorithm_(codecAlgorithm) ,
     patchSize_(patchSize) ,
     vectorSize_(patchSize.first* patchSize.second) ,
@@ -924,17 +926,36 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData ,
     torch::Tensor indexMask = indexMaskReverse(mainData.prefixMask ,
         mainData.maskLength ,
         metaData.pcaBasis.size(0));
+    indexMask = indexMask.to(device_);
 
-    torch::Tensor coeffInt = metaData.uniqueVals.index({ mainData.coeffInt.to(torch::kLong) });
+    torch::Tensor indexIndices = mainData.coeffInt.to(torch::kLong);
+    if (indexIndices.device() != device_) {
+        indexIndices = indexIndices.to(device_);
+    }
+
+    torch::Tensor coeffInt = metaData.uniqueVals;
+    if (coeffInt.device() != device_) {
+        coeffInt = coeffInt.to(device_);
+    }
+    coeffInt = coeffInt.index({ indexIndices }).to(torch::kFloat32).to(device_);
 
     torch::Tensor coeff = torch::zeros(indexMask.sizes() ,
         torch::TensorOptions().dtype(torch::kFloat32).device(device_));
 
-    coeff.masked_scatter_(indexMask , coeffInt * metaData.quanBin);
+    torch::Tensor scatterValues = coeffInt * metaData.quanBin;
+    if (scatterValues.device() != device_) {
+        scatterValues = scatterValues.to(device_);
+    }
+
+    coeff.masked_scatter_(indexMask , scatterValues);
     coeffInt = torch::Tensor();
     indexMask = torch::Tensor();
 
-    torch::Tensor pcaReconstruction = torch::matmul(coeff , metaData.pcaBasis.to(torch::kFloat32));
+    torch::Tensor pcaBasisDevice = metaData.pcaBasis.to(torch::kFloat32);
+    if (pcaBasisDevice.device() != device_) {
+        pcaBasisDevice = pcaBasisDevice.to(device_);
+    }
+    torch::Tensor pcaReconstruction = torch::matmul(coeff , pcaBasisDevice);
     coeff = torch::Tensor();
 
     reconsDevice.index_put_({ mainData.processMask } ,
