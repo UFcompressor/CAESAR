@@ -499,16 +499,19 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   dataset.clear();
 
   result.gaeMetaData.padding_recon_info = padding_recon_info;
-
   result.compressionMetaData.global_scale  = global_scale;
   result.compressionMetaData.global_offset = global_offset;
 
-  padded_original_tensor = padded_original_tensor.sub(global_offset).div(global_scale);
+  if (device_.is_mps()) {
+      padded_original_tensor = (padded_original_tensor - global_offset) / global_scale;
+      padded_recon_tensor    = (padded_recon_tensor - global_offset) / global_scale;
+  } else {
+      padded_original_tensor.sub_(global_offset).div_(global_scale);
+      padded_recon_tensor.sub_(global_offset).div_(global_scale);
+  }
+
   torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
-
-  padded_recon_tensor = padded_recon_tensor.sub(global_offset).div(global_scale);
   torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
-
 
   double quan_factor      = 2.0;
   std::string codec_alg   = "Zstd";
