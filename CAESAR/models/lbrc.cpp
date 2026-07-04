@@ -352,7 +352,6 @@ void compress(const torch::Tensor& original,
                                   x_mean, scale);
     });
 
-    // ---- fill metadata ----
     double sse_sum = 0.0;
     int64_t num_sum = 0;
     for (const auto& blk : blocks) {
@@ -361,7 +360,7 @@ void compress(const torch::Tensor& original,
         // (we need to thread sse out — add a temporary field approach)
         num_sum += blk.num;
     }
-    // Note: encoded_nrmse computed below after decode pass
+
     meta.x_mean  = x_mean;
     meta.scale   = scale;
     meta.shape   = {static_cast<int32_t>(S.B),
@@ -370,12 +369,9 @@ void compress(const torch::Tensor& original,
                     static_cast<int32_t>(S.H),
                     static_cast<int32_t>(S.W)};
     meta.lbrc_correction_occur = true;
-    meta.encoded_nrmse = target_nrmse; // conservative; exact value requires decode pass
+    meta.encoded_nrmse = target_nrmse; 
 }
 
-// ---------------------------------------------------------------------------
-// Public: decompress
-// ---------------------------------------------------------------------------
 torch::Tensor decompress(const torch::Tensor&          recons,
                           const LBRCMetaData&            meta,
                           const std::vector<LBRCBlock>&  blocks,
@@ -401,7 +397,7 @@ torch::Tensor decompress(const torch::Tensor&          recons,
     for (int64_t i = 0; i < N_total; ++i)
         x0n[i] = (x0_ptr[i] - x_mean) / scale;
 
-    // output tensor (float32 CPU)
+    // output tensor float32 
     torch::Tensor out = torch::empty_like(rec_c);
     float* out_ptr    = out.data_ptr<float>();
 
