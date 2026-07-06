@@ -84,7 +84,8 @@ std::pair<torch::Tensor, PaddingInfo> to_5d_and_pad(torch::Tensor& arr,
 }
 torch::Tensor restore_from_5d(torch::Tensor& padded_5d,
                               const PaddingInfo& info) {
-  torch::Tensor flat = padded_5d.flatten().contiguous();
+  torch::Device device = select_model_device();
+  torch::Tensor flat = padded_5d.flatten().contiguous().to(device);
 
   padded_5d = torch::Tensor();
 

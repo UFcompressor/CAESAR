@@ -3,8 +3,8 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
-#include <iostream>
 #include <stdexcept>
+#include "models/model_utils.h"
 /**
  * Structure to hold padding metadata for 5D tensor conversion
  */
