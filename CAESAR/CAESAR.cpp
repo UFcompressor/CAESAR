@@ -494,7 +494,9 @@ void print_usage(const char* program_name) {
   std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --force-padding          Force padding\n";
-  std::cout << "  --metrics-csv <file>     Save metrics to CSV\n\n";
+  std::cout << "  --metrics-csv <file>     Save metrics to CSV\n";
+  std::cout << "  --correction <method>    Correction method: none/gae/lbrc/nglr "
+               "(default: gae)\n\n";
   std::cout << "Decompression Options:\n";
   std::cout << "  --decompress-device <dev> Device (cpu/cuda)\n";
   std::cout << "  --verify                  Verify reconstruction\n";
