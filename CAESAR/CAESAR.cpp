@@ -378,9 +378,21 @@ std::vector<int64_t> parse_shape(const std::string& shape_str) {
 }
 
 torch::Device auto_select_device() {
+#ifdef USE_CUDA
   if (torch::cuda::is_available()) {
     return torch::Device(torch::kCUDA, 0);
   }
+#endif
+#if __has_include(<torch/mps.h>)
+  if (torch::mps::is_available()) {
+    return torch::Device(torch::kMPS);
+  }
+#endif
+#if __has_include(<torch/xpu.h>)
+  if (torch::xpu::is_available()) {
+    return torch::Device(torch::kXPU);
+  }
+#endif
   return torch::Device(torch::kCPU);
 }
 
@@ -397,6 +409,28 @@ torch::Device parse_device(const std::string& device_str) {
       return torch::Device(torch::kCUDA, device_id);
     }
     return torch::Device(torch::kCUDA, 0);
+  } else if (device_str == "mps") {
+#if __has_include(<torch/mps.h>)
+    if (!torch::mps::is_available()) {
+      std::cerr << "Warning: MPS not available, using CPU\n";
+      return torch::Device(torch::kCPU);
+    }
+    return torch::Device(torch::kMPS);
+#else
+    std::cerr << "Warning: MPS support unavailable in this build, using CPU\n";
+    return torch::Device(torch::kCPU);
+#endif
+  } else if (device_str == "xpu") {
+#if __has_include(<torch/xpu.h>)
+    if (!torch::xpu::is_available()) {
+      std::cerr << "Warning: XPU not available, using CPU\n";
+      return torch::Device(torch::kCPU);
+    }
+    return torch::Device(torch::kXPU);
+#else
+    std::cerr << "Warning: XPU support unavailable in this build, using CPU\n";
+    return torch::Device(torch::kCPU);
+#endif
   }
   throw std::runtime_error("Invalid device string: " + device_str);
 }
