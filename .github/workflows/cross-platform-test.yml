@@ -12,7 +12,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
 
-    timeout-minutes: 15
+    timeout-minutes: 25
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -265,7 +265,7 @@ jobs:
             }
           }
 
-          conda run -n compress_env python -m pip install pybind11 wheel setuptools
+          conda run -n compress_env python -m pip install --upgrade pip wheel setuptools tomli pybind11
           conda run -n compress_env python setup.py bdist_wheel --dist-dir D:\cai\dist
 
           $wheel = Get-ChildItem D:\cai\dist\compressai-*.whl | Select-Object -First 1
