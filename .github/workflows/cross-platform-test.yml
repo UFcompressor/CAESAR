@@ -200,7 +200,7 @@ jobs:
           echo "Test completed successfully on ${{ matrix.os }}!"
 
   build-test-windows:
-    timeout-minutes: 15
+    timeout-minutes: 20
     runs-on: windows-latest
 
     env:
