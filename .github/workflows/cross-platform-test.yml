@@ -200,7 +200,7 @@ jobs:
           echo "Test completed successfully on ${{ matrix.os }}!"
 
   build-test-windows:
-    timeout-minutes: 20
+    timeout-minutes: 15
     runs-on: windows-latest
 
     env:
@@ -350,34 +350,18 @@ jobs:
           cmake .. `
             -DCMAKE_PREFIX_PATH="$TORCH_PATH" `
             -DBUILD_TESTS=ON `
-            -DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_BUILD_TYPE=Release
           Pop-Location
 
       - name: Build project
         run: |
           Push-Location build
-          cmake --build . --config Debug --parallel
+          cmake --build . --config Release --parallel
           Pop-Location
 
       - name: Generate dummy test data
         run: |
           conda run -n compress_env python tests/gen_data.py build/tests/Release --filename TCf48.bin.f32
-
-      - name: List Windows build outputs
-        run: |
-          Write-Host "=== All EXE files under build/ ==="
-          Get-ChildItem -Path build -Recurse -Filter "*.exe" | ForEach-Object {
-            Write-Host $_.FullName
-          }
-
-          Write-Host "=== build/tests tree ==="
-          if (Test-Path build/tests) {
-            Get-ChildItem -Path build/tests -Recurse | ForEach-Object {
-              Write-Host $_.FullName
-            }
-          } else {
-            Write-Host "build/tests does not exist"
-          }
 
       - name: Run test_caesarCD
         run: |
