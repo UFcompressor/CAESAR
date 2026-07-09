@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
@@ -189,6 +190,15 @@ CausalNeuralLorenzoNetImpl::CausalNeuralLorenzoNetImpl(
             )
         )
     );
+
+    {
+        torch::NoGradGuard no_grad;
+        auto& final_conv = fusion->at<torch::nn::Conv3dImpl>(4);
+        final_conv.weight.zero_();
+        if (final_conv.bias.defined()) {
+            final_conv.bias.zero_();
+        }
+    }
 }
 
 torch::Tensor CausalNeuralLorenzoNetImpl::encode_recons(
@@ -895,6 +905,26 @@ std::vector<std::vector<uint8_t>> decompress_bitplanes_batch(
 #endif
 }
 
+void ensure_int64_fits_int32(
+    const torch::Tensor& values,
+    const std::string& what
+) {
+    const int64_t min_value =
+        values.min().item<int64_t>();
+    const int64_t max_value =
+        values.max().item<int64_t>();
+
+    if (min_value < std::numeric_limits<int32_t>::min() ||
+        max_value > std::numeric_limits<int32_t>::max()) {
+        throw std::overflow_error(
+            what + " does not fit int32: min=" +
+            std::to_string(min_value) +
+            " max=" +
+            std::to_string(max_value)
+        );
+    }
+}
+
 std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
     const std::vector<torch::Tensor>& deltas,
     int zstd_level
@@ -993,34 +1023,18 @@ torch::Tensor decode_delta_block_cpp(const EncodedDeltaBlock& block) {
     );
 }
 
-size_t encoded_block_payload_bytes(const EncodedDeltaBlock& block) {
-    if (block.bit_count == 0) {
-        return 0;
-    }
-
-    size_t total = 0;
+size_t encoded_block_serialized_bytes(const EncodedDeltaBlock& block) {
+    size_t total =
+        sizeof(int) +          // bit_count
+        3 * sizeof(int64_t) +  // T, H, W
+        sizeof(size_t);        // stream_count
 
     for (const auto& s : block.streams) {
+        total += sizeof(size_t);
         total += s.size();
     }
 
     return total;
-}
-
-bool all_encoded_blocks_zero_cpp(
-    const std::vector<EncodedDeltaBlock>& blocks
-) {
-    if (blocks.empty()) {
-        return false;
-    }
-
-    for (const auto& block : blocks) {
-        if (block.bit_count != 0 || !block.streams.empty()) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 NGLRBlockStream to_public_block(EncodedDeltaBlock&& encoded) {
@@ -1300,8 +1314,13 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
                 w_idx
             });
 
+        torch::Tensor d64 =
+            cur.to(torch::kInt64) - ref.to(torch::kInt64);
+
+        ensure_int64_fits_int32(d64, "NGLR delta");
+
         torch::Tensor d =
-            cur - ref;
+            d64.to(torch::kInt32);
 
         delta.index_put_(
             {torch::indexing::Slice(), t_idx, h_idx, w_idx},
@@ -1310,7 +1329,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
 
         qhat.index_put_(
             {torch::indexing::Slice(), t_idx, h_idx, w_idx},
-            ref + d
+            cur
         );
     }
 
@@ -1474,9 +1493,14 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
                 w_idx
             });
 
+        torch::Tensor q64 =
+            ref.to(torch::kInt64) + d.to(torch::kInt64);
+
+        ensure_int64_fits_int32(q64, "NGLR decoded q");
+
         qhat.index_put_(
             {torch::indexing::Slice(), t_idx, h_idx, w_idx},
-            ref + d
+            q64.to(torch::kInt32)
         );
     }
 
@@ -1597,6 +1621,7 @@ NGLRResult compress(
     result.meta = trained.meta;
 
     if (trained.base_nrmse <= target_nrmse) {
+        result.meta.nglr_correction_occur = false;
         result.meta.correction_bytes = 0;
         result.compressed.blocks.clear();
 
@@ -1684,18 +1709,13 @@ NGLRResult compress(
         std::vector<EncodedDeltaBlock> encoded_blocks =
             encode_delta_blocks_batch_cpp(deltas, result.meta.zstd_level);
 
-        if (all_encoded_blocks_zero_cpp(encoded_blocks)) {
-            // Fully zero correction batch: no per-block streams need to be serialized.
-            // Decompression treats empty correction data with correction_bytes=0 as no-op.
-        } else {
-            for (auto& encoded : encoded_blocks) {
-                total_payload_bytes +=
-                    encoded_block_payload_bytes(encoded);
+        for (auto& encoded : encoded_blocks) {
+            total_payload_bytes +=
+                encoded_block_serialized_bytes(encoded);
 
-                result.compressed.blocks.push_back(
-                    to_public_block(std::move(encoded))
-                );
-            }
+            result.compressed.blocks.push_back(
+                to_public_block(std::move(encoded))
+            );
         }
 
         i = next_i;
@@ -1712,7 +1732,8 @@ NGLRResult compress(
     result.meta.correction_bytes =
         static_cast<int64_t>(total_payload_bytes);
 
-    if (result.meta.correction_bytes > 0) {
+    if (result.meta.nglr_correction_occur &&
+        !result.compressed.blocks.empty()) {
         save_nglr_model(model);
         std::cout << "NGLR model saved: "
                   << get_nglr_model_path()

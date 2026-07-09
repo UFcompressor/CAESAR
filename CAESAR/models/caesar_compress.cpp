@@ -628,8 +628,7 @@ if (correction_method == "nglr") {
             device_
         );
 
-    if (nglr_result.meta.correction_bytes == 0 ||
-        nglr_result.compressed.blocks.empty()) {
+    if (!nglr_result.meta.nglr_correction_occur) {
         result.correction_type = CorrectionType::NONE;
         result.use_lbrc = false;
         result.use_nglr = false;

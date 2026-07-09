@@ -267,7 +267,7 @@ torch::Tensor lorenzo_delta_3d_train(const torch::Tensor& q_in) {
         }
     }
 
-    return (q - pred).to(torch::kInt32).contiguous();
+    return (q - pred).contiguous();
 }
 
 torch::Tensor q_context_3d_train(

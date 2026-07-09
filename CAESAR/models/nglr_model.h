@@ -62,7 +62,7 @@ struct NGLRMetaData {
     int hidden = 32;
     int q_hidden = 16;
     int model_blocks = 4;
-    int train_epochs = 60;
+    int train_epochs = 50;
     int zstd_level = 3;
 
     std::vector<int64_t> shape;

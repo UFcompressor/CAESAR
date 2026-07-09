@@ -23,7 +23,7 @@ struct NGLRTrainConfig {
     int q_hidden = 16;
     int model_blocks = 4;
 
-    int train_epochs = 60;
+    int train_epochs = 50;
     double lr = 5e-4;
     double weight_decay = 1e-6;
     double grad_clip = 1.0;
