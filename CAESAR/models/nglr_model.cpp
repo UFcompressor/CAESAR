@@ -36,6 +36,94 @@
 } while (0)
 #endif
 
+
+#if !defined(USE_CUDA)
+
+namespace caesar::nglr {
+namespace {
+
+[[noreturn]] void throw_nglr_cuda_required() {
+    // macOS GitHub runners are CPU-only and cannot provide CUDA/nvCOMP.
+    // Keep a lightweight portability stub there, while CUDA/nvCOMP builds
+    // compile the full NGLR implementation below for real experiments.
+    throw std::runtime_error(
+        "NGLR requires a CUDA/nvCOMP-enabled build."
+    );
+}
+
+} // namespace
+
+torch::Tensor recons_features(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+ResBlock3DImpl::ResBlock3DImpl(int64_t) {}
+
+torch::Tensor ResBlock3DImpl::forward(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+CausalNeuralLorenzoNetImpl::CausalNeuralLorenzoNetImpl(
+    int64_t,
+    int64_t,
+    int64_t
+) {}
+
+torch::Tensor CausalNeuralLorenzoNetImpl::encode_recons(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor CausalNeuralLorenzoNetImpl::forward_from_feature(
+    const torch::Tensor&,
+    const torch::Tensor&
+) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor CausalNeuralLorenzoNetImpl::forward(
+    const torch::Tensor&,
+    const torch::Tensor&
+) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor lorenzo_pred(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor lorenzo_delta(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor zigzag_encode(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor zigzag_decode(const torch::Tensor&) {
+    throw_nglr_cuda_required();
+}
+
+NGLRResult compress(
+    const torch::Tensor&,
+    const torch::Tensor&,
+    double,
+    torch::Device
+) {
+    throw_nglr_cuda_required();
+}
+
+torch::Tensor decompress(
+    const torch::Tensor&,
+    const NGLRMetaData&,
+    const NGLRCompressedData&,
+    torch::Device
+) {
+    throw_nglr_cuda_required();
+}
+
+} // namespace caesar::nglr
+
+#else
 namespace caesar::nglr {
 
 torch::Tensor recons_features(const torch::Tensor& x) {
@@ -1879,3 +1967,5 @@ torch::Tensor decompress(
 }
 
 }
+
+#endif // !defined(USE_CUDA)

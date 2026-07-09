@@ -12,6 +12,36 @@
 #include <vector>
 #include <sstream>
 
+
+#if !defined(USE_CUDA)
+
+#include <stdexcept>
+
+namespace caesar::nglr {
+
+NGLRTrainConfig default_train_config(double target_nrmse) {
+    NGLRTrainConfig cfg;
+    cfg.target_nrmse = target_nrmse;
+    return cfg;
+}
+
+NGLRTrainResult train_nglr_model(
+    const torch::Tensor&,
+    const torch::Tensor&,
+    const NGLRTrainConfig&,
+    torch::Device
+) {
+    // macOS GitHub runners are CPU-only and cannot provide CUDA/nvCOMP.
+    // Avoid compiling the heavy LibTorch autograd training implementation there;
+    // CUDA/nvCOMP builds compile the full implementation below unchanged.
+    throw std::runtime_error(
+        "NGLR training requires a CUDA/nvCOMP-enabled build."
+    );
+}
+
+} // namespace caesar::nglr
+
+#else
 namespace caesar::nglr {
 namespace {
 
@@ -656,3 +686,5 @@ best_model->eval();
 }
 
 } // namespace caesar::nglr
+
+#endif // !defined(USE_CUDA)
