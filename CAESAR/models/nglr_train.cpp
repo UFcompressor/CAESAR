@@ -15,6 +15,8 @@
 
 #if !defined(USE_CUDA)
 
+// Training NGLR also needs CUDA. For CPU-only builds, these stubs make the limitation
+// obvious and keep portability builds from spending time compiling unused GPU code.
 #include <stdexcept>
 
 namespace caesar::nglr {
@@ -25,6 +27,8 @@ NGLRTrainConfig default_train_config(double target_nrmse) {
     return cfg;
 }
 
+// Train the NGLR predictor. The predictor's job is to make residuals smaller so the
+// bitplane compressor has less information to store.
 NGLRTrainResult train_nglr_model(
     const torch::Tensor&,
     const torch::Tensor&,
@@ -263,6 +267,8 @@ std::pair<double, torch::Tensor> safe_global_quantize(
     return {step, q};
 }
 
+// Build the basic Lorenzo residual used as a training target. It is simply the current
+// q value minus what causal Lorenzo prediction would have guessed.
 torch::Tensor lorenzo_delta_3d_train(const torch::Tensor& q_in) {
     torch::Tensor q = q_in.to(torch::kCPU).to(torch::kInt64).contiguous();
 
@@ -300,6 +306,8 @@ torch::Tensor lorenzo_delta_3d_train(const torch::Tensor& q_in) {
     return (q - pred).contiguous();
 }
 
+// Create neighbor-context channels from q. These are the same kind of causal clues the
+// model will have during decompression, so training stays honest.
 torch::Tensor q_context_3d_train(
     const torch::Tensor& q_in,
     double q_scale
@@ -687,4 +695,5 @@ best_model->eval();
 
 } // namespace caesar::nglr
 
+// End of the CUDA training code. CPU-only builds use the simple stubs at the top.
 #endif // !defined(USE_CUDA)

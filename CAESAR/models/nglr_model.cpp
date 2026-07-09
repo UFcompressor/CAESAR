@@ -39,6 +39,9 @@
 
 #if !defined(USE_CUDA)
 
+// NGLR uses CUDA and nvCOMP in the real implementation. Mac GitHub runners do not
+// have those, so this small CPU-only section lets the rest of the project compile
+// while clearly saying that NGLR itself needs a CUDA build.
 namespace caesar::nglr {
 namespace {
 
@@ -53,6 +56,8 @@ namespace {
 
 } // namespace
 
+// Turn the already reconstructed values into simple neighbor features. Think of this
+// as giving the neural network a small local window of what has already been decoded.
 torch::Tensor recons_features(const torch::Tensor&) {
     throw_nglr_cuda_required();
 }
@@ -63,6 +68,8 @@ torch::Tensor ResBlock3DImpl::forward(const torch::Tensor&) {
     throw_nglr_cuda_required();
 }
 
+// This builds the neural predictor used by NGLR. It should stay close to the Python
+// model so both versions learn and predict from the same kind of information.
 CausalNeuralLorenzoNetImpl::CausalNeuralLorenzoNetImpl(
     int64_t,
     int64_t,
@@ -600,6 +607,8 @@ int compute_bit_count(const std::vector<uint32_t>& values) {
 }
 
 // Compress packed bitplanes with nvCOMP. Production builds intentionally have no CPU Zstd fallback.
+// Store integer residuals as compressed bitplanes. Even if every residual is zero, the
+// block still matters because the decoder must replay the same prediction steps.
 std::vector<std::vector<uint8_t>> compress_bitplanes_batch(
     const std::vector<std::vector<uint8_t>>& inputs,
     int zstd_level
@@ -803,6 +812,8 @@ std::vector<std::vector<uint8_t>> compress_bitplanes_batch(
 #endif
 }
 
+// Read the bitplanes back into integer residuals. This must match the writer exactly:
+/// same number of streams, same order, and same block shape.
 std::vector<std::vector<uint8_t>> decompress_bitplanes_batch(
     const std::vector<std::vector<uint8_t>>& compressed_inputs,
     size_t expected_size
@@ -993,6 +1004,8 @@ std::vector<std::vector<uint8_t>> decompress_bitplanes_batch(
 #endif
 }
 
+// The math is first done in int64 so it is hard to overflow. Before sending values to
+// the bitplane codec, we check that they really fit in int32.
 void ensure_int64_fits_int32(
     const torch::Tensor& values,
     const std::string& what
@@ -1111,6 +1124,8 @@ torch::Tensor decode_delta_block_cpp(const EncodedDeltaBlock& block) {
     );
 }
 
+// Estimate how many bytes this block will actually take on disk. We include metadata
+// here too, because tiny compressed streams can still have non-trivial headers.
 size_t encoded_block_serialized_bytes(const EncodedDeltaBlock& block) {
     size_t total =
         sizeof(int) +          // bit_count
@@ -1125,6 +1140,8 @@ size_t encoded_block_serialized_bytes(const EncodedDeltaBlock& block) {
     return total;
 }
 
+// Move an encoded block into the public format used by the rest of CAESAR. The move is
+// intentional so large compressed byte buffers are not copied.
 NGLRBlockStream to_public_block(EncodedDeltaBlock&& encoded) {
     NGLRBlockStream block;
 
@@ -1968,4 +1985,6 @@ torch::Tensor decompress(
 
 }
 
+// End of the CUDA/NGLR implementation. In CPU-only builds, the stub near the top is
+// used instead so CI can build CAESAR without CUDA or nvCOMP.
 #endif // !defined(USE_CUDA)
