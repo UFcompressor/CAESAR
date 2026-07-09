@@ -116,7 +116,7 @@ jobs:
             cmake .. \
               -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
               -DBUILD_TESTS=ON \
-              -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_BUILD_TYPE=Release \
               -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
               -DOpenMP_C_LIB_NAMES="omp" \
               -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
@@ -133,7 +133,11 @@ jobs:
         shell: bash
         run: |
           cd build
-          cmake --build . --config Debug --parallel
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cmake --build . --config Release --parallel 2
+          else
+            cmake --build . --config Debug --parallel
+          fi
 
       - name: Generate dummy test data
         shell: bash
