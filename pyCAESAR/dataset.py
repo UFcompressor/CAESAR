@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 import numpy as np
-from scipy.ndimage import zoom
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset
@@ -33,9 +32,6 @@ def center_crop(x, tshape):
     end_w = start_w + target_w
     return x[..., start_h:end_h, start_w:end_w]
 
-def downsampling_data(data, zoom_factors):
-    """Apply cubic interpolation-based downsampling or upsampling."""
-    return zoom(data, zoom_factors, order=3)  # order=3 = cubic interpolation
 
 
 def block_hw(data, block_size=(256, 256)):
