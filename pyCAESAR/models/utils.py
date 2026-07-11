@@ -59,14 +59,16 @@ def cosine_beta_schedule(timesteps, s=0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return np.clip(betas, a_min=0, a_max=0.999)
 
+
 def linear_beta_schedule(timesteps):
     scale = 1000 / timesteps
     beta_start = scale * 0.0001
     beta_end = scale * 0.02
     return np.linspace(beta_start, beta_end, timesteps)
 
+
 def noise(input, scale):
-    return input + scale*(torch.rand_like(input) - 0.5)
+    return input + scale * (torch.rand_like(input) - 0.5)
 
 
 def round_w_offset(input, loc):
@@ -74,12 +76,12 @@ def round_w_offset(input, loc):
     return diff + loc
 
 
-def quantize(x, mode='noise', offset=None):
-    if mode == 'noise':
+def quantize(x, mode="noise", offset=None):
+    if mode == "noise":
         return noise(x, 1)
-    elif mode == 'round':
+    elif mode == "round":
         return STERound.apply(x)
-    elif mode == 'dequantize':
+    elif mode == "dequantize":
         return round_w_offset(x, offset)
     else:
         raise NotImplementedError
@@ -132,9 +134,10 @@ class UpperBound(Function):
 
 
 class NormalDistribution:
-    '''
-        A normal distribution
-    '''
+    """
+    A normal distribution
+    """
+
     def __init__(self, loc, scale):
         assert loc.shape == scale.shape
         self.loc = loc
@@ -154,13 +157,13 @@ class NormalDistribution:
 
     def likelihood(self, x, min=1e-9):
         x = torch.abs(x - self.loc)
-        upper = self.std_cdf((.5 - x) / self.scale)
-        lower = self.std_cdf((-.5 - x) / self.scale)
+        upper = self.std_cdf((0.5 - x) / self.scale)
+        lower = self.std_cdf((-0.5 - x) / self.scale)
         return LowerBound.apply(upper - lower, min)
 
     def scaled_likelihood(self, x, s=1, min=1e-9):
         x = torch.abs(x - self.loc)
-        s = s * .5
+        s = s * 0.5
         upper = self.std_cdf((s - x) / self.scale)
         lower = self.std_cdf((-s - x) / self.scale)
         return LowerBound.apply(upper - lower, min)

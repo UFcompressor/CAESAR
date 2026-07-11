@@ -17,7 +17,6 @@ from pyCAESAR.models.RangeEncoding import RangeCoder
 from collections import OrderedDict
 
 
-
 def super_resolution_model(
     img_size=64, in_chans=32, out_chans=1, sr_dim="HAT", pretrain=False, sr_type="BCRN"
 ):
@@ -244,7 +243,6 @@ class Compressor(nn.Module):
             "scale": scale,
         }
         frame_bit, bpp = self.bpp(x.shape, state4bpp)
-
 
         output = self.decode(q_latent)
 
@@ -495,7 +493,7 @@ with torch.no_grad():
     )
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-       package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
+        package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
     print()
     print(f"decompress model saved to exported_model/{model_name}.pt2")
