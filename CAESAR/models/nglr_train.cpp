@@ -50,8 +50,8 @@ namespace caesar::nglr {
 namespace {
 
 constexpr int kDefaultBlockT = 60;
-constexpr int kDefaultBlockH = 128;
-constexpr int kDefaultBlockW = 128;
+constexpr int kDefaultBlockH = 120;
+constexpr int kDefaultBlockW = 120;
 
 struct ResolvedBlockConfig {
     int block_t = kDefaultBlockT;
@@ -523,6 +523,10 @@ NGLRTrainResult train_nglr_model(
     result.quant_nrmse = quant_nrmse;
     result.best_loss = 0.0;
     result.best_epoch = 0;
+    result.meta.base_nrmse = base_nrmse;
+    result.meta.quant_nrmse = quant_nrmse;
+    result.meta.best_loss = 0.0;
+    result.meta.best_epoch = 0;
 
     if (config.verbose) {
         std::cout << "NGLR skipped training: base NRMSE already within target"
@@ -689,6 +693,10 @@ best_model->eval();
     result.quant_nrmse = quant_nrmse;
     result.best_loss = best_loss;
     result.best_epoch = best_epoch;
+    result.meta.base_nrmse = base_nrmse;
+    result.meta.quant_nrmse = quant_nrmse;
+    result.meta.best_loss = best_loss;
+    result.meta.best_epoch = best_epoch;
 
     return result;
 }

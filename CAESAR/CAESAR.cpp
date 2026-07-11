@@ -178,24 +178,25 @@ file.write(reinterpret_cast<const char*>(nglr_meta.shape.data()), size * sizeof(
 file.write(reinterpret_cast<const char*>(&nglr_meta.original_bytes), sizeof(nglr_meta.original_bytes));
 file.write(reinterpret_cast<const char*>(&nglr_meta.latent_bit), sizeof(nglr_meta.latent_bit));
 file.write(reinterpret_cast<const char*>(&nglr_meta.correction_bytes), sizeof(nglr_meta.correction_bytes));
+file.write(reinterpret_cast<const char*>(&nglr_meta.base_nrmse), sizeof(nglr_meta.base_nrmse));
+file.write(reinterpret_cast<const char*>(&nglr_meta.quant_nrmse), sizeof(nglr_meta.quant_nrmse));
+file.write(reinterpret_cast<const char*>(&nglr_meta.best_loss), sizeof(nglr_meta.best_loss));
+file.write(reinterpret_cast<const char*>(&nglr_meta.best_epoch), sizeof(nglr_meta.best_epoch));
 
 // Save NGLR compressed block streams
 size = comp.nglrCompressedData.blocks.size();
 file.write(reinterpret_cast<const char*>(&size), sizeof(size));
 
 for (const auto& block : comp.nglrCompressedData.blocks) {
-  file.write(reinterpret_cast<const char*>(&block.bit_count), sizeof(block.bit_count));
-  file.write(reinterpret_cast<const char*>(&block.T), sizeof(block.T));
-  file.write(reinterpret_cast<const char*>(&block.H), sizeof(block.H));
-  file.write(reinterpret_cast<const char*>(&block.W), sizeof(block.W));
-
-  size_t stream_count = block.streams.size();
-  file.write(reinterpret_cast<const char*>(&stream_count), sizeof(stream_count));
+  // Match Python's correction stream layout:
+  // bit_count, then one length-prefixed compressed stream per bitplane.
+  uint32_t bit_count = static_cast<uint32_t>(block.bit_count);
+  file.write(reinterpret_cast<const char*>(&bit_count), sizeof(bit_count));
 
   for (const auto& stream : block.streams) {
-    size_t stream_size = stream.size();
+    uint64_t stream_size = static_cast<uint64_t>(stream.size());
     file.write(reinterpret_cast<const char*>(&stream_size), sizeof(stream_size));
-    file.write(reinterpret_cast<const char*>(stream.data()), stream_size);
+    file.write(reinterpret_cast<const char*>(stream.data()), static_cast<std::streamsize>(stream_size));
   }
 }
 
@@ -355,32 +356,28 @@ file.read(reinterpret_cast<char*>(nglr_meta.shape.data()), size * sizeof(int64_t
 file.read(reinterpret_cast<char*>(&nglr_meta.original_bytes), sizeof(nglr_meta.original_bytes));
 file.read(reinterpret_cast<char*>(&nglr_meta.latent_bit), sizeof(nglr_meta.latent_bit));
 file.read(reinterpret_cast<char*>(&nglr_meta.correction_bytes), sizeof(nglr_meta.correction_bytes));
+file.read(reinterpret_cast<char*>(&nglr_meta.base_nrmse), sizeof(nglr_meta.base_nrmse));
+file.read(reinterpret_cast<char*>(&nglr_meta.quant_nrmse), sizeof(nglr_meta.quant_nrmse));
+file.read(reinterpret_cast<char*>(&nglr_meta.best_loss), sizeof(nglr_meta.best_loss));
+file.read(reinterpret_cast<char*>(&nglr_meta.best_epoch), sizeof(nglr_meta.best_epoch));
 
 // Load NGLR compressed block streams
 file.read(reinterpret_cast<char*>(&size), sizeof(size));
 comp.nglrCompressedData.blocks.resize(size);
 
 for (auto& block : comp.nglrCompressedData.blocks) {
-  file.read(reinterpret_cast<char*>(&block.bit_count), sizeof(block.bit_count));
-  file.read(reinterpret_cast<char*>(&block.T), sizeof(block.T));
-  file.read(reinterpret_cast<char*>(&block.H), sizeof(block.H));
-  file.read(reinterpret_cast<char*>(&block.W), sizeof(block.W));
+  uint32_t bit_count = 0;
+  file.read(reinterpret_cast<char*>(&bit_count), sizeof(bit_count));
+  block.bit_count = static_cast<int>(bit_count);
 
-  size_t stream_count = 0;
-  file.read(reinterpret_cast<char*>(&stream_count), sizeof(stream_count));
-  block.streams.resize(stream_count);
+  block.streams.resize(block.bit_count);
 
   for (auto& stream : block.streams) {
-    size_t stream_size = 0;
+    uint64_t stream_size = 0;
     file.read(reinterpret_cast<char*>(&stream_size), sizeof(stream_size));
-
-    stream.resize(stream_size);
-    file.read(reinterpret_cast<char*>(stream.data()), stream_size);
+    stream.resize(static_cast<size_t>(stream_size));
+    file.read(reinterpret_cast<char*>(stream.data()), static_cast<std::streamsize>(stream_size));
   }
-}
-
-if (comp.use_nglr) {
-  comp.correction_type = CorrectionType::NGLR;
 }
 
   file.close();

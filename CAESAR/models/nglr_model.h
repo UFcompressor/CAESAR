@@ -55,14 +55,19 @@ struct NGLRMetaData {
     double q_scale = 1.0;
     double d_scale = 1.0;
 
+    double base_nrmse = 0.0;
+    double quant_nrmse = 0.0;
+    double best_loss = 0.0;
+    int best_epoch = 0;
+
     int block_t = 60;
-    int block_h = 128;
-    int block_w = 128;
+    int block_h = 120;
+    int block_w = 120;
 
     int hidden = 32;
     int q_hidden = 16;
     int model_blocks = 4;
-    int train_epochs = 50;
+    int train_epochs = 1;
     int zstd_level = 3;
 
     std::vector<int64_t> shape;

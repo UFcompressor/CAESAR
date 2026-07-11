@@ -594,7 +594,7 @@ int compute_bit_count(const std::vector<uint32_t>& values) {
     }
 
     if (max_val == 0) {
-        return 0;
+        return 1;
     }
 
     int bit_count = 0;
@@ -1127,13 +1127,13 @@ torch::Tensor decode_delta_block_cpp(const EncodedDeltaBlock& block) {
 // Estimate how many bytes this block will actually take on disk. We include metadata
 // here too, because tiny compressed streams can still have non-trivial headers.
 size_t encoded_block_serialized_bytes(const EncodedDeltaBlock& block) {
-    size_t total =
-        sizeof(int) +          // bit_count
-        3 * sizeof(int64_t) +  // T, H, W
-        sizeof(size_t);        // stream_count
+    // Match Python's correction stream layout:
+    // bit_count, then one byte stream length + payload for each bitplane.
+    // Block shape is inferred from global shape/block_t/block_h/block_w.
+    size_t total = sizeof(uint32_t);
 
     for (const auto& s : block.streams) {
-        total += sizeof(size_t);
+        total += sizeof(uint64_t);
         total += s.size();
     }
 
@@ -1154,13 +1154,16 @@ NGLRBlockStream to_public_block(EncodedDeltaBlock&& encoded) {
     return block;
 }
 
-EncodedDeltaBlock to_encoded_block(const NGLRBlockStream& block_stream) {
+EncodedDeltaBlock to_encoded_block(
+    const NGLRBlockStream& block_stream,
+    const BlockSlice& slice
+) {
     EncodedDeltaBlock encoded;
 
     encoded.bit_count = block_stream.bit_count;
-    encoded.T = block_stream.T;
-    encoded.H = block_stream.H;
-    encoded.W = block_stream.W;
+    encoded.T = slice.t1 - slice.t0;
+    encoded.H = slice.h1 - slice.h0;
+    encoded.W = slice.w1 - slice.w0;
     encoded.streams = block_stream.streams;
 
     return encoded;
@@ -1926,7 +1929,7 @@ torch::Tensor decompress(
 
         for (size_t j = i; j < next_i; ++j) {
             EncodedDeltaBlock encoded =
-                to_encoded_block(compressed.blocks[j]);
+                to_encoded_block(compressed.blocks[j], slices[j]);
 
             delta_blocks.push_back(
                 decode_delta_block_cpp(encoded)

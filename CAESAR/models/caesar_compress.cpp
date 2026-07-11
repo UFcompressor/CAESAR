@@ -569,6 +569,13 @@ if (correction_method == "gae") {
     result.gaeMetaData.GAE_correction_occur =
         gae_compression_result.metaData.GAE_correction_occur;
 
+    // Master stores padding_recon_info as part of GAE metadata, but it is only
+    // needed when GAE correction actually runs. Clear skipped-correction padding
+    // so GAE and skipped NGLR produce identical base CAESAR bytes.
+    if (!result.gaeMetaData.GAE_correction_occur) {
+        result.gaeMetaData.padding_recon_info.clear();
+    }
+
     result.gaeMetaData.quanBin =
         gae_compression_result.metaData.quanBin;
 
