@@ -13,11 +13,11 @@ import argparse
 from tqdm import tqdm
 
 import time
-import zstandard as zstd
+import zstandard as zstd # to do remove 
 import torch
 from tqdm import tqdm
 
-import nvidia.nvcomp as nvcomp
+import nvidia.nvcomp as nvcomp # to do remove 
 import cupy as cp
 
 import os
