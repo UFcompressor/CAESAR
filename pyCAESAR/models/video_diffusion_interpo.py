@@ -10,7 +10,6 @@ from pathlib import Path
 from torch.optim import Adam
 from torchvision import transforms as T, utils
 from torch.cuda.amp import autocast, GradScaler
-from PIL import Image
 
 from tqdm import tqdm
 from einops import rearrange

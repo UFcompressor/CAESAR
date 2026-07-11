@@ -69,7 +69,7 @@ grep -v "^torch" requirements.txt | \
 
 pip install --no-cache-dir -r temp_requirements.txt
 pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6 imageio==2.37.0
+pip install compressai==1.2.6
 rm temp_requirements.txt
 ```
 
@@ -92,7 +92,7 @@ grep -v "^torch" requirements.txt | \
 
 pip install -r temp_requirements.txt
 pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6 imageio==2.37.0
+pip install compressai==1.2.6 
 rm temp_requirements.txt
 ```
 
@@ -132,7 +132,7 @@ findstr /v /b "torch torchvision --extra-index-url cupy nvidia" requirements.txt
 
 pip install --no-cache-dir -r temp_requirements.txt
 pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6 imageio==2.37.0
+pip install compressai==1.2.6 
 del temp_requirements.txt
 ```
 
