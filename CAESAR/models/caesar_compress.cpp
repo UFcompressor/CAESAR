@@ -408,13 +408,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.encoded_hyper_latents.clear();
   }
 
-  int64_t total = cpu_latent_indexes.size(0);
-  cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
-    result.latent_indexes.resize(total);
-    for (int64_t j = 0; j < total; ++j) {
-        result.latent_indexes[j] = tensor_to_vector<uint8_t>(
-            cpu_latent_indexes.select(0, j).reshape(-1));
-    }
+//   int64_t total = cpu_latent_indexes.size(0);
+//   cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
+//     result.latent_indexes.resize(total);
+//     for (int64_t j = 0; j < total; ++j) {
+//         result.latent_indexes[j] = tensor_to_vector<uint8_t>(
+//             cpu_latent_indexes.select(0, j).reshape(-1));
+//     }
 
 
 

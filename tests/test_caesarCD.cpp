@@ -109,7 +109,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
   size_t total_bytes = 0;
 
   total_bytes += get_vector_data_size(result.gae_comp_data);
-  total_bytes += get_2d_vector_data_size(result.latent_indexes);
+  // total_bytes += get_2d_vector_data_size(result.latent_indexes);
 
   const auto& meta = result.compressionMetaData;
 

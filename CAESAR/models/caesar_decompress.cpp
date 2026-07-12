@@ -134,16 +134,16 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   input_shape.clear();
   input_shape.shrink_to_fit();
 
-  std::vector<torch::Tensor> row_tensors;
-  row_tensors.reserve(comp_result.latent_indexes.size());
-  for (const auto& row : comp_result.latent_indexes) {
-    auto t = torch::from_blob((void*)row.data(), {(long)row.size()}, torch::kUInt8).clone();
-    row_tensors.push_back(t.to(device_));
-  }
+//   std::vector<torch::Tensor> row_tensors;
+//   row_tensors.reserve(comp_result.latent_indexes.size());
+//   for (const auto& row : comp_result.latent_indexes) {
+//     auto t = torch::from_blob((void*)row.data(), {(long)row.size()}, torch::kUInt8).clone();
+//     row_tensors.push_back(t.to(device_));
+//   }
 
-  torch::Tensor latent_indexes_recon = torch::stack(row_tensors, 0).to(torch::kInt32);
-  row_tensors.clear();
-  row_tensors.shrink_to_fit();
+//  torch::Tensor latent_indexes_recon = torch::stack(row_tensors, 0).to(torch::kInt32);
+//   row_tensors.clear();
+//   row_tensors.shrink_to_fit();
 
   for (size_t lat_start = 0; lat_start < comp_result.encoded_latents.size();
        lat_start += (size_t)batch_size * 2) {
@@ -177,6 +177,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run(
         {decoded_hyper_latents.to(torch::kFloat32).to(device_)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
+    torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
 
     torch::Tensor decoded_latents_before_offset =
         torch::zeros({(long)cur_latents, 64, 16, 16}).to(torch::kInt32);
@@ -312,7 +313,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::pair<int, int> patch_size = {8, 8};
     double rel_eb = 1e-3;
     PCACompressor pca_compressor(rel_eb, quan_factor,
-                                 device_.is_cuda() ? "cuda" : "cpu", codec_alg,
+                                 device_.is_cuda() ? "cuda" : "cpu" , codec_alg,
                                  patch_size);
 
     MetaData gae_record_metaData;

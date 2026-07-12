@@ -184,8 +184,6 @@ private:
         int64_t s1=0; for (auto& row : vbr_quantized_cdf_) for (auto v : row) s1 += v;
         int64_t s2=0; for (auto v : vbr_cdf_length_) s2 += v;
         int64_t s3=0; for (auto v : vbr_offset_) s3 += v;
-        std::cout << "CHK0 vbr_cdf sum=" << s1 << " vbr_cdf_length sum=" << s2
-                    << " vbr_offset sum=" << s3 << std::endl;
         }
 
         // Load GS tables
@@ -204,8 +202,6 @@ private:
         int64_t s1=0; for (auto& row : gs_quantized_cdf_) for (auto v : row) s1 += v;
         int64_t s2=0; for (auto v : gs_cdf_length_) s2 += v;
         int64_t s3=0; for (auto v : gs_offset_) s3 += v;
-        std::cout << "CHK0 gs_cdf sum=" << s1 << " gs_cdf_length sum=" << s2
-                    << " gs_offset sum=" << s3 << std::endl;
         }
 
         prob_tables_loaded_ = true;
