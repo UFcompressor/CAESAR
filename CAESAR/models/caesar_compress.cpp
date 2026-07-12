@@ -1,5 +1,6 @@
 #include "caesar_compress.h"
 #include "nglr_model.h"
+#include "nglr_train.h"
 
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
@@ -627,11 +628,23 @@ if (correction_method == "nglr") {
     dataset.clear();
     recon_deblk = torch::Tensor();
 
-    caesar::nglr::NGLRResult nglr_result =
-        caesar::nglr::compress(
+    caesar::nglr::NGLRTrainConfig nglr_train_config =
+        caesar::nglr::default_train_config(static_cast<double>(rel_eb));
+
+    caesar::nglr::NGLRTrainResult nglr_trained =
+        caesar::nglr::train_nglr_model(
             original_cpu,
             recon_cpu,
-            static_cast<double>(rel_eb),
+            nglr_train_config,
+            device_
+        );
+
+    caesar::nglr::NGLRResult nglr_result =
+        caesar::nglr::encode_correction(
+            original_cpu,
+            recon_cpu,
+            nglr_trained.model,
+            nglr_trained.meta,
             device_
         );
 

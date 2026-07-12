@@ -500,6 +500,7 @@ NGLRTrainResult train_nglr_model(
     meta.q_hidden = config.q_hidden;
     meta.model_blocks = config.model_blocks;
     meta.train_epochs = config.train_epochs;
+    meta.zstd_level = config.zstd_level;
     meta.shape = shape;
     meta.original_bytes = x.numel() * x.element_size();
 

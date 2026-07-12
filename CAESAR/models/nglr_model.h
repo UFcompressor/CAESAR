@@ -79,9 +79,6 @@ struct NGLRMetaData {
 
 struct NGLRBlockStream {
     int bit_count = 0;
-    int64_t T = 0;
-    int64_t H = 0;
-    int64_t W = 0;
     std::vector<std::vector<uint8_t>> streams;
 };
 
@@ -99,10 +96,11 @@ torch::Tensor lorenzo_delta(const torch::Tensor& q);
 torch::Tensor zigzag_encode(const torch::Tensor& delta);
 torch::Tensor zigzag_decode(const torch::Tensor& zz);
 
-NGLRResult compress(
+NGLRResult encode_correction(
     const torch::Tensor& original,
     const torch::Tensor& reconstruction,
-    double target_nrmse,
+    CausalNeuralLorenzoNet model,
+    NGLRMetaData meta,
     torch::Device device
 );
 

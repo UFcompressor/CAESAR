@@ -1,5 +1,4 @@
 #include "nglr_model.h"
-#include "nglr_train.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +10,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <zstd.h>
 
 #if defined(USE_CUDA) && !defined(USE_ROCM) && !defined(__HIP_PLATFORM_AMD__)
 #include <cuda_runtime.h>
@@ -110,10 +110,11 @@ torch::Tensor zigzag_decode(const torch::Tensor&) {
     throw_nglr_cuda_required();
 }
 
-NGLRResult compress(
+NGLRResult encode_correction(
     const torch::Tensor&,
     const torch::Tensor&,
-    double,
+    CausalNeuralLorenzoNet,
+    NGLRMetaData,
     torch::Device
 ) {
     throw_nglr_cuda_required();
@@ -330,8 +331,11 @@ namespace {
 
 int get_env_int_or_default(const char* name, int default_value);
 
-// Use CAESAR-provided CUDA device when available; otherwise use CAESAR_NGLR_CUDA_DEVICE.
-torch::Device require_cuda_device(torch::Device requested) {
+torch::Device resolve_nglr_device(torch::Device requested) {
+    if (requested.is_cpu()) {
+        return torch::Device(torch::kCPU);
+    }
+
 #if defined(USE_CUDA)
     if (requested.is_cuda()) {
         return requested;
@@ -343,7 +347,7 @@ torch::Device require_cuda_device(torch::Device requested) {
     }
 #endif
 
-    throw std::runtime_error("NGLR requires a CUDA-capable build and GPU.");
+    throw std::runtime_error("NGLR requires either CPU execution or a CUDA-capable GPU.");
 }
 
 int get_env_int_or_default(const char* name, int default_value) {
@@ -609,11 +613,71 @@ int compute_bit_count(const std::vector<uint32_t>& values) {
 // Compress packed bitplanes with nvCOMP. Production builds intentionally have no CPU Zstd fallback.
 // Store integer residuals as compressed bitplanes. Even if every residual is zero, the
 // block still matters because the decoder must replay the same prediction steps.
-std::vector<std::vector<uint8_t>> compress_bitplanes_batch(
-    const std::vector<std::vector<uint8_t>>& inputs,
+std::vector<uint8_t> zstd_compress_cpu(
+    const std::vector<uint8_t>& input,
     int zstd_level
 ) {
-    (void)zstd_level;
+    const int level = std::max(1, zstd_level);
+    const size_t bound = ZSTD_compressBound(input.size());
+
+    std::vector<uint8_t> output(bound);
+    const size_t written =
+        ZSTD_compress(output.data(), output.size(), input.data(), input.size(), level);
+
+    if (ZSTD_isError(written)) {
+        throw std::runtime_error(
+            std::string("NGLR CPU zstd compress failed: ") +
+            ZSTD_getErrorName(written)
+        );
+    }
+
+    output.resize(written);
+    return output;
+}
+
+std::vector<uint8_t> zstd_decompress_cpu(
+    const std::vector<uint8_t>& input,
+    size_t expected_size
+) {
+    std::vector<uint8_t> output(expected_size);
+
+    const size_t written =
+        ZSTD_decompress(output.data(), output.size(), input.data(), input.size());
+
+    if (ZSTD_isError(written)) {
+        throw std::runtime_error(
+            std::string("NGLR CPU zstd decompress failed: ") +
+            ZSTD_getErrorName(written)
+        );
+    }
+
+    if (written != expected_size) {
+        throw std::runtime_error(
+            "NGLR CPU zstd decompress size mismatch: expected " +
+            std::to_string(expected_size) +
+            " got " +
+            std::to_string(written)
+        );
+    }
+
+    return output;
+}
+
+std::vector<std::vector<uint8_t>> compress_bitplanes_batch(
+    const std::vector<std::vector<uint8_t>>& inputs,
+    int zstd_level,
+    bool use_cpu_zstd
+) {
+    if (use_cpu_zstd) {
+        std::vector<std::vector<uint8_t>> outputs;
+        outputs.reserve(inputs.size());
+
+        for (const auto& input : inputs) {
+            outputs.push_back(zstd_compress_cpu(input, zstd_level));
+        }
+
+        return outputs;
+    }
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP) && !defined(USE_ROCM) && !defined(__HIP_PLATFORM_AMD__)
     const size_t N = inputs.size();
 
@@ -816,8 +880,20 @@ std::vector<std::vector<uint8_t>> compress_bitplanes_batch(
 /// same number of streams, same order, and same block shape.
 std::vector<std::vector<uint8_t>> decompress_bitplanes_batch(
     const std::vector<std::vector<uint8_t>>& compressed_inputs,
-    size_t expected_size
+    size_t expected_size,
+    bool use_cpu_zstd
 ) {
+    if (use_cpu_zstd) {
+        std::vector<std::vector<uint8_t>> outputs;
+        outputs.reserve(compressed_inputs.size());
+
+        for (const auto& input : compressed_inputs) {
+            outputs.push_back(zstd_decompress_cpu(input, expected_size));
+        }
+
+        return outputs;
+    }
+
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP) && !defined(USE_ROCM) && !defined(__HIP_PLATFORM_AMD__)
     const size_t N = compressed_inputs.size();
 
@@ -1028,7 +1104,8 @@ void ensure_int64_fits_int32(
 
 std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
     const std::vector<torch::Tensor>& deltas,
-    int zstd_level
+    int zstd_level,
+    bool use_cpu_zstd
 ) {
     std::vector<EncodedDeltaBlock> blocks;
     blocks.reserve(deltas.size());
@@ -1072,7 +1149,7 @@ std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
 
     if (!all_packed_bitplanes.empty()) {
         std::vector<std::vector<uint8_t>> compressed =
-            compress_bitplanes_batch(all_packed_bitplanes, zstd_level);
+            compress_bitplanes_batch(all_packed_bitplanes, zstd_level, use_cpu_zstd);
 
         for (size_t i = 0; i < blocks.size(); ++i) {
             const auto [begin, end] = stream_ranges[i];
@@ -1089,7 +1166,10 @@ std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
     return blocks;
 }
 
-torch::Tensor decode_delta_block_cpp(const EncodedDeltaBlock& block) {
+torch::Tensor decode_delta_block_cpp(
+    const EncodedDeltaBlock& block,
+    bool use_cpu_zstd
+) {
     if (block.bit_count == 0) {
         return torch::zeros(
             {block.T, block.H, block.W},
@@ -1106,7 +1186,8 @@ torch::Tensor decode_delta_block_cpp(const EncodedDeltaBlock& block) {
     std::vector<std::vector<uint8_t>> packed_streams =
         decompress_bitplanes_batch(
             block.streams,
-            packed_size
+            packed_size,
+            use_cpu_zstd
         );
 
     std::vector<uint32_t> zz_back =
@@ -1146,9 +1227,6 @@ NGLRBlockStream to_public_block(EncodedDeltaBlock&& encoded) {
     NGLRBlockStream block;
 
     block.bit_count = encoded.bit_count;
-    block.T = encoded.T;
-    block.H = encoded.H;
-    block.W = encoded.W;
     block.streams = std::move(encoded.streams);
 
     return block;
@@ -1696,17 +1774,20 @@ torch::Tensor zigzag_decode(const torch::Tensor& zz_in) {
 }
 
 // Quantize residuals, run batched NGLR correction on CUDA, and store nvCOMP bitplanes.
-NGLRResult compress(
+NGLRResult encode_correction(
     const torch::Tensor& original,
     const torch::Tensor& reconstruction,
-    double target_nrmse,
+    CausalNeuralLorenzoNet model,
+    NGLRMetaData meta,
     torch::Device device
 ) {
-    torch::Device nglr_device = require_cuda_device(device);
+    torch::Device nglr_device = resolve_nglr_device(device);
 
     std::cout << "Using NGLR correction on "
               << nglr_device
               << std::endl;
+
+    const bool use_cpu_zstd = nglr_device.is_cpu();
 
     torch::Tensor x =
         original.to(torch::kCPU).to(torch::kFloat32).contiguous();
@@ -1714,21 +1795,11 @@ NGLRResult compress(
     torch::Tensor r =
         reconstruction.to(torch::kCPU).to(torch::kFloat32).contiguous();
 
-    NGLRTrainConfig train_config =
-        default_train_config(target_nrmse);
-
-    NGLRTrainResult trained =
-        train_nglr_model(
-            x,
-            r,
-            train_config,
-            nglr_device
-        );
-
     NGLRResult result;
-    result.meta = trained.meta;
+    result.meta = std::move(meta);
 
-    if (trained.base_nrmse <= target_nrmse) {
+    if (!result.meta.nglr_correction_occur ||
+        result.meta.base_nrmse <= result.meta.target) {
         result.meta.nglr_correction_occur = false;
         result.meta.correction_bytes = 0;
         result.compressed.blocks.clear();
@@ -1743,7 +1814,6 @@ NGLRResult compress(
     result.meta.zstd_level =
         get_env_int_or_default("CAESAR_NGLR_ZSTD_LEVEL", result.meta.zstd_level);
 
-    CausalNeuralLorenzoNet model = trained.model;
     model->to(nglr_device);
     model->eval();
 
@@ -1815,7 +1885,7 @@ NGLRResult compress(
             );
 
         std::vector<EncodedDeltaBlock> encoded_blocks =
-            encode_delta_blocks_batch_cpp(deltas, result.meta.zstd_level);
+            encode_delta_blocks_batch_cpp(deltas, result.meta.zstd_level, use_cpu_zstd);
 
         for (auto& encoded : encoded_blocks) {
             total_payload_bytes +=
@@ -1865,11 +1935,13 @@ torch::Tensor decompress(
     const NGLRCompressedData& compressed,
     torch::Device device
 ) {
-    torch::Device nglr_device = require_cuda_device(device);
+    torch::Device nglr_device = resolve_nglr_device(device);
 
     std::cout << "Applying NGLR correction on "
               << nglr_device
               << std::endl;
+
+    const bool use_cpu_zstd = nglr_device.is_cpu();
 
     torch::Tensor r =
         reconstruction.to(torch::kCPU).to(torch::kFloat32).contiguous();
@@ -1932,7 +2004,7 @@ torch::Tensor decompress(
                 to_encoded_block(compressed.blocks[j], slices[j]);
 
             delta_blocks.push_back(
-                decode_delta_block_cpp(encoded)
+                decode_delta_block_cpp(encoded, use_cpu_zstd)
             );
 
             r_blocks.push_back(

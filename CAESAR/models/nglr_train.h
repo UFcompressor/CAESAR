@@ -29,6 +29,7 @@ struct NGLRTrainConfig {
     double grad_clip = 1.0;
 
     int quant_iters = 24;
+    int zstd_level = 3;
     int seed = 2026;
 
     bool verbose = true;

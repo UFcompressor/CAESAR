@@ -430,7 +430,7 @@ else if (comp_result.use_nglr &&
             recon_cpu,
             comp_result.nglrMetaData,
             comp_result.nglrCompressedData,
-            torch::kCPU
+            device_
         );
 
     torch::Tensor final_recon =
