@@ -80,6 +80,10 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                                        const CompressionResult& comp_result) {
   c10::InferenceMode guard;
 
+  // The exported CAESAR AOT model has a fixed runtime device. Use that for
+  // base reconstruction, then hand the result to correction on device_.
+  const torch::Device model_device = select_model_device();
+
   DecompressionResult result;
   result.num_samples = 0;
   result.num_batches = 0;
@@ -89,7 +93,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   auto& meta = comp_result.compressionMetaData;
 
   torch::TensorOptions opts =
-      torch::TensorOptions().dtype(torch::kFloat32).device(device_);
+      torch::TensorOptions().dtype(torch::kFloat32).device(model_device);
   torch::Tensor offsets_tensor = torch::tensor(meta.offsets, opts);
   torch::Tensor scales_tensor = torch::tensor(meta.scales, opts);
 
@@ -108,13 +112,13 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
             {(long)meta.indexes.size(), (long)meta.indexes[0].size()},
             idx_opts_cpu)
             .clone()
-            .to(device_);
+            .to(model_device);
 
     flat_indexes.clear();
     flat_indexes.shrink_to_fit();
   } else {
     indexes_tensor =
-        torch::zeros({0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
+        torch::zeros({0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(model_device));
   }
 
   if (indexes_tensor.numel() > 0) {
@@ -130,7 +134,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   }
   std::vector<int64_t> input_shape(meta.data_input_shape.begin(),
                                    meta.data_input_shape.end());
-  torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
+  torch::Tensor recon_tensor = torch::zeros(input_shape).to(model_device);
   input_shape.clear();
   input_shape.shrink_to_fit();
 
@@ -164,7 +168,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     }
 
     std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run(
-        {decoded_hyper_latents.to(torch::kFloat32).to(device_)});
+        {decoded_hyper_latents.to(torch::kFloat32).to(model_device)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
 
     torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
@@ -186,7 +190,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     }
 
     torch::Tensor q_latent_with_offset =
-        decoded_latents_before_offset.to(torch::kFloat32).to(device_) + mean;
+        decoded_latents_before_offset.to(torch::kFloat32).to(model_device) + mean;
     auto decoded_latents_sizes = q_latent_with_offset.sizes();
     std::vector<int64_t> new_shape = {-1, 2};
     new_shape.insert(new_shape.end(), decoded_latents_sizes.begin() + 1,
@@ -413,8 +417,7 @@ if (comp_result.gaeMetaData.GAE_correction_occur) {
 
     return final_recon;
 }
-else if (comp_result.use_nglr &&
-         comp_result.nglrMetaData.nglr_correction_occur) {
+else if (comp_result.use_nglr) {
     std::cout << "Applying NGLR correction" << std::endl;
 
     torch::Tensor recon_cpu =

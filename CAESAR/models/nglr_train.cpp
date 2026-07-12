@@ -108,7 +108,7 @@ std::vector<BlockSlice> block_slices(
     return out;
 }
 
-torch::Tensor slice_5d_to_3d_train(
+torch::Tensor slice_5d_to_3d(
     const torch::Tensor& x,
     const BlockSlice& sl
 ) {
@@ -236,11 +236,11 @@ std::pair<double, torch::Tensor> safe_global_quantize(
 
 // Build the basic Lorenzo residual used as a training target. It is simply the current
 // q value minus what causal Lorenzo prediction would have guessed.
-torch::Tensor lorenzo_delta_3d_train(const torch::Tensor& q_in) {
+torch::Tensor lorenzo_delta_block(const torch::Tensor& q_in) {
     torch::Tensor q = q_in.to(torch::kCPU).to(torch::kInt64).contiguous();
 
     if (q.dim() != 3) {
-        throw std::runtime_error("lorenzo_delta_3d_train expects [T,H,W]");
+        throw std::runtime_error("lorenzo_delta_block expects [T,H,W]");
     }
 
     torch::Tensor pred = torch::zeros_like(q);
@@ -275,7 +275,7 @@ torch::Tensor lorenzo_delta_3d_train(const torch::Tensor& q_in) {
 
 // Create neighbor-context channels from q. These are the same kind of causal clues the
 // model will have during decompression, so training stays honest.
-torch::Tensor q_context_3d_train(
+torch::Tensor q_context(
     const torch::Tensor& q_in,
     double q_scale
 ) {
@@ -337,8 +337,8 @@ std::pair<double, double> estimate_scales(
     int64_t n = 0;
 
     for (const BlockSlice& sl : block_slices(shape, block_t, block_h, block_w)) {
-        torch::Tensor qb = slice_5d_to_3d_train(q, sl);
-        torch::Tensor db = lorenzo_delta_3d_train(qb).to(torch::kInt64);
+        torch::Tensor qb = slice_5d_to_3d(q, sl);
+        torch::Tensor db = lorenzo_delta_block(qb).to(torch::kInt64);
 
         q_sum += qb.to(torch::kInt64).abs().sum().item<double>();
         d_sum += db.abs().sum().item<double>();
@@ -455,8 +455,6 @@ NGLRTrainResult train_nglr_model(
         );
 
     NGLRMetaData meta;
-    meta.nglr_correction_occur = true;
-    meta.target = config.target_nrmse;
     meta.mean = mean;
     meta.scale = scale;
     meta.step = step;
@@ -468,29 +466,24 @@ NGLRTrainResult train_nglr_model(
     meta.hidden = config.hidden;
     meta.q_hidden = config.q_hidden;
     meta.model_blocks = config.model_blocks;
-    meta.train_epochs = config.train_epochs;
     meta.zstd_level = config.zstd_level;
     meta.shape = shape;
-    meta.original_bytes = x.numel() * x.element_size();
 
     const double base_nrmse = zero_nrmse(x, r, scale);
     const double quant_nrmse = decoded_nrmse(x, r_norm, q, step, mean, scale);
     if (base_nrmse <= config.target_nrmse) {
-        meta.nglr_correction_occur = false;
-
         NGLRTrainResult result;
         result.meta = meta;
+        result.correction_required = false;
         result.base_nrmse = base_nrmse;
         result.quant_nrmse = quant_nrmse;
         result.best_loss = 0.0;
         result.best_epoch = 0;
-        result.meta.base_nrmse = base_nrmse;
-        result.meta.quant_nrmse = quant_nrmse;
-        result.meta.best_loss = 0.0;
-        result.meta.best_epoch = 0;
-
         if (config.verbose) {
-            std::cout << "NGLR skipped training: base NRMSE already within target"
+            std::cout << "Base NRMSE "
+                      << base_nrmse
+                      << " | Quant NRMSE "
+                      << quant_nrmse
                       << std::endl;
         }
 
@@ -501,24 +494,24 @@ NGLRTrainResult train_nglr_model(
         block_slices(meta.shape, meta.block_t, meta.block_h, meta.block_w);
 
     CausalNeuralLorenzoNet model =
-    CausalNeuralLorenzoNet(
-        config.hidden,
-        config.q_hidden,
-        config.model_blocks
-    );
+        CausalNeuralLorenzoNet(
+            config.hidden,
+            config.q_hidden,
+            config.model_blocks
+        );
 
-CausalNeuralLorenzoNet best_model =
-    CausalNeuralLorenzoNet(
-        config.hidden,
-        config.q_hidden,
-        config.model_blocks
-    );
+    CausalNeuralLorenzoNet best_model =
+        CausalNeuralLorenzoNet(
+            config.hidden,
+            config.q_hidden,
+            config.model_blocks
+        );
 
-model->to(device);
-best_model->to(device);
+    model->to(device);
+    best_model->to(device);
 
-model->train();
-best_model->eval();
+    model->train();
+    best_model->eval();
 
     torch::optim::AdamW optimizer(
         model->parameters(),
@@ -527,29 +520,23 @@ best_model->eval();
     );
 
     if (config.verbose) {
-        std::cout << "NGLR C++ training target: "
+        std::cout << "Target "
                   << config.target_nrmse
-                  << " blocks: "
+                  << " | blocks "
                   << slices.size()
-                  << " step: "
+                  << " | step "
                   << step
                   << std::endl;
 
-        std::cout << "NGLR block shape: "
-                  << meta.block_t << "x"
-                  << meta.block_h << "x"
-                  << meta.block_w
-                  << std::endl;
-
-        std::cout << "NGLR base NRMSE: "
+        std::cout << "Base NRMSE "
                   << base_nrmse
-                  << " quant NRMSE: "
+                  << " | Quant NRMSE "
                   << quant_nrmse
                   << std::endl;
 
-        std::cout << "NGLR q_scale: "
+        std::cout << "q_scale "
                   << meta.q_scale
-                  << " d_scale: "
+                  << " | d_scale "
                   << meta.d_scale
                   << std::endl;
     }
@@ -574,11 +561,11 @@ best_model->eval();
         for (size_t idx : order) {
             const BlockSlice& sl = slices[idx];
 
-            torch::Tensor qb = slice_5d_to_3d_train(q, sl);
-            torch::Tensor rb = slice_5d_to_3d_train(r_norm, sl);
+            torch::Tensor qb = slice_5d_to_3d(q, sl);
+            torch::Tensor rb = slice_5d_to_3d(r_norm, sl);
 
             torch::Tensor d =
-                lorenzo_delta_3d_train(qb).to(torch::kFloat32) /
+                lorenzo_delta_block(qb).to(torch::kFloat32) /
                 meta.d_scale;
 
             torch::Tensor r_t =
@@ -589,7 +576,7 @@ best_model->eval();
                   .contiguous();
 
             torch::Tensor c_t =
-                q_context_3d_train(qb, meta.q_scale)
+                q_context(qb, meta.q_scale)
                     .unsqueeze(0)
                     .to(device)
                     .to(torch::kFloat32)
@@ -627,19 +614,19 @@ best_model->eval();
         const double avg_remain = remain_sum / denom;
 
         if (avg_loss < best_loss) {
-    best_loss = avg_loss;
-    best_epoch = epoch;
-    copy_model_weights(model, best_model);
-}
+            best_loss = avg_loss;
+            best_epoch = epoch;
+            copy_model_weights(model, best_model);
+        }
 
         if (config.verbose) {
-            std::cout << "NGLR epoch "
+            std::cout << "Epoch "
                       << epoch
-                      << " loss "
+                      << " | Loss "
                       << avg_loss
-                      << " remain_abs "
+                      << " | RemainAbs "
                       << avg_remain
-                      << " best_epoch "
+                      << " | BestEpoch "
                       << best_epoch
                       << std::endl;
         }
@@ -650,15 +637,11 @@ best_model->eval();
     NGLRTrainResult result;
     result.model = best_model;
     result.meta = meta;
+    result.correction_required = true;
     result.base_nrmse = base_nrmse;
     result.quant_nrmse = quant_nrmse;
     result.best_loss = best_loss;
     result.best_epoch = best_epoch;
-    result.meta.base_nrmse = base_nrmse;
-    result.meta.quant_nrmse = quant_nrmse;
-    result.meta.best_loss = best_loss;
-    result.meta.best_epoch = best_epoch;
-
     return result;
 }
 

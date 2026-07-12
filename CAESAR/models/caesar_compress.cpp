@@ -190,7 +190,12 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
                                         int batch_size, float rel_eb,const std::string& correction_method) {
   c10::InferenceMode guard;
 
-  ScientificDataset dataset(config, device_);
+  // The exported CAESAR AOT model has its own device baked into the package
+  // (recorded in model_device.txt). Keep base-model tensors on that device;
+  // correction methods can still use the user-requested device_ afterward.
+  const torch::Device model_device = select_model_device();
+
+  ScientificDataset dataset(config, model_device);
 
   CompressionResult result;
 
@@ -244,7 +249,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       result.compressionMetaData.data_input_shape;
   std::vector<int64_t> input_shape(shape_i32.begin(), shape_i32.end());
   torch::Tensor recon_tensor =
-      torch::zeros(input_shape, torch::TensorOptions().device(device_));
+      torch::zeros(input_shape, torch::TensorOptions().device(model_device));
 
   std::vector<torch::Tensor> all_q_latent;
   std::vector<torch::Tensor> all_latent_indexes;
@@ -255,7 +260,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
 
-    torch::Tensor input_tensor  = sample["input"].to(device_);
+    torch::Tensor input_tensor  = sample["input"].to(model_device);
     torch::Tensor offset_tensor = sample["offset"];
     torch::Tensor scale_tensor  = sample["scale"];
     torch::Tensor index_tensor  = sample["index"];
@@ -284,13 +289,13 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
       torch::Tensor batched_input = torch::cat(batch_inputs, 0);
       torch::Tensor batched_offsets =
           torch::tensor(batch_offsets_vec,
-                        torch::TensorOptions().device(device_))
+                        torch::TensorOptions().device(model_device))
               .view({-1, 1, 1, 1, 1});
       torch::Tensor batched_scales =
           torch::tensor(batch_scales_vec,
-                        torch::TensorOptions().device(device_))
+                        torch::TensorOptions().device(model_device))
               .view({-1, 1, 1, 1, 1});
-      torch::Tensor batched_indexes = torch::cat(batch_indexes, 0).to(device_);
+      torch::Tensor batched_indexes = torch::cat(batch_indexes, 0).to(model_device);
       
       std::vector<torch::Tensor> outputs = compressor_model_->run({batched_input.to(torch::kFloat32)}); 
       torch::Tensor q_latent       = outputs[0];
@@ -639,7 +644,7 @@ if (correction_method == "nglr") {
             device_
         );
 
-    if (!nglr_trained.meta.nglr_correction_occur) {
+    if (!nglr_trained.correction_required) {
         result.correction_type = CorrectionType::NONE;
         result.use_lbrc = false;
         result.use_nglr = false;
@@ -655,7 +660,7 @@ if (correction_method == "nglr") {
             device_
         );
 
-    if (!nglr_result.meta.nglr_correction_occur) {
+    if (nglr_result.compressed.blocks.empty()) {
         result.correction_type = CorrectionType::NONE;
         result.use_lbrc = false;
         result.use_nglr = false;

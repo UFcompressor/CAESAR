@@ -252,7 +252,10 @@ torch::Device resolve_nglr_device(torch::Device requested) {
     }
 #endif
 
-    throw std::runtime_error("NGLR requires either CPU execution or a CUDA-capable GPU.");
+    // Follow GAE's device policy: allow non-CUDA Torch backends such as Apple MPS
+    // for model/tensor work, but keep the byte-stream codec off nvCOMP unless the
+    // active device is CUDA.
+    return requested;
 }
 
 int get_env_int_or_default(const char* name, int default_value) {
@@ -261,6 +264,25 @@ int get_env_int_or_default(const char* name, int default_value) {
         return default_value;
     }
     return std::stoi(value);
+}
+
+torch::Tensor reference_from_pred_bias(
+    const torch::Tensor& pred,
+    const torch::Tensor& bias_norm,
+    double delta_scale,
+    torch::Device device
+) {
+    if (device.type() == torch::kMPS) {
+        return torch::round(
+            pred.to(torch::kFloat32) +
+            bias_norm.to(torch::kFloat32) * static_cast<float>(delta_scale)
+        ).to(torch::kInt32);
+    }
+
+    return torch::round(
+        pred.to(torch::kFloat64) +
+        bias_norm.to(torch::kFloat64) * delta_scale
+    ).to(torch::kInt32);
 }
 
 std::string get_nglr_model_path() {
@@ -311,7 +333,7 @@ struct EncodedDeltaBlock {
     std::vector<std::vector<uint8_t>> streams;
 };
 
-std::vector<BlockSlice> iter_block_slices_cpp(
+std::vector<BlockSlice> iter_block_slices(
     const std::vector<int64_t>& shape,
     int64_t block_t,
     int64_t block_h,
@@ -361,7 +383,7 @@ torch::Tensor slice_5d_to_3d(const torch::Tensor& x, const BlockSlice& sl) {
 }
 
 std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>>>
-diagonal_indices_cpp(int64_t T, int64_t H, int64_t W) {
+diagonal_indices(int64_t T, int64_t H, int64_t W) {
     std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>>> out;
 
     for (int64_t s = 0; s <= T + H + W - 3; ++s) {
@@ -472,7 +494,7 @@ std::vector<uint8_t> pack_bitplane_little(
     return packed;
 }
 
-std::vector<uint32_t> unpack_bitplanes_little_cpp(
+std::vector<uint32_t> unpack_bitplanes_little(
     const std::vector<std::vector<uint8_t>>& packed_streams,
     int bit_count,
     int64_t num_values
@@ -515,7 +537,6 @@ int compute_bit_count(const std::vector<uint32_t>& values) {
     return bit_count;
 }
 
-// Compress packed bitplanes with nvCOMP. Production builds intentionally have no CPU Zstd fallback.
 // Store integer residuals as compressed bitplanes. Even if every residual is zero, the
 // block still matters because the decoder must replay the same prediction steps.
 std::vector<uint8_t> zstd_compress_cpu(
@@ -1007,7 +1028,7 @@ void ensure_int64_fits_int32(
     }
 }
 
-std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
+std::vector<EncodedDeltaBlock> encode_delta_blocks_batch(
     const std::vector<torch::Tensor>& deltas,
     int zstd_level,
     bool use_cpu_zstd
@@ -1071,7 +1092,7 @@ std::vector<EncodedDeltaBlock> encode_delta_blocks_batch_cpp(
     return blocks;
 }
 
-torch::Tensor decode_delta_block_cpp(
+torch::Tensor decode_delta_block(
     const EncodedDeltaBlock& block,
     bool use_cpu_zstd
 ) {
@@ -1096,7 +1117,7 @@ torch::Tensor decode_delta_block_cpp(
         );
 
     std::vector<uint32_t> zz_back =
-        unpack_bitplanes_little_cpp(
+        unpack_bitplanes_little(
             packed_streams,
             block.bit_count,
             num_values
@@ -1108,22 +1129,6 @@ torch::Tensor decode_delta_block_cpp(
         block.H,
         block.W
     );
-}
-
-// Estimate how many bytes this block will actually take on disk. We include metadata
-// here too, because tiny compressed streams can still have non-trivial headers.
-size_t encoded_block_serialized_bytes(const EncodedDeltaBlock& block) {
-    // Match Python's correction stream layout:
-    // bit_count, then one byte stream length + payload for each bitplane.
-    // Block shape is inferred from global shape/block_t/block_h/block_w.
-    size_t total = sizeof(uint32_t);
-
-    for (const auto& s : block.streams) {
-        total += sizeof(uint64_t);
-        total += s.size();
-    }
-
-    return total;
 }
 
 // Move an encoded block into the public format used by the rest of CAESAR. The move is
@@ -1158,24 +1163,24 @@ struct BlockShape {
     int64_t W = 0;
 };
 
-BlockShape block_shape_from_slice_cpp(const BlockSlice& sl) {
+BlockShape block_shape_from_slice(const BlockSlice& sl) {
     return {sl.t1 - sl.t0, sl.h1 - sl.h0, sl.w1 - sl.w0};
 }
 
-bool same_block_shape_cpp(const BlockShape& a, const BlockShape& b) {
+bool same_block_shape(const BlockShape& a, const BlockShape& b) {
     return a.T == b.T && a.H == b.H && a.W == b.W;
 }
 
-size_t same_shape_batch_end_cpp(
+size_t same_shape_batch_end(
     const std::vector<BlockSlice>& slices,
     size_t start,
     size_t max_batch
 ) {
-    const BlockShape first = block_shape_from_slice_cpp(slices[start]);
+    const BlockShape first = block_shape_from_slice(slices[start]);
     size_t end = start + 1;
 
     while (end < slices.size() && end - start < max_batch) {
-        if (!same_block_shape_cpp(first, block_shape_from_slice_cpp(slices[end]))) {
+        if (!same_block_shape(first, block_shape_from_slice(slices[end]))) {
             break;
         }
         ++end;
@@ -1224,7 +1229,7 @@ torch::Tensor gather_qhat_context_value(
     return out;
 }
 
-std::pair<torch::Tensor, torch::Tensor> torch_lorenzo_context_batched_cpp(
+std::pair<torch::Tensor, torch::Tensor> torch_lorenzo_context(
     const torch::Tensor& qhat,
     const torch::Tensor& t_idx,
     const torch::Tensor& h_idx,
@@ -1273,7 +1278,7 @@ std::pair<torch::Tensor, torch::Tensor> torch_lorenzo_context_batched_cpp(
 }
 
 // Batched causal NGLR encode. Blocks with the same shape are processed together on CUDA.
-std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
+std::vector<torch::Tensor> strict_encode_delta_blocks(
     const std::vector<torch::Tensor>& q_blocks,
     const std::vector<torch::Tensor>& r_blocks,
     CausalNeuralLorenzoNet model,
@@ -1324,7 +1329,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
     const int64_t ch = rf.size(1);
 
     auto diagonals =
-        diagonal_indices_cpp(T, H, W);
+        diagonal_indices(T, H, W);
 
     for (const auto& diag : diagonals) {
         const auto& ts = std::get<0>(diag);
@@ -1356,7 +1361,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
             ).clone().to(device);
 
         auto ctx_pred =
-            torch_lorenzo_context_batched_cpp(
+            torch_lorenzo_context(
                 qhat,
                 t_idx,
                 h_idx,
@@ -1384,7 +1389,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
             .contiguous()
             .view({nb * n, ch, 1, 1, 1});
 
-        torch::Tensor bias =
+        torch::Tensor bias_norm =
             model->forward_from_feature(rf_sel, qctx)
                 .reshape({nb, n})
                 .to(device)
@@ -1392,10 +1397,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
                 .contiguous();
 
         torch::Tensor ref =
-            torch::round(
-                pred.to(torch::kFloat64) +
-                bias.to(torch::kFloat64) * meta.d_scale
-            ).to(torch::kInt32);
+            reference_from_pred_bias(pred, bias_norm, meta.d_scale, device);
 
         torch::Tensor cur =
             q_ref.index({
@@ -1455,7 +1457,7 @@ std::vector<torch::Tensor> strict_encode_delta_blocks_torch_gpu_cpp(
 }
 
 // Batched causal NGLR decode mirrors the encode order and reconstructs qhat on CUDA.
-std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
+std::vector<torch::Tensor> strict_decode_delta_blocks(
     const std::vector<torch::Tensor>& delta_blocks,
     const std::vector<torch::Tensor>& r_blocks,
     CausalNeuralLorenzoNet model,
@@ -1503,7 +1505,7 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
     const int64_t ch = rf.size(1);
 
     auto diagonals =
-        diagonal_indices_cpp(T, H, W);
+        diagonal_indices(T, H, W);
 
     for (const auto& diag : diagonals) {
         const auto& ts = std::get<0>(diag);
@@ -1535,7 +1537,7 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
             ).clone().to(device);
 
         auto ctx_pred =
-            torch_lorenzo_context_batched_cpp(
+            torch_lorenzo_context(
                 qhat,
                 t_idx,
                 h_idx,
@@ -1563,7 +1565,7 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
             .contiguous()
             .view({nb * n, ch, 1, 1, 1});
 
-        torch::Tensor bias =
+        torch::Tensor bias_norm =
             model->forward_from_feature(rf_sel, qctx)
                 .reshape({nb, n})
                 .to(device)
@@ -1571,10 +1573,7 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
                 .contiguous();
 
         torch::Tensor ref =
-            torch::round(
-                pred.to(torch::kFloat64) +
-                bias.to(torch::kFloat64) * meta.d_scale
-            ).to(torch::kInt32);
+            reference_from_pred_bias(pred, bias_norm, meta.d_scale, device);
 
         torch::Tensor d =
             deltas.index({
@@ -1609,6 +1608,181 @@ std::vector<torch::Tensor> strict_decode_delta_blocks_torch_gpu_cpp(
     return out;
 }
 
+}
+
+void save_metadata(
+    std::ostream& out,
+    const NGLRMetaData& meta,
+    const NGLRCompressedData& compressed
+) {
+    out.write(reinterpret_cast<const char*>(&meta.mean), sizeof(meta.mean));
+    out.write(reinterpret_cast<const char*>(&meta.scale), sizeof(meta.scale));
+    out.write(reinterpret_cast<const char*>(&meta.step), sizeof(meta.step));
+    out.write(reinterpret_cast<const char*>(&meta.q_scale), sizeof(meta.q_scale));
+    out.write(reinterpret_cast<const char*>(&meta.d_scale), sizeof(meta.d_scale));
+
+    out.write(reinterpret_cast<const char*>(&meta.block_t), sizeof(meta.block_t));
+    out.write(reinterpret_cast<const char*>(&meta.block_h), sizeof(meta.block_h));
+    out.write(reinterpret_cast<const char*>(&meta.block_w), sizeof(meta.block_w));
+    out.write(reinterpret_cast<const char*>(&meta.hidden), sizeof(meta.hidden));
+    out.write(reinterpret_cast<const char*>(&meta.q_hidden), sizeof(meta.q_hidden));
+    out.write(reinterpret_cast<const char*>(&meta.model_blocks), sizeof(meta.model_blocks));
+
+    size_t size = meta.shape.size();
+    out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+    out.write(
+        reinterpret_cast<const char*>(meta.shape.data()),
+        static_cast<std::streamsize>(size * sizeof(int64_t))
+    );
+
+    size = compressed.blocks.size();
+    out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    for (const auto& block : compressed.blocks) {
+        uint32_t bit_count = static_cast<uint32_t>(block.bit_count);
+        out.write(reinterpret_cast<const char*>(&bit_count), sizeof(bit_count));
+
+        for (const auto& stream : block.streams) {
+            uint64_t stream_size = static_cast<uint64_t>(stream.size());
+            out.write(reinterpret_cast<const char*>(&stream_size), sizeof(stream_size));
+            out.write(
+                reinterpret_cast<const char*>(stream.data()),
+                static_cast<std::streamsize>(stream_size)
+            );
+        }
+    }
+}
+
+void load_metadata(
+    std::istream& in,
+    NGLRMetaData& meta,
+    NGLRCompressedData& compressed
+) {
+    size_t size = 0;
+    const std::streampos meta_start = in.tellg();
+
+    auto read_clean_meta = [&]() {
+        in.read(reinterpret_cast<char*>(&meta.mean), sizeof(meta.mean));
+        in.read(reinterpret_cast<char*>(&meta.scale), sizeof(meta.scale));
+        in.read(reinterpret_cast<char*>(&meta.step), sizeof(meta.step));
+        in.read(reinterpret_cast<char*>(&meta.q_scale), sizeof(meta.q_scale));
+        in.read(reinterpret_cast<char*>(&meta.d_scale), sizeof(meta.d_scale));
+
+        in.read(reinterpret_cast<char*>(&meta.block_t), sizeof(meta.block_t));
+        in.read(reinterpret_cast<char*>(&meta.block_h), sizeof(meta.block_h));
+        in.read(reinterpret_cast<char*>(&meta.block_w), sizeof(meta.block_w));
+        in.read(reinterpret_cast<char*>(&meta.hidden), sizeof(meta.hidden));
+        in.read(reinterpret_cast<char*>(&meta.q_hidden), sizeof(meta.q_hidden));
+        in.read(reinterpret_cast<char*>(&meta.model_blocks), sizeof(meta.model_blocks));
+
+        in.read(reinterpret_cast<char*>(&size), sizeof(size));
+        if (size > 8) {
+            in.setstate(std::ios::failbit);
+            return;
+        }
+
+        meta.shape.resize(size);
+        in.read(
+            reinterpret_cast<char*>(meta.shape.data()),
+            static_cast<std::streamsize>(size * sizeof(int64_t))
+        );
+    };
+
+    read_clean_meta();
+
+    const bool clean_meta_ok =
+        in.good() &&
+        meta.scale > 0.0 &&
+        meta.block_t > 0 &&
+        meta.block_h > 0 &&
+        meta.block_w > 0 &&
+        meta.hidden > 0 &&
+        meta.q_hidden > 0 &&
+        meta.model_blocks > 0 &&
+        !meta.shape.empty() &&
+        meta.shape.size() <= 8;
+
+    if (!clean_meta_ok) {
+        in.clear();
+        in.seekg(meta_start);
+
+        bool old_correction_occur = false;
+        double old_target = 0.0;
+        double old_base_nrmse = 0.0;
+        double old_quant_nrmse = 0.0;
+        double old_best_loss = 0.0;
+        int old_best_epoch = 0;
+        int old_train_epochs = 0;
+        int old_zstd_level = 0;
+        int64_t old_original_bytes = 0;
+        int64_t old_latent_bit = 0;
+        int64_t old_correction_bytes = 0;
+
+        in.read(reinterpret_cast<char*>(&old_correction_occur), sizeof(old_correction_occur));
+        in.read(reinterpret_cast<char*>(&old_target), sizeof(old_target));
+        in.read(reinterpret_cast<char*>(&meta.mean), sizeof(meta.mean));
+        in.read(reinterpret_cast<char*>(&meta.scale), sizeof(meta.scale));
+        in.read(reinterpret_cast<char*>(&meta.step), sizeof(meta.step));
+        in.read(reinterpret_cast<char*>(&meta.q_scale), sizeof(meta.q_scale));
+        in.read(reinterpret_cast<char*>(&meta.d_scale), sizeof(meta.d_scale));
+
+        in.read(reinterpret_cast<char*>(&meta.block_t), sizeof(meta.block_t));
+        in.read(reinterpret_cast<char*>(&meta.block_h), sizeof(meta.block_h));
+        in.read(reinterpret_cast<char*>(&meta.block_w), sizeof(meta.block_w));
+        in.read(reinterpret_cast<char*>(&meta.hidden), sizeof(meta.hidden));
+        in.read(reinterpret_cast<char*>(&meta.q_hidden), sizeof(meta.q_hidden));
+        in.read(reinterpret_cast<char*>(&meta.model_blocks), sizeof(meta.model_blocks));
+        in.read(reinterpret_cast<char*>(&old_train_epochs), sizeof(old_train_epochs));
+        in.read(reinterpret_cast<char*>(&old_zstd_level), sizeof(old_zstd_level));
+
+        in.read(reinterpret_cast<char*>(&size), sizeof(size));
+        meta.shape.resize(size);
+        in.read(
+            reinterpret_cast<char*>(meta.shape.data()),
+            static_cast<std::streamsize>(size * sizeof(int64_t))
+        );
+
+        in.read(reinterpret_cast<char*>(&old_original_bytes), sizeof(old_original_bytes));
+        in.read(reinterpret_cast<char*>(&old_latent_bit), sizeof(old_latent_bit));
+        in.read(reinterpret_cast<char*>(&old_correction_bytes), sizeof(old_correction_bytes));
+        in.read(reinterpret_cast<char*>(&old_base_nrmse), sizeof(old_base_nrmse));
+        in.read(reinterpret_cast<char*>(&old_quant_nrmse), sizeof(old_quant_nrmse));
+        in.read(reinterpret_cast<char*>(&old_best_loss), sizeof(old_best_loss));
+        in.read(reinterpret_cast<char*>(&old_best_epoch), sizeof(old_best_epoch));
+
+        (void)old_correction_occur;
+        (void)old_target;
+        (void)old_base_nrmse;
+        (void)old_quant_nrmse;
+        (void)old_best_loss;
+        (void)old_best_epoch;
+        (void)old_train_epochs;
+        (void)old_zstd_level;
+        (void)old_original_bytes;
+        (void)old_latent_bit;
+        (void)old_correction_bytes;
+    }
+
+    in.read(reinterpret_cast<char*>(&size), sizeof(size));
+    compressed.blocks.resize(size);
+
+    for (auto& block : compressed.blocks) {
+        uint32_t bit_count = 0;
+        in.read(reinterpret_cast<char*>(&bit_count), sizeof(bit_count));
+        block.bit_count = static_cast<int>(bit_count);
+
+        block.streams.resize(block.bit_count);
+
+        for (auto& stream : block.streams) {
+            uint64_t stream_size = 0;
+            in.read(reinterpret_cast<char*>(&stream_size), sizeof(stream_size));
+            stream.resize(static_cast<size_t>(stream_size));
+            in.read(
+                reinterpret_cast<char*>(stream.data()),
+                static_cast<std::streamsize>(stream_size)
+            );
+        }
+    }
 }
 
 torch::Tensor lorenzo_pred(const torch::Tensor& q_in) {
@@ -1678,7 +1852,7 @@ torch::Tensor zigzag_decode(const torch::Tensor& zz_in) {
     return torch::where(even, pos, neg).to(torch::kInt32);
 }
 
-// Quantize residuals, run batched NGLR correction on CUDA, and store nvCOMP bitplanes.
+// Quantize residuals, run causal NGLR correction, and store compressed bitplanes.
 NGLRResult encode_correction(
     const torch::Tensor& original,
     const torch::Tensor& reconstruction,
@@ -1687,12 +1861,7 @@ NGLRResult encode_correction(
     torch::Device device
 ) {
     torch::Device nglr_device = resolve_nglr_device(device);
-
-    std::cout << "Using NGLR correction on "
-              << nglr_device
-              << std::endl;
-
-    const bool use_cpu_zstd = nglr_device.is_cpu();
+    const bool use_zstd_cpu = !nglr_device.is_cuda();
 
     torch::Tensor x =
         original.to(torch::kCPU).to(torch::kFloat32).contiguous();
@@ -1703,19 +1872,6 @@ NGLRResult encode_correction(
     NGLRResult result;
     result.meta = std::move(meta);
 
-    if (!result.meta.nglr_correction_occur ||
-        result.meta.base_nrmse <= result.meta.target) {
-        result.meta.nglr_correction_occur = false;
-        result.meta.correction_bytes = 0;
-        result.compressed.blocks.clear();
-
-        std::cout << "NGLR correction skipped: base reconstruction already within target"
-                  << std::endl;
-        std::cout << "NGLR payload bytes: 0" << std::endl;
-
-        return result;
-    }
-
     result.meta.zstd_level =
         get_env_int_or_default("CAESAR_NGLR_ZSTD_LEVEL", result.meta.zstd_level);
 
@@ -1723,21 +1879,15 @@ NGLRResult encode_correction(
     model->eval();
 
     std::vector<BlockSlice> slices =
-        iter_block_slices_cpp(
+        iter_block_slices(
             result.meta.shape,
             result.meta.block_t,
             result.meta.block_h,
             result.meta.block_w
         );
 
-    std::cout << "NGLR total blocks: "
-              << slices.size()
-              << std::endl;
-
     const size_t batch_blocks =
         static_cast<size_t>(get_env_int_or_default("CAESAR_NGLR_BATCH_BLOCKS", 32));
-
-    size_t total_payload_bytes = 0;
 
     result.compressed.blocks.clear();
     result.compressed.blocks.reserve(slices.size());
@@ -1745,7 +1895,7 @@ NGLRResult encode_correction(
     size_t i = 0;
     while (i < slices.size()) {
         const size_t next_i =
-            same_shape_batch_end_cpp(
+            same_shape_batch_end(
                 slices,
                 i,
                 batch_blocks
@@ -1781,7 +1931,7 @@ NGLRResult encode_correction(
             r_blocks.push_back(r_block_norm.contiguous());
         }
         std::vector<torch::Tensor> deltas =
-            strict_encode_delta_blocks_torch_gpu_cpp(
+            strict_encode_delta_blocks(
                 q_blocks,
                 r_blocks,
                 model,
@@ -1790,12 +1940,9 @@ NGLRResult encode_correction(
             );
 
         std::vector<EncodedDeltaBlock> encoded_blocks =
-            encode_delta_blocks_batch_cpp(deltas, result.meta.zstd_level, use_cpu_zstd);
+            encode_delta_blocks_batch(deltas, result.meta.zstd_level, use_zstd_cpu);
 
         for (auto& encoded : encoded_blocks) {
-            total_payload_bytes +=
-                encoded_block_serialized_bytes(encoded);
-
             result.compressed.blocks.push_back(
                 to_public_block(std::move(encoded))
             );
@@ -1803,37 +1950,16 @@ NGLRResult encode_correction(
 
         i = next_i;
 
-        if (i % 100 == 0 || i == slices.size()) {
-            std::cout << "NGLR encoded blocks: "
-                      << i
-                      << " / "
-                      << slices.size()
-                      << std::endl;
-        }
     }
 
-    result.meta.correction_bytes =
-        static_cast<int64_t>(total_payload_bytes);
-
-    if (result.meta.nglr_correction_occur &&
-        !result.compressed.blocks.empty()) {
+    if (!result.compressed.blocks.empty()) {
         save_nglr_model(model);
-        std::cout << "NGLR model saved: "
-                  << get_nglr_model_path()
-                  << std::endl;
     }
 
-    std::cout << "NGLR blocks encoded: "
-              << result.compressed.blocks.size()
-              << std::endl;
-
-    std::cout << "NGLR payload bytes: "
-              << result.meta.correction_bytes
-              << std::endl;
     return result;
 }
 
-// Decode nvCOMP bitplanes, run batched NGLR reconstruction on CUDA, and apply correction.
+// Decode compressed bitplanes, replay causal NGLR reconstruction, and apply correction.
 torch::Tensor decompress(
     const torch::Tensor& reconstruction,
     const NGLRMetaData& meta,
@@ -1841,12 +1967,7 @@ torch::Tensor decompress(
     torch::Device device
 ) {
     torch::Device nglr_device = resolve_nglr_device(device);
-
-    std::cout << "Applying NGLR correction on "
-              << nglr_device
-              << std::endl;
-
-    const bool use_cpu_zstd = nglr_device.is_cpu();
+    const bool use_zstd_cpu = !nglr_device.is_cuda();
 
     torch::Tensor r =
         reconstruction.to(torch::kCPU).to(torch::kFloat32).contiguous();
@@ -1857,7 +1978,7 @@ torch::Tensor decompress(
     torch::Tensor corrected =
         r.clone();
 
-    if (compressed.blocks.empty() && meta.correction_bytes == 0) {
+    if (compressed.blocks.empty()) {
         return corrected.to(device);
     }
 
@@ -1865,7 +1986,7 @@ torch::Tensor decompress(
         load_nglr_model(meta, nglr_device);
 
     std::vector<BlockSlice> slices =
-        iter_block_slices_cpp(
+        iter_block_slices(
             meta.shape,
             meta.block_t,
             meta.block_h,
@@ -1881,10 +2002,6 @@ torch::Tensor decompress(
         );
     }
 
-    std::cout << "NGLR decoding blocks: "
-              << compressed.blocks.size()
-              << std::endl;
-
     const size_t batch_blocks =
         static_cast<size_t>(get_env_int_or_default("CAESAR_NGLR_BATCH_BLOCKS", 32));
 
@@ -1892,7 +2009,7 @@ torch::Tensor decompress(
 
     while (i < slices.size()) {
         const size_t next_i =
-            same_shape_batch_end_cpp(
+            same_shape_batch_end(
                 slices,
                 i,
                 batch_blocks
@@ -1909,7 +2026,7 @@ torch::Tensor decompress(
                 to_encoded_block(compressed.blocks[j], slices[j]);
 
             delta_blocks.push_back(
-                decode_delta_block_cpp(encoded, use_cpu_zstd)
+                decode_delta_block(encoded, use_zstd_cpu)
             );
 
             r_blocks.push_back(
@@ -1920,7 +2037,7 @@ torch::Tensor decompress(
             );
         }
         std::vector<torch::Tensor> q_blocks =
-            strict_decode_delta_blocks_torch_gpu_cpp(
+            strict_decode_delta_blocks(
                 delta_blocks,
                 r_blocks,
                 model,
@@ -1951,13 +2068,6 @@ torch::Tensor decompress(
 
         i = next_i;
 
-        if (i % 100 == 0 || i == slices.size()) {
-            std::cout << "NGLR decoded blocks: "
-                      << i
-                      << " / "
-                      << slices.size()
-                      << std::endl;
-        }
     }
 
     return corrected.to(device);

@@ -149,56 +149,13 @@ void save_complete_metadata(const std::string& filename,
   file.write(reinterpret_cast<const char*>(comp.gae_comp_data.data()), size);
 
   // Save NGLR metadata
-bool use_nglr = comp.use_nglr;
-file.write(reinterpret_cast<const char*>(&use_nglr), sizeof(use_nglr));
-
-const auto& nglr_meta = comp.nglrMetaData;
-
-file.write(reinterpret_cast<const char*>(&nglr_meta.nglr_correction_occur), sizeof(nglr_meta.nglr_correction_occur));
-file.write(reinterpret_cast<const char*>(&nglr_meta.target), sizeof(nglr_meta.target));
-file.write(reinterpret_cast<const char*>(&nglr_meta.mean), sizeof(nglr_meta.mean));
-file.write(reinterpret_cast<const char*>(&nglr_meta.scale), sizeof(nglr_meta.scale));
-file.write(reinterpret_cast<const char*>(&nglr_meta.step), sizeof(nglr_meta.step));
-file.write(reinterpret_cast<const char*>(&nglr_meta.q_scale), sizeof(nglr_meta.q_scale));
-file.write(reinterpret_cast<const char*>(&nglr_meta.d_scale), sizeof(nglr_meta.d_scale));
-
-file.write(reinterpret_cast<const char*>(&nglr_meta.block_t), sizeof(nglr_meta.block_t));
-file.write(reinterpret_cast<const char*>(&nglr_meta.block_h), sizeof(nglr_meta.block_h));
-file.write(reinterpret_cast<const char*>(&nglr_meta.block_w), sizeof(nglr_meta.block_w));
-file.write(reinterpret_cast<const char*>(&nglr_meta.hidden), sizeof(nglr_meta.hidden));
-file.write(reinterpret_cast<const char*>(&nglr_meta.q_hidden), sizeof(nglr_meta.q_hidden));
-file.write(reinterpret_cast<const char*>(&nglr_meta.model_blocks), sizeof(nglr_meta.model_blocks));
-file.write(reinterpret_cast<const char*>(&nglr_meta.train_epochs), sizeof(nglr_meta.train_epochs));
-file.write(reinterpret_cast<const char*>(&nglr_meta.zstd_level), sizeof(nglr_meta.zstd_level));
-
-size = nglr_meta.shape.size();
-file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-file.write(reinterpret_cast<const char*>(nglr_meta.shape.data()), size * sizeof(int64_t));
-
-file.write(reinterpret_cast<const char*>(&nglr_meta.original_bytes), sizeof(nglr_meta.original_bytes));
-file.write(reinterpret_cast<const char*>(&nglr_meta.latent_bit), sizeof(nglr_meta.latent_bit));
-file.write(reinterpret_cast<const char*>(&nglr_meta.correction_bytes), sizeof(nglr_meta.correction_bytes));
-file.write(reinterpret_cast<const char*>(&nglr_meta.base_nrmse), sizeof(nglr_meta.base_nrmse));
-file.write(reinterpret_cast<const char*>(&nglr_meta.quant_nrmse), sizeof(nglr_meta.quant_nrmse));
-file.write(reinterpret_cast<const char*>(&nglr_meta.best_loss), sizeof(nglr_meta.best_loss));
-file.write(reinterpret_cast<const char*>(&nglr_meta.best_epoch), sizeof(nglr_meta.best_epoch));
-
-// Save NGLR compressed block streams
-size = comp.nglrCompressedData.blocks.size();
-file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-
-for (const auto& block : comp.nglrCompressedData.blocks) {
-  // Match Python's correction stream layout:
-  // bit_count, then one length-prefixed compressed stream per bitplane.
-  uint32_t bit_count = static_cast<uint32_t>(block.bit_count);
-  file.write(reinterpret_cast<const char*>(&bit_count), sizeof(bit_count));
-
-  for (const auto& stream : block.streams) {
-    uint64_t stream_size = static_cast<uint64_t>(stream.size());
-    file.write(reinterpret_cast<const char*>(&stream_size), sizeof(stream_size));
-    file.write(reinterpret_cast<const char*>(stream.data()), static_cast<std::streamsize>(stream_size));
-  }
-}
+  bool use_nglr = comp.use_nglr;
+  file.write(reinterpret_cast<const char*>(&use_nglr), sizeof(use_nglr));
+  caesar::nglr::save_metadata(
+      file,
+      comp.nglrMetaData,
+      comp.nglrCompressedData
+  );
 
   file.close();
 }
@@ -326,59 +283,14 @@ CompressionResult load_complete_metadata(const std::string& filename,
   file.read(reinterpret_cast<char*>(comp.gae_comp_data.data()), size);
 
   // Load NGLR metadata
-bool use_nglr = false;
-file.read(reinterpret_cast<char*>(&use_nglr), sizeof(use_nglr));
-comp.use_nglr = use_nglr;
-
-auto& nglr_meta = comp.nglrMetaData;
-
-file.read(reinterpret_cast<char*>(&nglr_meta.nglr_correction_occur), sizeof(nglr_meta.nglr_correction_occur));
-file.read(reinterpret_cast<char*>(&nglr_meta.target), sizeof(nglr_meta.target));
-file.read(reinterpret_cast<char*>(&nglr_meta.mean), sizeof(nglr_meta.mean));
-file.read(reinterpret_cast<char*>(&nglr_meta.scale), sizeof(nglr_meta.scale));
-file.read(reinterpret_cast<char*>(&nglr_meta.step), sizeof(nglr_meta.step));
-file.read(reinterpret_cast<char*>(&nglr_meta.q_scale), sizeof(nglr_meta.q_scale));
-file.read(reinterpret_cast<char*>(&nglr_meta.d_scale), sizeof(nglr_meta.d_scale));
-
-file.read(reinterpret_cast<char*>(&nglr_meta.block_t), sizeof(nglr_meta.block_t));
-file.read(reinterpret_cast<char*>(&nglr_meta.block_h), sizeof(nglr_meta.block_h));
-file.read(reinterpret_cast<char*>(&nglr_meta.block_w), sizeof(nglr_meta.block_w));
-file.read(reinterpret_cast<char*>(&nglr_meta.hidden), sizeof(nglr_meta.hidden));
-file.read(reinterpret_cast<char*>(&nglr_meta.q_hidden), sizeof(nglr_meta.q_hidden));
-file.read(reinterpret_cast<char*>(&nglr_meta.model_blocks), sizeof(nglr_meta.model_blocks));
-file.read(reinterpret_cast<char*>(&nglr_meta.train_epochs), sizeof(nglr_meta.train_epochs));
-file.read(reinterpret_cast<char*>(&nglr_meta.zstd_level), sizeof(nglr_meta.zstd_level));
-
-file.read(reinterpret_cast<char*>(&size), sizeof(size));
-nglr_meta.shape.resize(size);
-file.read(reinterpret_cast<char*>(nglr_meta.shape.data()), size * sizeof(int64_t));
-
-file.read(reinterpret_cast<char*>(&nglr_meta.original_bytes), sizeof(nglr_meta.original_bytes));
-file.read(reinterpret_cast<char*>(&nglr_meta.latent_bit), sizeof(nglr_meta.latent_bit));
-file.read(reinterpret_cast<char*>(&nglr_meta.correction_bytes), sizeof(nglr_meta.correction_bytes));
-file.read(reinterpret_cast<char*>(&nglr_meta.base_nrmse), sizeof(nglr_meta.base_nrmse));
-file.read(reinterpret_cast<char*>(&nglr_meta.quant_nrmse), sizeof(nglr_meta.quant_nrmse));
-file.read(reinterpret_cast<char*>(&nglr_meta.best_loss), sizeof(nglr_meta.best_loss));
-file.read(reinterpret_cast<char*>(&nglr_meta.best_epoch), sizeof(nglr_meta.best_epoch));
-
-// Load NGLR compressed block streams
-file.read(reinterpret_cast<char*>(&size), sizeof(size));
-comp.nglrCompressedData.blocks.resize(size);
-
-for (auto& block : comp.nglrCompressedData.blocks) {
-  uint32_t bit_count = 0;
-  file.read(reinterpret_cast<char*>(&bit_count), sizeof(bit_count));
-  block.bit_count = static_cast<int>(bit_count);
-
-  block.streams.resize(block.bit_count);
-
-  for (auto& stream : block.streams) {
-    uint64_t stream_size = 0;
-    file.read(reinterpret_cast<char*>(&stream_size), sizeof(stream_size));
-    stream.resize(static_cast<size_t>(stream_size));
-    file.read(reinterpret_cast<char*>(stream.data()), static_cast<std::streamsize>(stream_size));
-  }
-}
+  bool use_nglr = false;
+  file.read(reinterpret_cast<char*>(&use_nglr), sizeof(use_nglr));
+  comp.use_nglr = use_nglr;
+  caesar::nglr::load_metadata(
+      file,
+      comp.nglrMetaData,
+      comp.nglrCompressedData
+  );
 
   file.close();
 
@@ -797,7 +709,7 @@ int decompress_file(const std::string& input_base,
   comp.encoded_latents = loaded_latents;
   comp.encoded_hyper_latents = loaded_hyper;
 
-  if (comp.use_nglr && comp.nglrMetaData.nglr_correction_occur) {
+  if (comp.use_nglr) {
     set_env_var("CAESAR_NGLR_MODEL_PATH", input_base + ".pt");
   }
 

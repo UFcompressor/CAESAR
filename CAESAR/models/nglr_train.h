@@ -39,6 +39,7 @@ struct NGLRTrainResult {
     CausalNeuralLorenzoNet model = nullptr;
     NGLRMetaData meta;
 
+    bool correction_required = false;
     double base_nrmse = 0.0;
     double quant_nrmse = 0.0;
     double best_loss = 0.0;

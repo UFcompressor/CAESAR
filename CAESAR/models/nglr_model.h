@@ -2,6 +2,7 @@
 
 #include <torch/torch.h>
 #include <cstdint>
+#include <iosfwd>
 #include <vector>
 
 namespace caesar::nglr {
@@ -46,19 +47,11 @@ struct CausalNeuralLorenzoNetImpl : torch::nn::Module {
 
 TORCH_MODULE(CausalNeuralLorenzoNet);
 struct NGLRMetaData {
-    bool nglr_correction_occur = false;
-
-    double target = 0.0;
     double mean = 0.0;
     double scale = 1.0;
     double step = 1.0;
     double q_scale = 1.0;
     double d_scale = 1.0;
-
-    double base_nrmse = 0.0;
-    double quant_nrmse = 0.0;
-    double best_loss = 0.0;
-    int best_epoch = 0;
 
     int block_t = 60;
     int block_h = 120;
@@ -67,14 +60,9 @@ struct NGLRMetaData {
     int hidden = 32;
     int q_hidden = 16;
     int model_blocks = 4;
-    int train_epochs = 1;
     int zstd_level = 3;
 
     std::vector<int64_t> shape;
-
-    int64_t original_bytes = 0;
-    int64_t latent_bit = 0;
-    int64_t correction_bytes = 0;
 };
 
 struct NGLRBlockStream {
@@ -90,6 +78,18 @@ struct NGLRResult {
     NGLRMetaData meta;
     NGLRCompressedData compressed;
 };
+
+void save_metadata(
+    std::ostream& out,
+    const NGLRMetaData& meta,
+    const NGLRCompressedData& compressed
+);
+
+void load_metadata(
+    std::istream& in,
+    NGLRMetaData& meta,
+    NGLRCompressedData& compressed
+);
 
 torch::Tensor lorenzo_pred(const torch::Tensor& q);
 torch::Tensor lorenzo_delta(const torch::Tensor& q);
