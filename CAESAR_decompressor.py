@@ -1,6 +1,5 @@
 import os
 import sys
-import numpy as np
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from pathlib import Path
@@ -11,19 +10,11 @@ from pyCAESAR.models.network_components import (
     Upsample,
 )
 from pyCAESAR.models.utils import quantize, NormalDistribution
-import time
-import yaml
 from pyCAESAR.models.BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch.nn as nn
 import torch.nn.init as init
 from pyCAESAR.models.RangeEncoding import RangeCoder
 from collections import OrderedDict
-
-
-def load_yaml(file_path):
-    with open(file_path, "r") as file:
-        data = yaml.safe_load(file)
-    return data
 
 
 def super_resolution_model(
@@ -235,21 +226,15 @@ class Compressor(nn.Module):
 
         return bpb, bpp
 
-    def forward(self, x, return_time=False):
+    def forward(self, x):
 
         result = {}
-
-        if return_time:
-            start_time = time.time()
 
         latent = self.encode(x)
         hyper_latent = self.hyper_encode(latent)
         q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
         mean, scale = self.hyper_decode(q_hyper_latent)
         q_latent = quantize(latent, "dequantize", mean.detach())
-
-        if return_time:
-            result["encoding_time"] = time.time() - start_time
 
         state4bpp = {
             "latent": latent,
@@ -259,13 +244,7 @@ class Compressor(nn.Module):
         }
         frame_bit, bpp = self.bpp(x.shape, state4bpp)
 
-        if return_time:
-            start_time = time.time()
-
         output = self.decode(q_latent)
-
-        if return_time:
-            result["decoding_time"] = time.time() - start_time
 
         result.update(
             {
@@ -445,9 +424,25 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
+if len(sys.argv) < 2:
+    raise ValueError(
+        "Usage: python script.py <device>\n\n"
+        "Available devices:\n"
+        "  cpu  - CPU (all systems)\n"
+        "  cuda - NVIDIA GPU or AMD GPU (ROCm on Linux)\n"
+        "  mps  - Apple Silicon GPU (M1/M2/M3/M4)\n"
+        "  xpu  - Intel GPU"
+    )
 device = sys.argv[1].lower()
 if device not in {"cpu", "cuda", "mps", "xpu"}:
-    raise ValueError(f"Unsupported device: {device}")
+    raise ValueError(
+        f"Unsupported device '{device}'.\n\n"
+        "Supported devices:\n"
+        "  cpu  - CPU (all systems)\n"
+        "  cuda - NVIDIA GPU or AMD GPU (ROCm on Linux)\n"
+        "  mps  - Apple Silicon GPU (M1/M2/M3/M4)\n"
+        "  xpu  - Intel GPU"
+    )
 model_name = f"caesar_decompressor"
 
 model = CompressorMix(
@@ -498,7 +493,7 @@ with torch.no_grad():
     )
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-       package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
+        package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
     print()
     print(f"decompress model saved to exported_model/{model_name}.pt2")

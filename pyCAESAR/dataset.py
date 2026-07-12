@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 import numpy as np
-from scipy.ndimage import zoom
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset
@@ -23,19 +22,16 @@ import torch.nn.functional as F
 import math
 import bisect
 
+
 def center_crop(x, tshape):
-    _, _,_, H, W = x.shape
-    
+    _, _, _, H, W = x.shape
+
     target_h, target_w = tshape
     start_h = (H - target_h) // 2
     start_w = (W - target_w) // 2
     end_h = start_h + target_h
     end_w = start_w + target_w
     return x[..., start_h:end_h, start_w:end_w]
-
-def downsampling_data(data, zoom_factors):
-    """Apply cubic interpolation-based downsampling or upsampling."""
-    return zoom(data, zoom_factors, order=3)  # order=3 = cubic interpolation
 
 
 def block_hw(data, block_size=(256, 256)):
@@ -53,12 +49,12 @@ def block_hw(data, block_size=(256, 256)):
     dw = W_target - W
     left, right = dw // 2, dw - dw // 2
     n_w = W_target // w_block
-    
+
     V1, S1, T1, H1, W1 = data.shape
-    data = data.view(V1*S1,T1, H1, W1)
+    data = data.view(V1 * S1, T1, H1, W1)
     # Apply reflection padding (order: W_left, W_right, H_top, H_bottom)
-    data = F.pad(data, (left, right, top, down), mode='reflect')
-    data = data.view(V1, S1, T1,*data.shape[-2:])
+    data = F.pad(data, (left, right, top, down), mode="reflect")
+    data = data.view(V1, S1, T1, *data.shape[-2:])
     # Update shape after padding
     V, S, T, H_p, W_p = data.shape
 
@@ -87,10 +83,9 @@ def deblock_hw(data, n_h, n_w, padding):
     H = H_p - top - down
     W = W_p - left - right
 
-    data = data[:, :, :, top:top+H, left:left+W]
+    data = data[:, :, :, top : top + H, left : left + W]
 
     return data
-
 
 
 def normalize_data(data, norm_type, axis):
@@ -134,14 +129,17 @@ def normalize_data(data, norm_type, axis):
         normalized_data = (data - var_mean) / var_scale
 
     else:
-        raise NotImplementedError(f"Normalization type '{norm_type}' is not implemented.")
+        raise NotImplementedError(
+            f"Normalization type '{norm_type}' is not implemented."
+        )
 
     return normalized_data, var_mean, var_scale
+
 
 def data_filtering(data, n_frame):
     V, S, T, H, W = data.shape
     assert T % n_frame == 0
-    samples = T // n_frame  
+    samples = T // n_frame
     filtered_blocks = []
     filtered_labels = []
     for v in range(V):
@@ -149,54 +147,53 @@ def data_filtering(data, n_frame):
             for blk_idx in range(samples):
                 start = blk_idx * n_frame
                 end = (blk_idx + 1) * n_frame
-                block = data[v, s, start:end]  
+                block = data[v, s, start:end]
 
                 if torch.all(block == block.view(-1)[0]):
-                #if torch.all(block == block.reshape(-1)[0]):
+                    # if torch.all(block == block.reshape(-1)[0]):
                     label = v * (S * samples) + s * samples + blk_idx
                     value = block.view(-1)[0].item()
-                    #value = block.reshape(-1)[0].item()
+                    # value = block.reshape(-1)[0].item()
                     filtered_blocks.append((label, value))
                     filtered_labels.append(label)
     return filtered_blocks, filtered_labels
+
 
 def build_reverse_id_map(visble_length, filtered_labels):
     filtered_set = set(filtered_labels)
     valid_ids = [i for i in range(visble_length) if i not in filtered_set]
 
-    reverse_map = {i : orig for i, orig in enumerate(valid_ids)}  
+    reverse_map = {i: orig for i, orig in enumerate(valid_ids)}
     return reverse_map
+
 
 class BaseDataset(Dataset):
     def __init__(self, args):
         args = deepcopy(args)
         # Universal configs
-        self.data_path      = args["data_path"]
-        
-        self.dataset_name   = args.get("name", "Customized Dataset")
-        
-        self.variable_idx   = args.get("variable_idx")
-        self.section_range  = args.get("section_range")
-        self.frame_range    = args.get("frame_range")
-        
-        self.n_frame        = args["n_frame"]
-        
-        self.resolution     = args.get("resolution", None)
-        
-        self.train_size     = args.get("train_size", 256)
-        self.inst_norm      = args.get("inst_norm", True)
-        self.augment_type   = args.get("augment_type", {})
-        self.norm_type      = args.get("norm_type", "mean_range")
-        
-        self.train_mode     = args.get("train")
-        
-        self.test_size      = args.get("test_size", (256,256))
-        self.n_overlap      = args.get("n_overlap", 0)
-        self.downsampling   = args.get("downsampling", 1)
-        
-        
-        
-        
+        self.data_path = args["data_path"]
+
+        self.dataset_name = args.get("name", "Customized Dataset")
+
+        self.variable_idx = args.get("variable_idx")
+        self.section_range = args.get("section_range")
+        self.frame_range = args.get("frame_range")
+
+        self.n_frame = args["n_frame"]
+
+        self.resolution = args.get("resolution", None)
+
+        self.train_size = args.get("train_size", 256)
+        self.inst_norm = args.get("inst_norm", True)
+        self.augment_type = args.get("augment_type", {})
+        self.norm_type = args.get("norm_type", "mean_range")
+
+        self.train_mode = args.get("train")
+
+        self.test_size = args.get("test_size", (256, 256))
+        self.n_overlap = args.get("n_overlap", 0)
+        self.downsampling = args.get("downsampling", 1)
+
         self.random_crop = T.RandomCrop(size=(self.train_size, self.train_size))
 
         if "downsample" in self.augment_type:
@@ -207,15 +204,15 @@ class BaseDataset(Dataset):
             self.max_downsample = 1
 
         self.enble_ds = True
-        
-    def apply_augments(self,data):
-        
+
+    def apply_augments(self, data):
+
         if ("downsample" in self.augment_type) and self.enble_ds:
             data = self.apply_downsampling(data, step=self.augment_type["downsample"])
         elif ("randsample" in self.augment_type) and self.enble_ds:
             step = torch.randint(1, self.augment_type["randsample"] + 1, (1,)).item()
             data = self.apply_downsampling(data, step=step)
-            
+
         return data
 
     def apply_padding_or_crop(self, data):
@@ -224,22 +221,23 @@ class BaseDataset(Dataset):
             pad_size = self.train_size - cur_size
             pad_left = pad_size // 2
             pad_right = pad_size - pad_left
-            data = F.pad(data[None], (pad_left, pad_right, pad_left, pad_right), mode='reflect')[0]
+            data = F.pad(
+                data[None], (pad_left, pad_right, pad_left, pad_right), mode="reflect"
+            )[0]
         elif self.train_size < cur_size:
             data = self.random_crop(data)
         return data
 
     def apply_inst_norm(self, data, return_norm=False):
         if self.norm_type == "mean_range":
-            offset = torch.mean(data).view([1,1,1])
-            scale = data.max() - data.min()            
+            offset = torch.mean(data).view([1, 1, 1])
+            scale = data.max() - data.min()
             assert scale != 0, "Scale is zero."
-            #if scale == 0: scale = data.max()
+            # if scale == 0: scale = data.max()
             data = (data - offset) / scale
-            
-            offset = offset.view([1,1,1])
-            scale = scale.view([1,1,1])
-            
+
+            offset = offset.view([1, 1, 1])
+            scale = scale.view([1, 1, 1])
 
         elif self.norm_type == "min_max":
             dmin = data.min()
@@ -248,99 +246,117 @@ class BaseDataset(Dataset):
             scale = (dmax - dmin) / 2
             assert scale != 0, "Scale is zero."
             data = (data - offset) / scale
-            
-            offset = offset.view([1,1,1])
-            scale = scale.view([1,1,1])
-            
+
+            offset = offset.view([1, 1, 1])
+            scale = scale.view([1, 1, 1])
 
         elif self.norm_type == "mean_range_hw":
             offset = torch.mean(data, dim=(-2, -1), keepdim=True)
-            scale = torch.amax(data, dim=(-2, -1), keepdim=True) - torch.amin(data, dim=(-2, -1), keepdim=True)
+            scale = torch.amax(data, dim=(-2, -1), keepdim=True) - torch.amin(
+                data, dim=(-2, -1), keepdim=True
+            )
             assert torch.all(scale != 0), "Scale is zero."
             data = (data - offset) / scale
 
         else:
-            raise NotImplementedError(f"Normalization type {self.norm_type} not implemented.")
+            raise NotImplementedError(
+                f"Normalization type {self.norm_type} not implemented."
+            )
 
         if return_norm:
             return data, offset, scale
         else:
             return data
 
-        
-    
+
 class ScientificDataset(BaseDataset):
     def __init__(self, args):
         super().__init__(args)
 
         print(f"*************** Loading {self.dataset_name} ***************")
-        
-        data = self.load_dataset(self.data_path, self.variable_idx, self.section_range, self.frame_range)
-        
+
+        data = self.load_dataset(
+            self.data_path, self.variable_idx, self.section_range, self.frame_range
+        )
+
         self.shape_org = data.shape
-        
+
         self.delta_t = self.n_frame - self.n_overlap
         T = data.shape[2]
         self.t_samples = math.ceil((T - self.n_frame) / self.delta_t) + 1
-        
+
         pad_T = (self.t_samples - 1) * self.delta_t + self.n_frame - T
         self.pad_T = pad_T
-        
+
         if pad_T > 0:
             tail_frames = data[:, :, -pad_T:]
-            tail_frames = tail_frames[:, :, ::-1] 
+            tail_frames = tail_frames[:, :, ::-1]
             data = np.concatenate([data, tail_frames], axis=2)
-        #self.shape = data.shape
-        
+        # self.shape = data.shape
+
         # print("self.inst_norm:", self.inst_norm)
         # if not self.inst_norm:
         #     print("not self.inst_norm")
         #     assert(self.norm_type != "mean_range_hw")
         #     data, var_offset, var_scale = normalize_data(data, self.norm_type, axis=(1, 2, 3, 4))
         #     self.var_offset, self.var_scale = torch.FloatTensor(var_offset), torch.FloatTensor(var_scale)
-        
+
         data = torch.FloatTensor(data)
-        
+
         if not self.train_mode:
             data, self.block_info = block_hw(data, self.test_size)
-        
+
         self.filtered_blocks, self.filtered_labels = data_filtering(data, self.delta_t)
         self.shape = data.shape
-        self.data_input = data 
+        self.data_input = data
         self.visble_length = self.update_length()
-        self.reverse_id_map = build_reverse_id_map(self.visble_length, self.filtered_labels)
-        
-    def original_data(self,):
-        data =  self.data_input
+        self.reverse_id_map = build_reverse_id_map(
+            self.visble_length, self.filtered_labels
+        )
+
+    def original_data(
+        self,
+    ):
+        data = self.data_input
         if not self.train_mode:
             data = deblock_hw(data, *self.block_info)
         if not self.inst_norm:
             data = data * self.var_scale + self.var_offset
         return data
-    
-    def input_data(self,):
+
+    def input_data(
+        self,
+    ):
         data = self.original_data()
-        data = data[:, :, :self.shape[2]-self.pad_T, :, :]
+        data = data[:, :, : self.shape[2] - self.pad_T, :, :]
         return data
-        
+
     def recons_data(self, recons_data):
-        return recons_data[:, :, :self.shape[2]-self.pad_T, :, :]
-            
+        return recons_data[:, :, : self.shape[2] - self.pad_T, :, :]
+
     def load_dataset(self, data_path, variable_idx, section_range, frame_range):
-        frame_range   = slice(None) if frame_range   is None else slice(frame_range[0], frame_range[1])
-        section_range = slice(None) if section_range is None else slice(section_range[0], section_range[1])
+        frame_range = (
+            slice(None)
+            if frame_range is None
+            else slice(frame_range[0], frame_range[1])
+        )
+        section_range = (
+            slice(None)
+            if section_range is None
+            else slice(section_range[0], section_range[1])
+        )
 
         with np.load(data_path) as npzfile:
             data = npzfile["data"][variable_idx, section_range, frame_range]
-        
+
         if self.resolution is not None:
             data = center_crop(data, self.resolution)
         self.dtype = data.dtype
         data = data.astype(np.float32)
 
         return data
-    
-    def deblocking_hw(self,data):
+
+    def deblocking_hw(self, data):
         return deblock_hw(data, *self.block_info)
 
     def update_length(self):
@@ -358,8 +374,8 @@ class ScientificDataset(BaseDataset):
         if self.inst_norm:
             data, offset, scale = self.apply_inst_norm(data, True)
         else:
-            offset = self.var_offset[var_idx].view(1,1,1)
-            scale = self.var_scale[var_idx].view(1,1,1)
+            offset = self.var_offset[var_idx].view(1, 1, 1)
+            scale = self.var_scale[var_idx].view(1, 1, 1)
 
         data_dict = {"input": data[None], "offset": offset[None], "scale": scale[None]}
         return data_dict
@@ -377,10 +393,9 @@ class ScientificDataset(BaseDataset):
         end_t = start_t + self.n_frame
 
         data = self.data_input[idx0, idx1, start_t:end_t]
-        
-        #print(f"[__getitem__] idx=({idx0},{idx1},{start_t}:{end_t}), max={data.max():.6e}, min={data.min():.6e}")
+
+        # print(f"[__getitem__] idx=({idx0},{idx1},{start_t}:{end_t}), max={data.max():.6e}, min={data.min():.6e}")
 
         data = self.post_processing(data, idx0, self.train_mode)
-        data["index"] = [idx0, idx1, start_t,end_t]
+        data["index"] = [idx0, idx1, start_t, end_t]
         return data
-

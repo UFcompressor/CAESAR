@@ -62,7 +62,7 @@ jobs:
 
           pip install --no-cache-dir -r temp_requirements.txt
           pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install compressai==1.2.6 imageio==2.37.0
+          pip install compressai==1.2.6 
           rm temp_requirements.txt
 
       - name: Install macOS deps (inside venv)
@@ -82,7 +82,7 @@ jobs:
 
           pip install -r temp_requirements.txt
           pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install compressai==1.2.6 imageio==2.37.0
+          pip install compressai==1.2.6 
           rm temp_requirements.txt
 
       - name: Download pretrained models
@@ -271,9 +271,6 @@ jobs:
           $wheel = Get-ChildItem D:\cai\dist\compressai-*.whl | Select-Object -First 1
           conda run -n compress_env python -m pip install $wheel.FullName
 
-          Pop-Location
-
-          conda run -n compress_env python -m pip install imageio==2.37.0
 
       - name: Install cmake and zstd
         run: |
