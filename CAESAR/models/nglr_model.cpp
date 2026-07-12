@@ -37,101 +37,6 @@
 #endif
 
 
-#if !defined(USE_CUDA)
-
-// NGLR uses CUDA and nvCOMP in the real implementation. Mac GitHub runners do not
-// have those, so this small CPU-only section lets the rest of the project compile
-// while clearly saying that NGLR itself needs a CUDA build.
-namespace caesar::nglr {
-namespace {
-
-[[noreturn]] void throw_nglr_cuda_required() {
-    // macOS GitHub runners are CPU-only and cannot provide CUDA/nvCOMP.
-    // Keep a lightweight portability stub there, while CUDA/nvCOMP builds
-    // compile the full NGLR implementation below for real experiments.
-    throw std::runtime_error(
-        "NGLR requires a CUDA/nvCOMP-enabled build."
-    );
-}
-
-} // namespace
-
-// Turn the already reconstructed values into simple neighbor features. Think of this
-// as giving the neural network a small local window of what has already been decoded.
-torch::Tensor recons_features(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-ResBlock3DImpl::ResBlock3DImpl(int64_t) {}
-
-torch::Tensor ResBlock3DImpl::forward(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-// This builds the neural predictor used by NGLR. It should stay close to the Python
-// model so both versions learn and predict from the same kind of information.
-CausalNeuralLorenzoNetImpl::CausalNeuralLorenzoNetImpl(
-    int64_t,
-    int64_t,
-    int64_t
-) {}
-
-torch::Tensor CausalNeuralLorenzoNetImpl::encode_recons(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor CausalNeuralLorenzoNetImpl::forward_from_feature(
-    const torch::Tensor&,
-    const torch::Tensor&
-) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor CausalNeuralLorenzoNetImpl::forward(
-    const torch::Tensor&,
-    const torch::Tensor&
-) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor lorenzo_pred(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor lorenzo_delta(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor zigzag_encode(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor zigzag_decode(const torch::Tensor&) {
-    throw_nglr_cuda_required();
-}
-
-NGLRResult encode_correction(
-    const torch::Tensor&,
-    const torch::Tensor&,
-    CausalNeuralLorenzoNet,
-    NGLRMetaData,
-    torch::Device
-) {
-    throw_nglr_cuda_required();
-}
-
-torch::Tensor decompress(
-    const torch::Tensor&,
-    const NGLRMetaData&,
-    const NGLRCompressedData&,
-    torch::Device
-) {
-    throw_nglr_cuda_required();
-}
-
-} // namespace caesar::nglr
-
-#else
 namespace caesar::nglr {
 
 torch::Tensor recons_features(const torch::Tensor& x) {
@@ -2059,7 +1964,3 @@ torch::Tensor decompress(
 }
 
 }
-
-// End of the CUDA/NGLR implementation. In CPU-only builds, the stub near the top is
-// used instead so CI can build CAESAR without CUDA or nvCOMP.
-#endif // !defined(USE_CUDA)

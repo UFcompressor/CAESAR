@@ -13,39 +13,6 @@
 #include <sstream>
 
 
-#if !defined(USE_CUDA)
-
-// Training NGLR also needs CUDA. For CPU-only builds, these stubs make the limitation
-// obvious and keep portability builds from spending time compiling unused GPU code.
-#include <stdexcept>
-
-namespace caesar::nglr {
-
-NGLRTrainConfig default_train_config(double target_nrmse) {
-    NGLRTrainConfig cfg;
-    cfg.target_nrmse = target_nrmse;
-    return cfg;
-}
-
-// Train the NGLR predictor. The predictor's job is to make residuals smaller so the
-// bitplane compressor has less information to store.
-NGLRTrainResult train_nglr_model(
-    const torch::Tensor&,
-    const torch::Tensor&,
-    const NGLRTrainConfig&,
-    torch::Device
-) {
-    // macOS GitHub runners are CPU-only and cannot provide CUDA/nvCOMP.
-    // Avoid compiling the heavy LibTorch autograd training implementation there;
-    // CUDA/nvCOMP builds compile the full implementation below unchanged.
-    throw std::runtime_error(
-        "NGLR training requires a CUDA/nvCOMP-enabled build."
-    );
-}
-
-} // namespace caesar::nglr
-
-#else
 namespace caesar::nglr {
 namespace {
 
@@ -432,9 +399,11 @@ NGLRTrainResult train_nglr_model(
     torch::AutoGradMode grad_mode(true);
 
     torch::manual_seed(config.seed);
+#if defined(USE_CUDA)
     if (device.is_cuda()) {
         torch::cuda::manual_seed_all(config.seed);
     }
+#endif
 
     torch::Tensor x = original.to(torch::kCPU).to(torch::kFloat32).contiguous();
     torch::Tensor r = reconstruction.to(torch::kCPU).to(torch::kFloat32).contiguous();
@@ -507,35 +476,26 @@ NGLRTrainResult train_nglr_model(
     const double base_nrmse = zero_nrmse(x, r, scale);
     const double quant_nrmse = decoded_nrmse(x, r_norm, q, step, mean, scale);
     if (base_nrmse <= config.target_nrmse) {
-        CausalNeuralLorenzoNet model =
-        CausalNeuralLorenzoNet(
-            config.hidden,
-            config.q_hidden,
-            config.model_blocks
-        );
+        meta.nglr_correction_occur = false;
 
-    model->to(device);
-    model->eval();
+        NGLRTrainResult result;
+        result.meta = meta;
+        result.base_nrmse = base_nrmse;
+        result.quant_nrmse = quant_nrmse;
+        result.best_loss = 0.0;
+        result.best_epoch = 0;
+        result.meta.base_nrmse = base_nrmse;
+        result.meta.quant_nrmse = quant_nrmse;
+        result.meta.best_loss = 0.0;
+        result.meta.best_epoch = 0;
 
-    NGLRTrainResult result;
-    result.model = model;
-    result.meta = meta;
-    result.base_nrmse = base_nrmse;
-    result.quant_nrmse = quant_nrmse;
-    result.best_loss = 0.0;
-    result.best_epoch = 0;
-    result.meta.base_nrmse = base_nrmse;
-    result.meta.quant_nrmse = quant_nrmse;
-    result.meta.best_loss = 0.0;
-    result.meta.best_epoch = 0;
+        if (config.verbose) {
+            std::cout << "NGLR skipped training: base NRMSE already within target"
+                      << std::endl;
+        }
 
-    if (config.verbose) {
-        std::cout << "NGLR skipped training: base NRMSE already within target"
-                  << std::endl;
+        return result;
     }
-
-    return result;
-}
 
     std::vector<BlockSlice> slices =
         block_slices(meta.shape, meta.block_t, meta.block_h, meta.block_w);
@@ -703,6 +663,3 @@ best_model->eval();
 }
 
 } // namespace caesar::nglr
-
-// End of the CUDA training code. CPU-only builds use the simple stubs at the top.
-#endif // !defined(USE_CUDA)

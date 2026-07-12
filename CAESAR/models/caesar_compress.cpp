@@ -639,6 +639,13 @@ if (correction_method == "nglr") {
             device_
         );
 
+    if (!nglr_trained.meta.nglr_correction_occur) {
+        result.correction_type = CorrectionType::NONE;
+        result.use_lbrc = false;
+        result.use_nglr = false;
+        return result;
+    }
+
     caesar::nglr::NGLRResult nglr_result =
         caesar::nglr::encode_correction(
             original_cpu,
