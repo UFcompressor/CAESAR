@@ -16,6 +16,8 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
+
+
 struct GAEMetaData {
     bool GAE_correction_occur;
     std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
@@ -41,6 +43,7 @@ struct CompressionMetaData {
     bool all_filtered = false; // all data is the same 
 };
 
+
 struct CompressionResult {
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
@@ -51,7 +54,7 @@ struct CompressionResult {
 
     // LBRC compressed data
     std::vector<LBRCBlock> lbrc_blocks;
-    LBRCMetaData lbrcMetaData;
+    LBRCMetaData    lbrcMetaData;
 
     // NGLR compressed data
     caesar::nglr::NGLRMetaData nglrMetaData;

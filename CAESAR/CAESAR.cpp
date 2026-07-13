@@ -412,7 +412,7 @@ void print_usage(const char* program_name) {
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --force-padding          Force padding\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n";
-  std::cout << "  --correction <method>    Correction method: none/gae/lbrc/nglr "
+  std::cout << "  --correction <method>    Correction method: gae/nglr "
                "(default: gae)\n\n";
   std::cout << "Decompression Options:\n";
   std::cout << "  --decompress-device <dev> Device (cpu/cuda/mps)\n";
@@ -723,6 +723,8 @@ int decompress_file(const std::string& input_base,
 
   comp.encoded_latents = loaded_latents;
   comp.encoded_hyper_latents = loaded_hyper;
+
+  std::cout << "Metadata loaded successfully\n";
 
   if (comp.use_nglr) {
     set_env_var("CAESAR_NGLR_MODEL_PATH", input_base + ".pt");
