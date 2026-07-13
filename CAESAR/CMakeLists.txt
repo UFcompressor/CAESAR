@@ -2,6 +2,10 @@ find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
 
+option(CAESAR_BUILD_NGLR_TRAINING
+    "Build NGLR training into the CAESAR binary. Keep OFF for inference-only builds."
+    OFF)
+
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
 endif()
@@ -65,7 +69,6 @@ set(CAESAR_SRC
     models/lbrc.cpp
     data_utils.cpp
     models/nglr_model.cpp
-    models/nglr_train.cpp
 )
 
 if(MSVC)
@@ -77,6 +80,14 @@ endif()
 target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
+
+if(CAESAR_BUILD_NGLR_TRAINING)
+    target_sources(caesar PRIVATE models/nglr_train.cpp)
+    target_compile_definitions(caesar PUBLIC CAESAR_ENABLE_NGLR_TRAINING)
+    message(STATUS "NGLR training enabled for CAESAR build")
+else()
+    message(STATUS "NGLR training disabled; CAESAR build is inference-only for NGLR")
+endif()
 
 if(USE_CUDA)
     target_compile_definitions(caesar PUBLIC USE_CUDA)

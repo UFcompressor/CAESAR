@@ -1,5 +1,4 @@
 #include "../CAESAR/models/nglr_model.h"
-#include "../CAESAR/models/nglr_train.h"
 
 #include <torch/torch.h>
 
@@ -21,29 +20,35 @@ namespace {
 void run_device(const torch::Device& device) {
   torch::manual_seed(2026);
 
-  torch::Tensor x =
-      torch::linspace(-1.0, 1.0, 1 * 1 * 4 * 8 * 8, torch::kFloat32)
-          .reshape({1, 1, 4, 8, 8});
-  torch::Tensor r = (x + 0.02 * torch::sin(x * 17.0)).contiguous();
+  torch::Tensor q =
+      (torch::arange(1 * 1 * 4 * 8 * 8, torch::kInt32).reshape({1, 1, 4, 8, 8}) %
+       7) -
+      3;
+  torch::Tensor r = torch::zeros({1, 1, 4, 8, 8}, torch::kFloat32);
+  torch::Tensor x = q.to(torch::kFloat32) * 0.01f;
 
-  caesar::nglr::NGLRTrainConfig cfg =
-      caesar::nglr::default_train_config(1e-3);
-  cfg.block_t = 4;
-  cfg.block_h = 8;
-  cfg.block_w = 8;
-  cfg.hidden = 8;
-  cfg.q_hidden = 4;
-  cfg.model_blocks = 1;
-  cfg.train_epochs = 1;
-  cfg.verbose = false;
+  caesar::nglr::NGLRMetaData meta;
+  meta.mean = 0.0;
+  meta.scale = 1.0;
+  meta.step = 0.01;
+  meta.q_scale = 3.0;
+  meta.d_scale = 1.0;
+  meta.block_t = 4;
+  meta.block_h = 8;
+  meta.block_w = 8;
+  meta.hidden = 8;
+  meta.q_hidden = 4;
+  meta.model_blocks = 1;
+  meta.shape = x.sizes().vec();
 
-  auto trained = caesar::nglr::train_nglr_model(x, r, cfg, device);
-  if (!trained.correction_required) {
-    throw std::runtime_error("NGLR smoke skipped correction");
-  }
+  caesar::nglr::CausalNeuralLorenzoNet model =
+      caesar::nglr::CausalNeuralLorenzoNet(
+          meta.hidden,
+          meta.q_hidden,
+          meta.model_blocks);
 
   auto encoded =
-      caesar::nglr::encode_correction(x, r, trained.model, trained.meta, device);
+      caesar::nglr::encode_correction(x, r, model, meta, device);
   torch::Tensor decoded =
       caesar::nglr::decompress(r, encoded.meta, encoded.compressed, device);
 

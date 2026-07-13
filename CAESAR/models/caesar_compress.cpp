@@ -1,5 +1,7 @@
 #include "caesar_compress.h"
+#if defined(CAESAR_ENABLE_NGLR_TRAINING)
 #include "nglr_train.h"
+#endif
 
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
@@ -553,6 +555,14 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   }
 
   if (correction_method == "nglr") {
+#if !defined(CAESAR_ENABLE_NGLR_TRAINING)
+    throw std::runtime_error(
+        "NGLR training is not part of this CAESAR build. "
+        "Build with -DCAESAR_BUILD_NGLR_TRAINING=ON when creating "
+        "new NGLR corrections, or use this inference-only build for "
+        "decompression of existing NGLR files."
+    );
+#else
     std::cout << "Using NGLR correction" << std::endl;
 
     torch::Tensor original_cpu =
@@ -603,6 +613,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.nglrCompressedData = std::move(nglr_result.compressed);
 
     return result;
+#endif
   }
 
   throw std::runtime_error(
