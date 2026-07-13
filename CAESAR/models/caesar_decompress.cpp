@@ -75,6 +75,7 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
   return permuted_data;
 }
 
+
 torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                                        const unsigned int n_frame,
                                        const CompressionResult& comp_result) {
@@ -122,7 +123,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   }
 
   if (indexes_tensor.numel() > 0) {
-
     int64_t rows_to_print = std::min((int64_t)3, indexes_tensor.size(0));
     int64_t cols = indexes_tensor.size(1);
 
@@ -137,6 +137,17 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor recon_tensor = torch::zeros(input_shape).to(model_device);
   input_shape.clear();
   input_shape.shrink_to_fit();
+
+//   std::vector<torch::Tensor> row_tensors;
+//   row_tensors.reserve(comp_result.latent_indexes.size());
+//   for (const auto& row : comp_result.latent_indexes) {
+//     auto t = torch::from_blob((void*)row.data(), {(long)row.size()}, torch::kUInt8).clone();
+//     row_tensors.push_back(t.to(device_));
+//   }
+
+//  torch::Tensor latent_indexes_recon = torch::stack(row_tensors, 0).to(torch::kInt32);
+//   row_tensors.clear();
+//   row_tensors.shrink_to_fit();
 
   for (size_t lat_start = 0; lat_start < comp_result.encoded_latents.size();
        lat_start += (size_t)batch_size * 2) {
@@ -170,7 +181,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run(
         {decoded_hyper_latents.to(torch::kFloat32).to(model_device)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
-
     torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
 
     torch::Tensor decoded_latents_before_offset =
@@ -178,7 +188,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
     for (size_t i = 0; i < cur_latents; i++) {
       std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-          latent_indexes_recon.select(0, (long)i).reshape(-1));
+       latent_indexes_recon.select(0, (long)i).reshape(-1));
 
       std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
           comp_result.encoded_latents[lat_start + i], latent_index,
@@ -255,6 +265,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                   .fill_(value);
     }
   }
+
   auto [b1_i32, b2_i32, pad_i32] = meta.block_info;
 
   int64_t block_info_1 = b1_i32;
@@ -350,6 +361,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
         recons_data(recons_gae_unpadded, meta.data_input_shape, meta.pad_T);
     torch::Tensor final_recon =
         final_recon_norm * meta.global_scale + meta.global_offset;
+
     return final_recon;
   }
   else if (comp_result.use_nglr) {
@@ -381,6 +393,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   else {
     torch::Tensor final_recon =
         recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
+
     return final_recon;
   }
 
