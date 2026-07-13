@@ -1,3 +1,7 @@
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif()
 
 if(APPLE)
     set(FILESYSTEM_LIB "")
@@ -31,6 +35,15 @@ endif()
 
 add_executable(test_caesarCD test_caesarCD.cpp)
 target_link_libraries(test_caesarCD PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+
+
+add_executable(test_caesarC test_caesarC.cpp)
+target_link_libraries(test_caesarC PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
+
+add_executable(test_caesarD test_caesarD.cpp)
+target_link_libraries(test_caesarD PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 
 add_executable(test_padding test_padding.cpp)
@@ -68,6 +81,8 @@ endif()
 
 set(TEST_TARGETS
     test_caesarCD
+    test_caesarC
+    test_caesarD
     test_padding
     test_runGaeCuda
     test_LBRC
@@ -82,3 +97,16 @@ if(MSVC)
             ${TORCH_DLLS} $<TARGET_FILE_DIR:${test_exe}>)
     endforeach()
 endif()
+
+foreach(t IN ITEMS test_caesarCD test_caesarC test_caesarD test_padding test_LBRC test_runGaeCuda test_NGLR)
+    target_compile_options(${t} PRIVATE
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fPIC>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    )
+    target_compile_definitions(${t} PRIVATE
+        DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
+        MODEL_CAESAR_V_ONLY
+    )
+    target_precompile_headers(${t} REUSE_FROM caesar_objs)
+endforeach()

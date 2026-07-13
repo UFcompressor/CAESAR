@@ -463,11 +463,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         torch::Tensor original_cpu =
             dataset.original_data().to(torch::kCPU).to(torch::kFloat32).contiguous();
         torch::Tensor recon_cpu =
-            recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
+        recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
         recon_deblk = torch::Tensor();
         dataset.clear();
-
-        result.lbrcMetaData.quant_iter = 16;
 
         caesar::lbrc::compress(
             original_cpu, recon_cpu,

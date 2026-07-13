@@ -71,37 +71,41 @@ set(CAESAR_SRC
     models/nglr_model.cpp
 )
 
+add_library(caesar_objs OBJECT ${CAESAR_SRC})
+target_precompile_headers(caesar_objs PRIVATE <torch/torch.h>)
+set_target_properties(caesar_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 if(MSVC)
-    add_library(caesar STATIC ${CAESAR_SRC})
+    add_library(caesar STATIC $<TARGET_OBJECTS:caesar_objs>)
 else()
-    add_library(caesar SHARED ${CAESAR_SRC})
+    add_library(caesar SHARED $<TARGET_OBJECTS:caesar_objs>)
 endif()
 
-target_compile_definitions(caesar PRIVATE
+target_compile_definitions(caesar_objs PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
 message(STATUS "NGLR training is kept out of the CAESAR inference library")
 
 if(USE_CUDA)
-    target_compile_definitions(caesar PUBLIC USE_CUDA)
+    target_compile_definitions(caesar_objs PUBLIC USE_CUDA)
     message(STATUS "Build defined with USE_CUDA")
 
     if(HIP_FOUND)
-        target_compile_definitions(caesar PUBLIC USE_ROCM)
+        target_compile_definitions(caesar_objs PUBLIC USE_ROCM)
     endif()
 endif()
 
 if(NVCOMP_FOUND)
-    target_compile_definitions(caesar PRIVATE ENABLE_NVCOMP)
+    target_compile_definitions(caesar_objs PRIVATE ENABLE_NVCOMP)
     message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
 # todo: fix this to read in the file and set it to just some model name
-target_compile_definitions(caesar PRIVATE MODEL_CAESAR_V_ONLY)
+target_compile_definitions(caesar_objs PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 
-target_include_directories(caesar
+target_include_directories(caesar_objs
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dataset>
@@ -110,21 +114,21 @@ target_include_directories(caesar
         $<INSTALL_INTERFACE:include/caesar>
 )
 
-target_link_libraries(caesar PUBLIC zstd_target torch)
+target_link_libraries(caesar_objs PUBLIC zstd_target torch)
 
 if(USE_CUDA)
     if(CUDA_FOUND)
-        target_include_directories(caesar PRIVATE ${CUDA_INCLUDE_DIRS})
-        target_link_libraries(caesar PUBLIC ${CUDA_LIBRARIES})
+        target_include_directories(caesar_objs PRIVATE ${CUDA_INCLUDE_DIRS})
+        target_link_libraries(caesar_objs PUBLIC ${CUDA_LIBRARIES})
     endif()
 
     if(NVCOMP_FOUND)
-        target_include_directories(caesar PRIVATE ${NVCOMP_INCLUDE_DIR})
-        target_link_libraries(caesar PUBLIC ${NVCOMP_LIBRARY})
+        target_include_directories(caesar_objs PRIVATE ${NVCOMP_INCLUDE_DIR})
+        target_link_libraries(caesar_objs PUBLIC ${NVCOMP_LIBRARY})
     endif()
 endif()
 
-target_compile_options(caesar PRIVATE
+target_compile_options(caesar_objs PRIVATE
     $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
     $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
     $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer -fno-inline-functions>
@@ -133,11 +137,11 @@ target_compile_options(caesar PRIVATE
 )
 
 if(USE_CUDA)
-    target_compile_options(caesar PRIVATE
+    target_compile_options(caesar_objs PRIVATE
         $<$<AND:$<CONFIG:Profile>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>
     )
 
-    target_compile_options(caesar PRIVATE
+    target_compile_options(caesar_objs PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -O3 --maxrregcount=64>
     )
 endif()
@@ -147,9 +151,27 @@ set_target_properties(caesar PROPERTIES
     SOVERSION 1
 )
 
-add_executable(caesar_cli CAESAR.cpp)
+add_executable(caesar_cli $<TARGET_OBJECTS:caesar_objs>)
+target_link_libraries(caesar_cli PRIVATE caesar_objs torch)
 
-target_link_libraries(caesar_cli PRIVATE caesar torch)
+target_link_libraries(caesar PUBLIC zstd_target torch)
+target_include_directories(caesar
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dataset>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/models>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/range_coder>
+        $<INSTALL_INTERFACE:include/caesar>
+)
+
+if(USE_CUDA)
+    if(CUDA_FOUND)
+        target_link_libraries(caesar PUBLIC ${CUDA_LIBRARIES})
+    endif()
+    if(NVCOMP_FOUND)
+        target_link_libraries(caesar PUBLIC ${NVCOMP_LIBRARY})
+    endif()
+endif()
 
 if(USE_CUDA)
     target_compile_definitions(caesar_cli PRIVATE USE_CUDA)

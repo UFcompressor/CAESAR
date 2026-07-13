@@ -172,7 +172,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
 
     torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
-    torch::Tensor latent_indexes_cpu = latent_indexes_recon.cpu().contiguous();
 
     torch::Tensor decoded_latents_before_offset =
         torch::zeros({(long)cur_latents, 64, 16, 16}).to(torch::kInt32);

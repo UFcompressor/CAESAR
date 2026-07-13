@@ -231,6 +231,14 @@ private:
     bool text_files_loaded_ = false;
 
     std::mutex mutex_;
+
+    /*
+    todo add this for 
+    input_file.read(reinterpret_cast<char*>(data.data()), file_size);
+    if (!input_file) {
+        throw std::runtime_error("Short read on file: " + filepath.string());
+    }
+    */
 };
 
 
