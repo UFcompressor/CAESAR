@@ -408,14 +408,14 @@ void print_usage(const char* program_name) {
   std::cout << "  -h, --help               Show this help message\n\n";
   std::cout << "Compression Options:\n";
   std::cout << "  -e, --error-bound <val>  Error bound (default: 0.001)\n";
-  std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
+  std::cout << "  --compress-device <dev>  Device (cpu/cuda/mps)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --force-padding          Force padding\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n";
   std::cout << "  --correction <method>    Correction method: none/gae/lbrc/nglr "
                "(default: gae)\n\n";
   std::cout << "Decompression Options:\n";
-  std::cout << "  --decompress-device <dev> Device (cpu/cuda)\n";
+  std::cout << "  --decompress-device <dev> Device (cpu/cuda/mps)\n";
   std::cout << "  --verify                  Verify reconstruction\n";
   std::cout << "  --original <file>         Original file for verification\n";
 }
@@ -486,6 +486,12 @@ torch::Device parse_device(const std::string& device_str) {
 #endif
   }
   throw std::runtime_error("Invalid device string: " + device_str);
+}
+
+std::string device_name(const torch::Device& device) {
+  if (device.is_cuda()) return "cuda";
+  if (device.is_mps()) return "mps";
+  return "cpu";
 }
 
 double calculate_psnr(const torch::Tensor& original,
@@ -784,7 +790,7 @@ int decompress_file(const std::string& input_base,
       save_metrics_to_csv(metrics_csv, original_file, original_shape, 0.0,
                           decompression_time.count(), uncompressed_bytes, 0, 0,
                           0.0, 0.0, nrmse, psnr, 0.0, batch_size, n_frame, "V",
-                          "N/A", decompress_device.is_cuda() ? "cuda" : "cpu");
+                          "N/A", device_name(decompress_device));
     }
   }
 
