@@ -147,7 +147,6 @@ set_target_properties(caesar PROPERTIES
 add_executable(caesar_cli $<TARGET_OBJECTS:caesar_objs>)
 target_link_libraries(caesar_cli PRIVATE caesar_objs torch)
 
-target_link_libraries(caesar PRIVATE caesar_objs)
 target_link_libraries(caesar PUBLIC zstd_target torch)
 target_include_directories(caesar
     PUBLIC
