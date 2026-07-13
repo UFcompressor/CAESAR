@@ -416,6 +416,7 @@ if device not in {"cpu", "cuda", "mps", "xpu"}:
         "  mps  - Apple Silicon GPU (M1/M2/M3/M4)\n"
         "  xpu  - Intel GPU"
     )
+
 model_name = f"caesar_compressor"
 
 

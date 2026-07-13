@@ -250,7 +250,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   std::vector<torch::Tensor> all_q_hyper_latent;
   std::vector<torch::Tensor> all_hyper_indexes;
   int64_t total_latent_codes = 0;
-
+  torch::Tensor cpu_latent_indexes;
 
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
@@ -358,7 +358,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     all_hyper_indexes.clear();
 
     torch::Tensor cpu_q_latent       = cat_q_latent.to(torch::kCPU, true);
-    torch::Tensor cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
+    cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU,  true);
     torch::Tensor cpu_q_hyper        = cat_q_hyper.to(torch::kCPU,  true);
     torch::Tensor cpu_hyper_indexes  = cat_hyper_indexes.to(torch::kCPU, true);
 
@@ -407,6 +407,16 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     result.encoded_latents.clear();
     result.encoded_hyper_latents.clear();
   }
+
+//   int64_t total = cpu_latent_indexes.size(0);
+//   cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
+//     result.latent_indexes.resize(total);
+//     for (int64_t j = 0; j < total; ++j) {
+//         result.latent_indexes[j] = tensor_to_vector<uint8_t>(
+//             cpu_latent_indexes.select(0, j).reshape(-1));
+//     }
+
+
 
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
@@ -464,9 +474,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
             recon_deblk.to(torch::kCPU).to(torch::kFloat32).contiguous();
         recon_deblk = torch::Tensor();
         dataset.clear();
-
-        result.lbrcMetaData.quant_iter = 16;
-
         caesar::lbrc::compress(
             original_cpu, recon_cpu,
             static_cast<double>(rel_eb),

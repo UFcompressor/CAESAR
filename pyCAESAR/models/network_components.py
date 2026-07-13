@@ -214,7 +214,6 @@ class ChannelShuffle(nn.Module):
         return shuffle_out.view(batch_size, channels, *out_dims)
 
 
-
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads=1, dim_head=None):
         super().__init__()

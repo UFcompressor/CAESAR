@@ -109,6 +109,7 @@ size_t calculate_metadata_size(const CompressionResult& result) {
   size_t total_bytes = 0;
 
   total_bytes += get_vector_data_size(result.gae_comp_data);
+  // total_bytes += get_2d_vector_data_size(result.latent_indexes);
 
   const auto& meta = result.compressionMetaData;
 
@@ -154,20 +155,13 @@ size_t calculate_metadata_size(const CompressionResult& result) {
   total_bytes += sizeof(lbrc_meta.lbrc_correction_occur);
   total_bytes += sizeof(lbrc_meta.x_mean);
   total_bytes += sizeof(lbrc_meta.scale);
-  total_bytes += sizeof(lbrc_meta.encoded_nrmse);
+
   total_bytes += sizeof(lbrc_meta.block_size);
-  total_bytes += sizeof(lbrc_meta.zstd_level);
-  total_bytes += sizeof(lbrc_meta.quant_iter);
-  total_bytes += lbrc_meta.shape.size() * sizeof(int32_t);
+
 
   for (const auto& blk : result.lbrc_blocks) {
-      total_bytes += sizeof(blk.b) + sizeof(blk.c);
-      total_bytes += sizeof(blk.t0) + sizeof(blk.t1);
-      total_bytes += sizeof(blk.h0) + sizeof(blk.h1);
-      total_bytes += sizeof(blk.w0) + sizeof(blk.w1);
       total_bytes += sizeof(blk.step);
       total_bytes += sizeof(blk.bit_count);
-      total_bytes += sizeof(blk.num);
       for (const auto& s : blk.streams)
           total_bytes += s.size();
   }

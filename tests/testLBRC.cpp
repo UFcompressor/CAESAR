@@ -194,8 +194,6 @@ static void test_api_roundtrip() {
     LBRCMetaData         meta;
     std::vector<LBRCBlock> blocks;
     meta.block_size = {8, 16, 16};
-    meta.zstd_level = 3;   // fast for testing
-    meta.quant_iter = 16;
 
     const double target = 1e-4;
     caesar::lbrc::compress(orig, recon, target, meta, blocks);
