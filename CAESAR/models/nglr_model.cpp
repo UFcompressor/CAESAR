@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -285,6 +286,9 @@ torch::Tensor reference_from_pred_bias(
     ).to(torch::kInt32);
 }
 
+constexpr uint32_t kNGLRModelTensorMagic = 0x57544D4E; // NMTW
+constexpr uint32_t kNGLRModelTensorVersion = 1;
+
 std::string get_nglr_model_path() {
     const char* value = std::getenv("CAESAR_NGLR_MODEL_PATH");
     if (value == nullptr || std::string(value).empty()) {
@@ -293,8 +297,69 @@ std::string get_nglr_model_path() {
     return std::string(value);
 }
 
-void save_nglr_model(CausalNeuralLorenzoNet model) {
-    torch::save(model, get_nglr_model_path());
+std::vector<NGLRModelTensor> export_model_tensors(CausalNeuralLorenzoNet model) {
+    std::vector<NGLRModelTensor> tensors;
+
+    torch::NoGradGuard no_grad;
+    for (const auto& item : model->named_parameters(/*recurse=*/true)) {
+        torch::Tensor cpu =
+            item.value()
+                .detach()
+                .to(torch::kCPU)
+                .to(torch::kFloat32)
+                .contiguous();
+
+        NGLRModelTensor tensor;
+        tensor.name = item.key();
+        tensor.shape.assign(cpu.sizes().begin(), cpu.sizes().end());
+        tensor.values.resize(static_cast<size_t>(cpu.numel()));
+        std::memcpy(
+            tensor.values.data(),
+            cpu.data_ptr<float>(),
+            tensor.values.size() * sizeof(float)
+        );
+
+        tensors.push_back(std::move(tensor));
+    }
+
+    return tensors;
+}
+
+void load_model_tensors(
+    CausalNeuralLorenzoNet model,
+    const std::vector<NGLRModelTensor>& tensors
+) {
+    torch::NoGradGuard no_grad;
+    auto params = model->named_parameters(/*recurse=*/true);
+
+    for (const auto& tensor : tensors) {
+        bool found = false;
+
+        for (auto& param : params) {
+            if (param.key() != tensor.name) {
+                continue;
+            }
+
+            torch::Tensor value =
+                torch::from_blob(
+                    const_cast<float*>(tensor.values.data()),
+                    tensor.shape,
+                    torch::TensorOptions().dtype(torch::kFloat32)
+                ).clone();
+
+            param.value().copy_(
+                value.to(param.value().device(), param.value().scalar_type())
+            );
+            found = true;
+            break;
+        }
+
+        if (!found) {
+            throw std::runtime_error(
+                "NGLR metadata contains unknown model tensor: " + tensor.name
+            );
+        }
+    }
 }
 
 CausalNeuralLorenzoNet load_nglr_model(
@@ -308,7 +373,12 @@ CausalNeuralLorenzoNet load_nglr_model(
             meta.model_blocks
         );
 
-    torch::load(model, get_nglr_model_path());
+    if (!meta.model_tensors.empty()) {
+        load_model_tensors(model, meta.model_tensors);
+    } else {
+        torch::load(model, get_nglr_model_path());
+    }
+
     model->to(device);
     model->eval();
     return model;
@@ -1635,6 +1705,37 @@ void save_metadata(
         static_cast<std::streamsize>(size * sizeof(int64_t))
     );
 
+    const uint32_t model_magic = kNGLRModelTensorMagic;
+    const uint32_t model_version = kNGLRModelTensorVersion;
+    out.write(reinterpret_cast<const char*>(&model_magic), sizeof(model_magic));
+    out.write(reinterpret_cast<const char*>(&model_version), sizeof(model_version));
+
+    size = meta.model_tensors.size();
+    out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    for (const auto& tensor : meta.model_tensors) {
+        size = tensor.name.size();
+        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        out.write(
+            tensor.name.data(),
+            static_cast<std::streamsize>(tensor.name.size())
+        );
+
+        size = tensor.shape.size();
+        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        out.write(
+            reinterpret_cast<const char*>(tensor.shape.data()),
+            static_cast<std::streamsize>(size * sizeof(int64_t))
+        );
+
+        size = tensor.values.size();
+        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        out.write(
+            reinterpret_cast<const char*>(tensor.values.data()),
+            static_cast<std::streamsize>(size * sizeof(float))
+        );
+    }
+
     size = compressed.blocks.size();
     out.write(reinterpret_cast<const char*>(&size), sizeof(size));
 
@@ -1761,6 +1862,63 @@ void load_metadata(
         (void)old_original_bytes;
         (void)old_latent_bit;
         (void)old_correction_bytes;
+    }
+
+    meta.model_tensors.clear();
+
+    if (clean_meta_ok) {
+        uint32_t model_magic = 0;
+        const std::streampos before_model = in.tellg();
+        in.read(reinterpret_cast<char*>(&model_magic), sizeof(model_magic));
+
+        if (in.good() && model_magic == kNGLRModelTensorMagic) {
+            uint32_t model_version = 0;
+            in.read(reinterpret_cast<char*>(&model_version), sizeof(model_version));
+            if (model_version != kNGLRModelTensorVersion) {
+                throw std::runtime_error("Unsupported NGLR model tensor metadata version");
+            }
+
+            in.read(reinterpret_cast<char*>(&size), sizeof(size));
+            if (size > 10000) {
+                throw std::runtime_error("Invalid NGLR model tensor count in metadata");
+            }
+
+            meta.model_tensors.resize(size);
+
+            for (auto& tensor : meta.model_tensors) {
+                in.read(reinterpret_cast<char*>(&size), sizeof(size));
+                if (size > 4096) {
+                    throw std::runtime_error("Invalid NGLR model tensor name length");
+                }
+
+                tensor.name.resize(size);
+                in.read(
+                    tensor.name.data(),
+                    static_cast<std::streamsize>(tensor.name.size())
+                );
+
+                in.read(reinterpret_cast<char*>(&size), sizeof(size));
+                if (size > 8) {
+                    throw std::runtime_error("Invalid NGLR model tensor rank");
+                }
+
+                tensor.shape.resize(size);
+                in.read(
+                    reinterpret_cast<char*>(tensor.shape.data()),
+                    static_cast<std::streamsize>(size * sizeof(int64_t))
+                );
+
+                in.read(reinterpret_cast<char*>(&size), sizeof(size));
+                tensor.values.resize(size);
+                in.read(
+                    reinterpret_cast<char*>(tensor.values.data()),
+                    static_cast<std::streamsize>(size * sizeof(float))
+                );
+            }
+        } else {
+            in.clear();
+            in.seekg(before_model);
+        }
     }
 
     in.read(reinterpret_cast<char*>(&size), sizeof(size));
@@ -1953,7 +2111,7 @@ NGLRResult encode_correction(
     }
 
     if (!result.compressed.blocks.empty()) {
-        save_nglr_model(model);
+        result.meta.model_tensors = export_model_tensors(model);
     }
 
     return result;

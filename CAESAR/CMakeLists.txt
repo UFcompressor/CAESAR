@@ -2,8 +2,8 @@ find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
 
-option(CAESAR_BUILD_NGLR_TRAINING
-    "Build NGLR training into the CAESAR binary. Keep OFF for inference-only builds."
+option(CAESAR_BUILD_NGLR_TOOLS
+    "Build standalone NGLR training tools."
     OFF)
 
 if(PkgConfig_FOUND)
@@ -81,13 +81,7 @@ target_compile_definitions(caesar PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
-if(CAESAR_BUILD_NGLR_TRAINING)
-    target_sources(caesar PRIVATE models/nglr_train.cpp)
-    target_compile_definitions(caesar PUBLIC CAESAR_ENABLE_NGLR_TRAINING)
-    message(STATUS "NGLR training enabled for CAESAR build")
-else()
-    message(STATUS "NGLR training disabled; CAESAR build is inference-only for NGLR")
-endif()
+message(STATUS "NGLR training is kept out of the CAESAR inference library")
 
 if(USE_CUDA)
     target_compile_definitions(caesar PUBLIC USE_CUDA)
@@ -173,6 +167,39 @@ target_compile_options(caesar_cli PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
     $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
 )
+
+if(CAESAR_BUILD_NGLR_TOOLS)
+    add_executable(caesar_nglr_train
+        tools/caesar_nglr_train.cpp
+        tools/nglr_train.cpp
+    )
+
+    target_link_libraries(caesar_nglr_train PRIVATE caesar torch)
+    target_include_directories(caesar_nglr_train PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/models
+        ${CMAKE_CURRENT_SOURCE_DIR}/dataset
+    )
+
+    if(USE_CUDA)
+        target_compile_definitions(caesar_nglr_train PRIVATE USE_CUDA)
+        if(HIP_FOUND)
+            target_compile_definitions(caesar_nglr_train PRIVATE USE_ROCM)
+        endif()
+    endif()
+
+    target_compile_options(caesar_nglr_train PRIVATE
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Profile>>:-O3 -g -fno-omit-frame-pointer>
+        $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Zi /Od /wd4267>
+        $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2 /wd4267>
+    )
+
+    install(TARGETS caesar_nglr_train
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 if(MSVC)
     set_target_properties(caesar_cli PROPERTIES OUTPUT_NAME caesar_cli)

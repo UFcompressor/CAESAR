@@ -412,7 +412,7 @@ void print_usage(const char* program_name) {
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --force-padding          Force padding\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n";
-  std::cout << "  --correction <method>    Correction method: gae/nglr "
+  std::cout << "  --correction <method>    Correction method: none/gae/nglr "
                "(default: gae)\n\n";
   std::cout << "Decompression Options:\n";
   std::cout << "  --decompress-device <dev> Device (cpu/cuda/mps)\n";
@@ -629,19 +629,10 @@ int compress_file(const std::string& input_file,
   std::string base_output =
       output_file.empty() ? input_file + ".cae" : output_file;
 
-  if (correction_method == "nglr") {
-    set_env_var("CAESAR_NGLR_MODEL_PATH", base_output + ".pt");
-  }
-
   auto start_time_c = std::chrono::high_resolution_clock::now();
   CompressionResult comp =
       compressor.compress(config, batch_size, error_bound, correction_method);
   auto end_time_c = std::chrono::high_resolution_clock::now();
-
-  if (correction_method == "nglr" && !comp.use_nglr) {
-    std::error_code ec;
-    std::filesystem::remove(base_output + ".pt", ec);
-  }
 
   std::chrono::duration<double> compression_time = end_time_c - start_time_c;
 
@@ -726,7 +717,7 @@ int decompress_file(const std::string& input_base,
 
   std::cout << "Metadata loaded successfully\n";
 
-  if (comp.use_nglr) {
+  if (comp.use_nglr && comp.nglrMetaData.model_tensors.empty()) {
     set_env_var("CAESAR_NGLR_MODEL_PATH", input_base + ".pt");
   }
 

@@ -1,7 +1,4 @@
 #include "caesar_compress.h"
-#if defined(CAESAR_ENABLE_NGLR_TRAINING)
-#include "nglr_train.h"
-#endif
 
 template<typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
@@ -482,6 +479,10 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         return result;
     }
     // ---- GAE path  ----------------------------------------
+  if (correction_method == "none") {
+    return result;
+  }
+
   if (correction_method == "gae") {
   torch::Tensor original_full = dataset.original_data();
 
@@ -555,65 +556,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   }
 
   if (correction_method == "nglr") {
-#if !defined(CAESAR_ENABLE_NGLR_TRAINING)
     throw std::runtime_error(
-        "NGLR training is not part of this CAESAR build. "
-        "Build with -DCAESAR_BUILD_NGLR_TRAINING=ON when creating "
-        "new NGLR corrections, or use this inference-only build for "
-        "decompression of existing NGLR files."
+        "NGLR training is handled by the caesar_nglr_train tool. "
+        "Create a base CAESAR file first, then run caesar_nglr_train "
+        "to attach the NGLR correction metadata."
     );
-#else
-    std::cout << "Using NGLR correction" << std::endl;
-
-    torch::Tensor original_cpu =
-        dataset.original_data()
-            .to(torch::kCPU)
-            .to(torch::kFloat32)
-            .contiguous();
-
-    torch::Tensor recon_cpu =
-        recon_deblk
-            .to(torch::kCPU)
-            .to(torch::kFloat32)
-            .contiguous();
-
-    dataset.clear();
-    recon_deblk = torch::Tensor();
-
-    caesar::nglr::NGLRTrainConfig nglr_train_config =
-        caesar::nglr::default_train_config(static_cast<double>(rel_eb));
-
-    caesar::nglr::NGLRTrainResult nglr_trained =
-        caesar::nglr::train_nglr_model(
-            original_cpu,
-            recon_cpu,
-            nglr_train_config,
-            device_
-        );
-
-    if (!nglr_trained.correction_required) {
-        return result;
-    }
-
-    caesar::nglr::NGLRResult nglr_result =
-        caesar::nglr::encode_correction(
-            original_cpu,
-            recon_cpu,
-            nglr_trained.model,
-            nglr_trained.meta,
-            device_
-        );
-
-    if (nglr_result.compressed.blocks.empty()) {
-        return result;
-    }
-
-    result.use_nglr = true;
-    result.nglrMetaData = std::move(nglr_result.meta);
-    result.nglrCompressedData = std::move(nglr_result.compressed);
-
-    return result;
-#endif
   }
 
   throw std::runtime_error(

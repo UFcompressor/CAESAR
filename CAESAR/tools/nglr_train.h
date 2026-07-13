@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nglr_model.h"
+#include "models/nglr_model.h"
 
 #include <torch/torch.h>
 #include <cstdint>

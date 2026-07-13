@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -49,8 +50,26 @@ void run_device(const torch::Device& device) {
 
   auto encoded =
       caesar::nglr::encode_correction(x, r, model, meta, device);
+  if (encoded.meta.model_tensors.empty()) {
+    throw std::runtime_error("NGLR metadata did not capture model weights");
+  }
+
+  std::stringstream metadata_stream(
+      std::ios::in | std::ios::out | std::ios::binary);
+  caesar::nglr::save_metadata(
+      metadata_stream, encoded.meta, encoded.compressed);
+
+  caesar::nglr::NGLRMetaData loaded_meta;
+  caesar::nglr::NGLRCompressedData loaded_compressed;
+  metadata_stream.seekg(0);
+  caesar::nglr::load_metadata(
+      metadata_stream, loaded_meta, loaded_compressed);
+  if (loaded_meta.model_tensors.empty()) {
+    throw std::runtime_error("NGLR metadata did not reload model weights");
+  }
+
   torch::Tensor decoded =
-      caesar::nglr::decompress(r, encoded.meta, encoded.compressed, device);
+      caesar::nglr::decompress(r, loaded_meta, loaded_compressed, device);
 
   const double rmse =
       (decoded.to(torch::kCPU) - x).pow(2).mean().sqrt().item<double>();

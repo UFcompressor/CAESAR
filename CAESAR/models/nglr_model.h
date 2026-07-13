@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 #include <cstdint>
 #include <iosfwd>
+#include <string>
 #include <vector>
 
 namespace caesar::nglr {
@@ -46,6 +47,13 @@ struct CausalNeuralLorenzoNetImpl : torch::nn::Module {
 };
 
 TORCH_MODULE(CausalNeuralLorenzoNet);
+
+struct NGLRModelTensor {
+    std::string name;
+    std::vector<int64_t> shape;
+    std::vector<float> values;
+};
+
 struct NGLRMetaData {
     double mean = 0.0;
     double scale = 1.0;
@@ -63,6 +71,7 @@ struct NGLRMetaData {
     int zstd_level = 3;
 
     std::vector<int64_t> shape;
+    std::vector<NGLRModelTensor> model_tensors;
 };
 
 struct NGLRBlockStream {
