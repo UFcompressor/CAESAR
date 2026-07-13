@@ -24,15 +24,15 @@ enum class CorrectionType {
 };
 
 struct GAEMetaData {
-    bool GAE_correction_occur;
+    bool GAE_correction_occur = false;
     std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
     std::vector<std::vector<float>> pcaBasis; // tensor is converted into vector for adios
     std::vector<float> uniqueVals; // tensor is converted into vector for adios
-    double quanBin;
-    int64_t nVec;
-    int64_t prefixLength;
-    int64_t dataBytes;
-    size_t coeffIntBytes;
+    double quanBin = 0.0;
+    int64_t nVec = 0;
+    int64_t prefixLength = 0;
+    int64_t dataBytes = 0;
+    size_t coeffIntBytes = 0;
 };
 
 struct CompressionMetaData {
@@ -42,9 +42,9 @@ struct CompressionMetaData {
     std::tuple<int32_t , int32_t , std::vector<int32_t>> block_info; // global info
     std::vector<int32_t> data_input_shape; // global info
     std::vector<std::pair<int32_t , float>> filtered_blocks; // global info
-    float global_scale; // global info
-    float global_offset; // global info
-    int64_t pad_T; // global_info
+    float global_scale = 1.0f; // global info
+    float global_offset = 0.0f; // global info
+    int64_t pad_T = 0; // global_info
     bool all_filtered = false; // all data is the same 
 };
 

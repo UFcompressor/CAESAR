@@ -148,14 +148,17 @@ void save_complete_metadata(const std::string& filename,
   file.write(reinterpret_cast<const char*>(&size), sizeof(size));
   file.write(reinterpret_cast<const char*>(comp.gae_comp_data.data()), size);
 
-  // Save NGLR metadata
-  bool use_nglr = comp.use_nglr;
-  file.write(reinterpret_cast<const char*>(&use_nglr), sizeof(use_nglr));
-  caesar::nglr::save_metadata(
-      file,
-      comp.nglrMetaData,
-      comp.nglrCompressedData
-  );
+  // NGLR metadata is an optional trailer. Keeping it absent for GAE/no-correction
+  // files preserves the base CAESAR metadata layout for those paths.
+  if (comp.use_nglr) {
+    bool use_nglr = true;
+    file.write(reinterpret_cast<const char*>(&use_nglr), sizeof(use_nglr));
+    caesar::nglr::save_metadata(
+        file,
+        comp.nglrMetaData,
+        comp.nglrCompressedData
+    );
+  }
 
   file.close();
 }
@@ -282,15 +285,21 @@ CompressionResult load_complete_metadata(const std::string& filename,
   comp.gae_comp_data.resize(size);
   file.read(reinterpret_cast<char*>(comp.gae_comp_data.data()), size);
 
-  // Load NGLR metadata
+  // Load optional NGLR metadata trailer. Older/GAE-only metadata files end here.
   bool use_nglr = false;
-  file.read(reinterpret_cast<char*>(&use_nglr), sizeof(use_nglr));
-  comp.use_nglr = use_nglr;
-  caesar::nglr::load_metadata(
-      file,
-      comp.nglrMetaData,
-      comp.nglrCompressedData
-  );
+  if (file.read(reinterpret_cast<char*>(&use_nglr), sizeof(use_nglr))) {
+    comp.use_nglr = use_nglr;
+    if (comp.use_nglr) {
+      caesar::nglr::load_metadata(
+          file,
+          comp.nglrMetaData,
+          comp.nglrCompressedData
+      );
+    }
+  } else {
+    file.clear();
+    comp.use_nglr = false;
+  }
 
   file.close();
 
@@ -623,6 +632,11 @@ int compress_file(const std::string& input_file,
   CompressionResult comp =
       compressor.compress(config, batch_size, error_bound, correction_method);
   auto end_time_c = std::chrono::high_resolution_clock::now();
+
+  if (correction_method == "nglr" && !comp.use_nglr) {
+    std::error_code ec;
+    std::filesystem::remove(base_output + ".pt", ec);
+  }
 
   std::chrono::duration<double> compression_time = end_time_c - start_time_c;
 

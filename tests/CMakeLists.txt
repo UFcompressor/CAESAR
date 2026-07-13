@@ -42,12 +42,12 @@ target_link_libraries(test_LBRC PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
-add_executable(test_NGLR_mps test_NGLR_mps.cpp)
-target_link_libraries(test_NGLR_mps PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+add_executable(test_NGLR test_NGLR.cpp)
+target_link_libraries(test_NGLR PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
 if(USE_CUDA)
     target_compile_definitions(test_runGaeCuda PRIVATE USE_CUDA)
-    target_compile_definitions(test_NGLR_mps PRIVATE USE_CUDA)
+    target_compile_definitions(test_NGLR PRIVATE USE_CUDA)
     
     if(NVCOMP_FOUND)
         target_compile_definitions(test_runGaeCuda PRIVATE ENABLE_NVCOMP)
@@ -72,7 +72,7 @@ set(TEST_TARGETS
     test_padding
     test_runGaeCuda
     test_LBRC
-    test_NGLR_mps
+    test_NGLR
 )
 
 if(MSVC)

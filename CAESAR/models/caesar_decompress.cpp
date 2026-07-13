@@ -304,7 +304,8 @@ if (comp_result.gaeMetaData.GAE_correction_occur) {
     PCACompressor pca_compressor(
         rel_eb,
         quan_factor,
-        device_.is_cuda() ? "cuda" : "cpu",
+        device_.is_cuda() ? "cuda" :
+        device_.is_mps() ? "mps" : "cpu",
         codec_alg,
         patch_size
     );
@@ -372,35 +373,11 @@ if (comp_result.gaeMetaData.GAE_correction_occur) {
             gae_record_compressedData
         );
 
-    torch::Tensor gae_diff =
-        (recons_gae - padded_recon_tensor_norm).abs();
-
-    std::cout << "GAE max correction: "
-              << gae_diff.max().item<float>()
-              << std::endl;
-
-    std::cout << "GAE mean correction: "
-              << gae_diff.mean().item<float>()
-              << std::endl;
-
     torch::Tensor recons_gae_unpadded =
         unpadding(
             recons_gae,
             comp_result.gaeMetaData.padding_recon_info
         );
-
-    torch::Tensor base_unpadded =
-        unpadding(
-            padded_recon_tensor_norm,
-            comp_result.gaeMetaData.padding_recon_info
-        );
-
-    torch::Tensor unpadding_diff =
-        (recons_gae_unpadded - base_unpadded).abs();
-
-    std::cout << "After unpadding max correction: "
-              << unpadding_diff.max().item<float>()
-              << std::endl;
 
     padding_recon_info.clear();
     padding_recon_info.shrink_to_fit();
