@@ -184,7 +184,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
     for (size_t i = 0; i < cur_latents; i++) {
       std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-        latent_indexes_recon.select(0, (long)(lat_start + i)).reshape(-1));
+       latent_indexes_recon.select(0, (long)i).reshape(-1));
 
       std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
           comp_result.encoded_latents[lat_start + i], latent_index,
