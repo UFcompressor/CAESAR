@@ -47,7 +47,6 @@ target_link_libraries(test_NGLR PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM
 
 if(USE_CUDA)
     target_compile_definitions(test_runGaeCuda PRIVATE USE_CUDA)
-    target_compile_definitions(test_NGLR PRIVATE USE_CUDA)
     
     if(NVCOMP_FOUND)
         target_compile_definitions(test_runGaeCuda PRIVATE ENABLE_NVCOMP)

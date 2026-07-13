@@ -19,12 +19,11 @@
 #include "models/caesar_compress.h"
 #include "models/caesar_decompress.h"
 
-
 static void set_env_var(const std::string& key, const std::string& value) {
 #ifdef _WIN32
-    _putenv_s(key.c_str(), value.c_str());
+  _putenv_s(key.c_str(), value.c_str());
 #else
-    setenv(key.c_str(), value.c_str(), 1);
+  setenv(key.c_str(), value.c_str(), 1);
 #endif
 }
 
@@ -670,10 +669,6 @@ int compress_file(const std::string& input_file,
     std::cout << "  - " << latents_file << "\n";
     std::cout << "  - " << hyper_file << "\n";
     std::cout << "  - " << metadata_file << "\n";
-    if (correction_method == "nglr" &&
-        std::filesystem::exists(base_output + ".pt")) {
-      std::cout << "  - " << base_output << ".pt\n";
-    }
   }
 
   return 0;
@@ -860,8 +855,7 @@ int main(int argc, char* argv[]) {
         n_frame = std::stoi(argv[++i]);
       } else if (arg == "--correction" && i + 1 < argc) {
         correction_method = argv[++i];
-      } 
-      else if (arg == "--compress-device" && i + 1 < argc) {
+      } else if (arg == "--compress-device" && i + 1 < argc) {
         compress_device_str = argv[++i];
       } else if (arg == "--decompress-device" && i + 1 < argc) {
         decompress_device_str = argv[++i];
@@ -900,9 +894,9 @@ int main(int argc, char* argv[]) {
       }
 
       return compress_file(input_file, output_file, shape, error_bound,
-                     batch_size, n_frame, model_type, correction_method,
-                     compress_device, show_timing, show_metadata, verbose,
-                     quiet, force_padding, metrics_csv);
+                           batch_size, n_frame, model_type, correction_method,
+                           compress_device, show_timing, show_metadata, verbose,
+                           quiet, force_padding, metrics_csv);
 
     } else if (command == "decompress") {
       torch::Device decompress_device =

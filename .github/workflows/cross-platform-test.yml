@@ -116,7 +116,7 @@ jobs:
             cmake .. \
               -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
               -DBUILD_TESTS=ON \
-              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_BUILD_TYPE=Debug \
               -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
               -DOpenMP_C_LIB_NAMES="omp" \
               -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I$OpenMP_ROOT/include" \
@@ -133,11 +133,7 @@ jobs:
         shell: bash
         run: |
           cd build
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            cmake --build . --config Release --parallel 2
-          else
-            cmake --build . --config Debug --parallel
-          fi
+          cmake --build . --config Debug --parallel
 
       - name: Generate dummy test data
         shell: bash
@@ -274,6 +270,7 @@ jobs:
 
           $wheel = Get-ChildItem D:\cai\dist\compressai-*.whl | Select-Object -First 1
           conda run -n compress_env python -m pip install $wheel.FullName
+
 
       - name: Install cmake and zstd
         run: |

@@ -16,23 +16,16 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
-enum class CorrectionType {
-    NONE = 0,
-    GAE  = 1,
-    LBRC = 2,
-    NGLR = 3
-};
-
 struct GAEMetaData {
-    bool GAE_correction_occur = false;
+    bool GAE_correction_occur;
     std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
     std::vector<std::vector<float>> pcaBasis; // tensor is converted into vector for adios
     std::vector<float> uniqueVals; // tensor is converted into vector for adios
-    double quanBin = 0.0;
-    int64_t nVec = 0;
-    int64_t prefixLength = 0;
-    int64_t dataBytes = 0;
-    size_t coeffIntBytes = 0;
+    double quanBin;
+    int64_t nVec;
+    int64_t prefixLength;
+    int64_t dataBytes;
+    size_t coeffIntBytes;
 };
 
 struct CompressionMetaData {
@@ -42,17 +35,16 @@ struct CompressionMetaData {
     std::tuple<int32_t , int32_t , std::vector<int32_t>> block_info; // global info
     std::vector<int32_t> data_input_shape; // global info
     std::vector<std::pair<int32_t , float>> filtered_blocks; // global info
-    float global_scale = 1.0f; // global info
-    float global_offset = 0.0f; // global info
-    int64_t pad_T = 0; // global_info
+    float global_scale; // global info
+    float global_offset; // global info
+    int64_t pad_T; // global_info
     bool all_filtered = false; // all data is the same 
 };
 
 struct CompressionResult {
-    CorrectionType correction_type = CorrectionType::NONE;
-
     std::vector<std::string> encoded_latents;
     std::vector<std::string> encoded_hyper_latents;
+  //  std::vector<std::vector<int32_t>> latent_indexes;
 
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
@@ -64,7 +56,8 @@ struct CompressionResult {
     // NGLR compressed data
     caesar::nglr::NGLRMetaData nglrMetaData;
     caesar::nglr::NGLRCompressedData nglrCompressedData;
-// record metadata for decompression
+
+    // record metadata for decompression
     CompressionMetaData compressionMetaData;
     GAEMetaData gaeMetaData;
 
@@ -77,12 +70,10 @@ public:
     explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
     ~Compressor() = default;
 
-    CompressionResult compress(
-    const DatasetConfig& config,
-    int batch_size = 32,
-    float rel_eb = 0.1,
-    const std::string& correction_method = "gae"
-);
+    CompressionResult compress(const DatasetConfig& config,
+                               int batch_size = 32,
+                               float rel_eb = 0.1,
+                               const std::string& correction_method = "gae");
 private:
     torch::Device device_;
     
