@@ -48,6 +48,7 @@ void print_usage(const char* program_name) {
       << "  " << program_name << " <base.cae> --original <file> --shape <shape> [options]\n\n"
       << "Options:\n"
       << "  -e, --target <val>       Target NRMSE/error bound (default: 0.001)\n"
+      << "  --train-epochs <n>       NGLR training epochs (default: 50)\n"
       << "  -b, --batch-size <n>     CAESAR decompression batch size (default: 128)\n"
       << "  -f, --n-frame <n>        Number of frames (default: 8)\n"
       << "  --device <dev>           Training/encoding device (cpu/cuda/mps)\n"
@@ -127,6 +128,7 @@ int main(int argc, char* argv[]) {
     std::string original_file;
     std::vector<int64_t> shape;
     double target = 1e-3;
+    int train_epochs = 50;
     int batch_size = 128;
     int n_frame = 8;
     std::string device_arg;
@@ -141,6 +143,8 @@ int main(int argc, char* argv[]) {
         shape = parse_shape(argv[++i]);
       } else if ((arg == "-e" || arg == "--target") && i + 1 < argc) {
         target = std::stod(argv[++i]);
+      } else if (arg == "--train-epochs" && i + 1 < argc) {
+        train_epochs = std::stoi(argv[++i]);
       } else if ((arg == "-b" || arg == "--batch-size") && i + 1 < argc) {
         batch_size = std::stoi(argv[++i]);
       } else if ((arg == "-f" || arg == "--n-frame") && i + 1 < argc) {
@@ -195,6 +199,7 @@ int main(int argc, char* argv[]) {
 
     caesar::nglr::NGLRTrainConfig train_config =
         caesar::nglr::default_train_config(target);
+    train_config.train_epochs = train_epochs;
 
     caesar::nglr::NGLRTrainResult trained =
         caesar::nglr::train_nglr_model(
