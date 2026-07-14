@@ -154,12 +154,7 @@ CausalNeuralLorenzoNetImpl::CausalNeuralLorenzoNetImpl(
     );
 
     for (int64_t i = 0; i < blocks; ++i) {
-        recons_blocks->push_back(
-            register_module(
-                "recons_block_" + std::to_string(i),
-                ResBlock3D(hidden)
-            )
-        );
+        recons_blocks->push_back(ResBlock3D(hidden));
     }
 
     q_branch = register_module(
