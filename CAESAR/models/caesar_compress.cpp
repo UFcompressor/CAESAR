@@ -487,78 +487,78 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
         return result;
     }
-    // ---- GAE path  ----------------------------------------
+  // ---- GAE path  ----------------------------------------
   if (correction_method == "none") {
     return result;
   }
 
   if (correction_method == "gae") {
-  torch::Tensor original_full = dataset.original_data();
+    torch::Tensor original_full = dataset.original_data();
 
-  // crop reflected tail frames (pad_T) before computing global stats
-  int64_t T_full = original_full.size(2);
-  torch::Tensor original_for_stats = (pad_T > 0)
-      ? original_full.index({torch::indexing::Slice(), torch::indexing::Slice(),
-                              torch::indexing::Slice(0, T_full - pad_T)})
-      : original_full;
+    // crop reflected tail frames (pad_T) before computing global stats
+    int64_t T_full = original_full.size(2);
+    torch::Tensor original_for_stats = (pad_T > 0)
+        ? original_full.index({torch::indexing::Slice(), torch::indexing::Slice(),
+                                torch::indexing::Slice(0, T_full - pad_T)})
+        : original_full;
 
-  torch::Tensor stats =
-      torch::stack({original_for_stats.max(), original_for_stats.min(),
-                    original_for_stats.mean()});
-  float global_scale  = stats[0].item<float>() - stats[1].item<float>();
-  float global_offset = stats[2].item<float>();
+    torch::Tensor stats =
+        torch::stack({original_for_stats.max(), original_for_stats.min(),
+                      original_for_stats.mean()});
+    float global_scale  = stats[0].item<float>() - stats[1].item<float>();
+    float global_offset = stats[2].item<float>();
 
-  auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
-  recon_deblk = torch::Tensor();
+    auto [padded_recon_tensor, padding_recon_info] = padding(recon_deblk);
+    recon_deblk = torch::Tensor();
 
-  auto [padded_original_tensor, dummy_pad] = padding(original_full);
-  dataset.clear();
+    auto [padded_original_tensor, dummy_pad] = padding(original_full);
+    dataset.clear();
 
-  result.gaeMetaData.padding_recon_info = padding_recon_info;
-  result.compressionMetaData.global_scale  = global_scale;
-  result.compressionMetaData.global_offset = global_offset;
+    result.gaeMetaData.padding_recon_info = padding_recon_info;
+    result.compressionMetaData.global_scale  = global_scale;
+    result.compressionMetaData.global_offset = global_offset;
 
-  if (device_.is_mps()) {
+    if (device_.is_mps()) {
       padded_original_tensor = (padded_original_tensor - global_offset) / global_scale;
       padded_recon_tensor    = (padded_recon_tensor - global_offset) / global_scale;
-  } else {
+    } else {
       padded_original_tensor.sub_(global_offset).div_(global_scale);
       padded_recon_tensor.sub_(global_offset).div_(global_scale);
-  }
+    }
 
-  torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
-  torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
+    torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
+    torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
 
-  double quan_factor      = 2.0;
-  std::string codec_alg   = "Zstd";
-  std::pair<int, int> patch_size = {8, 8};
-  std::string pca_device_str =
-      device_.is_cuda() ? "cuda" :
-      device_.is_mps()  ? "mps"  : "cpu";
+    double quan_factor      = 2.0;
+    std::string codec_alg   = "Zstd";
+    std::pair<int, int> patch_size = {8, 8};
+    std::string pca_device_str =
+        device_.is_cuda() ? "cuda" :
+        device_.is_mps()  ? "mps"  : "cpu";
 
-  PCACompressor pca_compressor(rel_eb, quan_factor,
-                             pca_device_str,
-                             codec_alg, patch_size);
+    PCACompressor pca_compressor(rel_eb, quan_factor,
+                                 pca_device_str,
+                                 codec_alg, patch_size);
 
-  auto gae_compression_result = pca_compressor.compress(
-      padded_original_tensor_norm, padded_recon_tensor_norm);
-  padded_original_tensor_norm = torch::Tensor();
+    auto gae_compression_result = pca_compressor.compress(
+        padded_original_tensor_norm, padded_recon_tensor_norm);
+    padded_original_tensor_norm = torch::Tensor();
 
-  result.gaeMetaData.GAE_correction_occur =
-      gae_compression_result.metaData.GAE_correction_occur;
+    result.gaeMetaData.GAE_correction_occur =
+        gae_compression_result.metaData.GAE_correction_occur;
 
-  result.gaeMetaData.quanBin       = gae_compression_result.metaData.quanBin;
-  result.gaeMetaData.nVec          = gae_compression_result.metaData.nVec;
-  result.gaeMetaData.prefixLength  = gae_compression_result.metaData.prefixLength;
-  result.gaeMetaData.dataBytes     = gae_compression_result.metaData.dataBytes;
-  result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
-  result.gae_comp_data             = gae_compression_result.compressedData->data;
+    result.gaeMetaData.quanBin       = gae_compression_result.metaData.quanBin;
+    result.gaeMetaData.nVec          = gae_compression_result.metaData.nVec;
+    result.gaeMetaData.prefixLength  = gae_compression_result.metaData.prefixLength;
+    result.gaeMetaData.dataBytes     = gae_compression_result.metaData.dataBytes;
+    result.gaeMetaData.coeffIntBytes = gae_compression_result.compressedData->coeffIntBytes;
+    result.gae_comp_data             = gae_compression_result.compressedData->data;
 
     if (result.gaeMetaData.GAE_correction_occur) {
-        result.gaeMetaData.pcaBasis =
-        tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
-    result.gaeMetaData.uniqueVals =
-        tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
+      result.gaeMetaData.pcaBasis =
+          tensor_to_2d_vector<float>(gae_compression_result.metaData.pcaBasis);
+      result.gaeMetaData.uniqueVals =
+          tensor_to_vector<float>(gae_compression_result.metaData.uniqueVals);
     }
 
     return result;

@@ -85,8 +85,6 @@ target_compile_definitions(caesar_objs PRIVATE
     DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
 )
 
-message(STATUS "NGLR training is kept out of the CAESAR inference library")
-
 if(USE_CUDA)
     target_compile_definitions(caesar_objs PUBLIC USE_CUDA)
     message(STATUS "Build defined with USE_CUDA")

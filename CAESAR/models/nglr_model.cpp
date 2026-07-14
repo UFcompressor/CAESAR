@@ -284,14 +284,6 @@ torch::Tensor reference_from_pred_bias(
 constexpr uint32_t kNGLRModelTensorMagic = 0x57544D4E; // NMTW
 constexpr uint32_t kNGLRModelTensorVersion = 1;
 
-std::string get_nglr_model_path() {
-    const char* value = std::getenv("CAESAR_NGLR_MODEL_PATH");
-    if (value == nullptr || std::string(value).empty()) {
-        return "nglr_model.pt";
-    }
-    return std::string(value);
-}
-
 std::vector<NGLRModelTensor> export_model_tensors(CausalNeuralLorenzoNet model) {
     std::vector<NGLRModelTensor> tensors;
 
@@ -368,12 +360,13 @@ CausalNeuralLorenzoNet load_nglr_model(
             meta.model_blocks
         );
 
-    if (!meta.model_tensors.empty()) {
-        load_model_tensors(model, meta.model_tensors);
-    } else {
-        torch::load(model, get_nglr_model_path());
+    if (meta.model_tensors.empty()) {
+        throw std::runtime_error(
+            "NGLR metadata is missing embedded model tensors."
+        );
     }
 
+    load_model_tensors(model, meta.model_tensors);
     model->to(device);
     model->eval();
     return model;

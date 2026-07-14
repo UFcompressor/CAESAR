@@ -1,31 +1,8 @@
-#include <torch/torch.h>
-
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
-
 #include "data_utils.h"
 #include "dataset/dataset.h"
 #include "models/array_utils.h"
 #include "models/caesar_compress.h"
 #include "models/caesar_decompress.h"
-
-static void set_env_var(const std::string& key, const std::string& value) {
-#ifdef _WIN32
-  _putenv_s(key.c_str(), value.c_str());
-#else
-  setenv(key.c_str(), value.c_str(), 1);
-#endif
-}
 
 void save_complete_metadata(const std::string& filename,
                             const PaddingInfo& padding_info,
@@ -716,10 +693,6 @@ int decompress_file(const std::string& input_base,
   comp.encoded_hyper_latents = loaded_hyper;
 
   std::cout << "Metadata loaded successfully\n";
-
-  if (comp.use_nglr && comp.nglrMetaData.model_tensors.empty()) {
-    set_env_var("CAESAR_NGLR_MODEL_PATH", input_base + ".pt");
-  }
 
   auto start_time_d = std::chrono::high_resolution_clock::now();
   Decompressor decompressor(decompress_device);

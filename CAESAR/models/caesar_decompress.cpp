@@ -363,8 +363,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
         final_recon_norm * meta.global_scale + meta.global_offset;
 
     return final_recon;
-  }
-  else if (comp_result.use_nglr) {
+  } else if (comp_result.use_nglr) {
     torch::Tensor recon_cpu =
         recon_tensor_deblock
             .to(torch::kCPU)
@@ -389,8 +388,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
         );
 
     return final_recon.to(device_);
-  }
-  else {
+  } else {
     torch::Tensor final_recon =
         recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
 
