@@ -104,5 +104,21 @@ foreach(t IN ITEMS test_caesarCD test_caesarC test_caesarD test_padding test_LBR
         DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
         MODEL_CAESAR_V_ONLY
     )
+
+    if(USE_CUDA)
+        target_compile_definitions(${t} PRIVATE USE_CUDA)
+        if(CUDA_FOUND)
+            target_include_directories(${t} PRIVATE ${CUDA_INCLUDE_DIRS})
+        endif()
+        if(HIP_FOUND)
+            target_compile_definitions(${t} PRIVATE USE_ROCM)
+        endif()
+        if(NVCOMP_FOUND)
+            target_compile_definitions(${t} PRIVATE ENABLE_NVCOMP)
+            target_include_directories(${t} PRIVATE ${NVCOMP_INCLUDE_DIR})
+            target_link_libraries(${t} PRIVATE ${NVCOMP_LIBRARY})
+        endif()
+    endif()
+
     target_precompile_headers(${t} REUSE_FROM caesar_objs)
 endforeach()
