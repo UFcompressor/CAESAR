@@ -48,6 +48,7 @@ struct CompressionResult {
     std::vector<std::string> encoded_hyper_latents;
     std::vector<std::vector<uint8_t>> latent_indexes;
 
+
     // GAE compressed data
     std::vector<uint8_t> gae_comp_data;
 

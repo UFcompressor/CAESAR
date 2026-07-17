@@ -1,3 +1,7 @@
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif()
 
 if(APPLE)
     set(FILESYSTEM_LIB "")
@@ -89,3 +93,32 @@ if(MSVC)
             ${TORCH_DLLS} $<TARGET_FILE_DIR:${test_exe}>)
     endforeach()
 endif()
+
+foreach(t IN ITEMS test_caesarCD test_caesarC test_caesarD test_padding test_LBRC test_runGaeCuda)
+    target_compile_options(${t} PRIVATE
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fPIC>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
+        $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-g -O0>
+    )
+    target_compile_definitions(${t} PRIVATE
+        DEFAULT_CAESAR_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/caesar/models"
+        MODEL_CAESAR_V_ONLY
+    )
+
+    if(USE_CUDA)
+        target_compile_definitions(${t} PRIVATE USE_CUDA)
+        if(CUDA_FOUND)
+            target_include_directories(${t} PRIVATE ${CUDA_INCLUDE_DIRS})
+        endif()
+        if(HIP_FOUND)
+            target_compile_definitions(${t} PRIVATE USE_ROCM)
+        endif()
+        if(NVCOMP_FOUND)
+            target_compile_definitions(${t} PRIVATE ENABLE_NVCOMP)
+            target_include_directories(${t} PRIVATE ${NVCOMP_INCLUDE_DIR})
+            target_link_libraries(${t} PRIVATE ${NVCOMP_LIBRARY})
+        endif()
+    endif()
+
+    target_precompile_headers(${t} REUSE_FROM caesar_objs)
+endforeach()

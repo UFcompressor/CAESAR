@@ -180,14 +180,6 @@ private:
         );
         vbr_quantized_cdf_ = reshape_to_2d(vbr_quantized_cdf_1d, 64, 63);
 
-        {
-        int64_t s1=0; for (auto& row : vbr_quantized_cdf_) for (auto v : row) s1 += v;
-        int64_t s2=0; for (auto v : vbr_cdf_length_) s2 += v;
-        int64_t s3=0; for (auto v : vbr_offset_) s3 += v;
-        std::cout << "CHK0 vbr_cdf sum=" << s1 << " vbr_cdf_length sum=" << s2
-                    << " vbr_offset sum=" << s3 << std::endl;
-        }
-
         // Load GS tables
         auto gs_quantized_cdf_1d = load_array_from_bin<int32_t>(
             get_model_file("gs_quantized_cdf.bin")
@@ -199,14 +191,6 @@ private:
             get_model_file("gs_offset.bin")
         );
         gs_quantized_cdf_ = reshape_to_2d(gs_quantized_cdf_1d, 128, 249);
-
-        {
-        int64_t s1=0; for (auto& row : gs_quantized_cdf_) for (auto v : row) s1 += v;
-        int64_t s2=0; for (auto v : gs_cdf_length_) s2 += v;
-        int64_t s3=0; for (auto v : gs_offset_) s3 += v;
-        std::cout << "CHK0 gs_cdf sum=" << s1 << " gs_cdf_length sum=" << s2
-                    << " gs_offset sum=" << s3 << std::endl;
-        }
 
         prob_tables_loaded_ = true;
     }

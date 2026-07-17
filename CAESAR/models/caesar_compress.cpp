@@ -416,8 +416,6 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
             cpu_latent_indexes.select(0, j).reshape(-1));
     }
 
-
-
   if (!result.compressionMetaData.filtered_blocks.empty()) {
     const int64_t V =
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[0]);

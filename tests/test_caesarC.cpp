@@ -256,6 +256,7 @@ bool save_compression_result_metadata(const CompressionResult& result,
   // Save latent_indexes
   write_2d_vector(result.latent_indexes);
 
+
   // Save use_lbrc
   file.write(reinterpret_cast<const char*>(&result.use_lbrc),
              sizeof(result.use_lbrc));

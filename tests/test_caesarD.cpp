@@ -174,6 +174,7 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   // Load gae_comp_data
   read_vector(result.gae_comp_data);
 
+
   // Load latent_indexes
   read_2d_vector(result.latent_indexes);
 

@@ -145,6 +145,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   row_tensors.clear();
   row_tensors.shrink_to_fit();
 
+
   for (size_t lat_start = 0; lat_start < comp_result.encoded_latents.size();
        lat_start += (size_t)batch_size * 2) {
     size_t lat_end = std::min(lat_start + (size_t)batch_size * 2,
@@ -183,7 +184,8 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
     for (size_t i = 0; i < cur_latents; i++) {
       std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-        latent_indexes_recon.select(0, (long)(lat_start + i)).reshape(-1));
+
+       latent_indexes_recon.select(0, (long)i).reshape(-1));
 
       std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
           comp_result.encoded_latents[lat_start + i], latent_index,
@@ -312,7 +314,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::pair<int, int> patch_size = {8, 8};
     double rel_eb = 1e-3;
     PCACompressor pca_compressor(rel_eb, quan_factor,
-                                 device_.is_cuda() ? "cuda" : "cpu", codec_alg,
+                                 device_.is_cuda() ? "cuda" : "cpu" , codec_alg,
                                  patch_size);
 
     MetaData gae_record_metaData;
