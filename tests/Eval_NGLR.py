@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -9,14 +10,14 @@ import struct
 import time
 from multiprocessing.pool import ThreadPool
 from multiprocessing import get_context
-# not needed that much above 
+
+# not needed that much above
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import zstandard as zstd # can be nvcomp 
-
+import zstandard as zstd  # can be nvcomp
 
 MAGIC = b"NGLR_V1\n"
 
@@ -93,7 +94,9 @@ class CausalNeuralLorenzoNet(nn.Module):
             nn.GroupNorm(g1, recons_hidden),
             nn.GELU(),
         )
-        self.recons_blocks = nn.Sequential(*[ResBlock3D(recons_hidden) for _ in range(blocks)])
+        self.recons_blocks = nn.Sequential(
+            *[ResBlock3D(recons_hidden) for _ in range(blocks)]
+        )
         self.q_branch = nn.Sequential(
             nn.Conv3d(8, q_hidden, 1),
             nn.GELU(),
@@ -151,7 +154,9 @@ def diagonal_indices(shape):
             hs_all.append(hs)
             ws_all.append(ws)
         if ts_all:
-            out.append((np.concatenate(ts_all), np.concatenate(hs_all), np.concatenate(ws_all)))
+            out.append(
+                (np.concatenate(ts_all), np.concatenate(hs_all), np.concatenate(ws_all))
+            )
     _DIAG_CACHE[key] = out
     return out
 
@@ -159,8 +164,13 @@ def diagonal_indices(shape):
 def lorenzo_context_arrays(q, ts, hs, ws, q_context_scale):
     n = len(ts)
     z = np.zeros(n, dtype=np.int32)
-    v1 = z.copy(); v2 = z.copy(); v3 = z.copy(); v4 = z.copy()
-    v5 = z.copy(); v6 = z.copy(); v7 = z.copy()
+    v1 = z.copy()
+    v2 = z.copy()
+    v3 = z.copy()
+    v4 = z.copy()
+    v5 = z.copy()
+    v6 = z.copy()
+    v7 = z.copy()
 
     m = ts > 0
     if np.any(m):
@@ -209,7 +219,12 @@ def strict_encode_delta_block_cpu(q_block, r_block, model, meta):
         ts_t = torch.as_tensor(ts, dtype=torch.long)
         hs_t = torch.as_tensor(hs, dtype=torch.long)
         ws_t = torch.as_tensor(ws, dtype=torch.long)
-        rf_sel = rf[0, :, ts_t, hs_t, ws_t].transpose(0, 1).contiguous().view(-1, ch, 1, 1, 1)
+        rf_sel = (
+            rf[0, :, ts_t, hs_t, ws_t]
+            .transpose(0, 1)
+            .contiguous()
+            .view(-1, ch, 1, 1, 1)
+        )
         bias_norm = model.forward_from_recons_feature(rf_sel, qctx)
         bias = bias_norm.reshape(-1).detach().numpy().astype(np.float64) * delta_scale
         ref = np.rint(pred.astype(np.float64) + bias).astype(np.int32)
@@ -244,11 +259,18 @@ def strict_decode_delta_block_cpu(delta, r_block, model, meta):
         ts_t = torch.as_tensor(ts, dtype=torch.long)
         hs_t = torch.as_tensor(hs, dtype=torch.long)
         ws_t = torch.as_tensor(ws, dtype=torch.long)
-        rf_sel = rf[0, :, ts_t, hs_t, ws_t].transpose(0, 1).contiguous().view(-1, ch, 1, 1, 1)
+        rf_sel = (
+            rf[0, :, ts_t, hs_t, ws_t]
+            .transpose(0, 1)
+            .contiguous()
+            .view(-1, ch, 1, 1, 1)
+        )
         bias_norm = model.forward_from_recons_feature(rf_sel, qctx)
         bias = bias_norm.reshape(-1).detach().numpy().astype(np.float64) * delta_scale
         ref = np.rint(pred.astype(np.float64) + bias).astype(np.int32)
-        qhat[ts, hs, ws] = (ref.astype(np.int64) + delta[ts, hs, ws].astype(np.int64)).astype(np.int32)
+        qhat[ts, hs, ws] = (
+            ref.astype(np.int64) + delta[ts, hs, ws].astype(np.int64)
+        ).astype(np.int32)
     return qhat.astype(np.int32, copy=False)
 
 
@@ -256,8 +278,13 @@ def torch_lorenzo_context(qhat, ts, hs, ws, q_context_scale):
     nb = qhat.shape[0]
     n = ts.numel()
     z = torch.zeros((nb, n), dtype=torch.int32, device=qhat.device)
-    v1 = z.clone(); v2 = z.clone(); v3 = z.clone(); v4 = z.clone()
-    v5 = z.clone(); v6 = z.clone(); v7 = z.clone()
+    v1 = z.clone()
+    v2 = z.clone()
+    v3 = z.clone()
+    v4 = z.clone()
+    v5 = z.clone()
+    v6 = z.clone()
+    v7 = z.clone()
 
     m = ts > 0
     if bool(m.any()):
@@ -298,7 +325,9 @@ def strict_encode_delta_blocks_gpu(q_blocks, r_blocks, model, meta, device):
     qhat = torch.zeros((nb, T, H, W), dtype=torch.int32, device=device)
     delta = torch.zeros((nb, T, H, W), dtype=torch.int32, device=device)
 
-    r_np = np.stack([x.astype(np.float32, copy=False) for x in r_blocks], axis=0)[:, None]
+    r_np = np.stack([x.astype(np.float32, copy=False) for x in r_blocks], axis=0)[
+        :, None
+    ]
     r = torch.from_numpy(r_np).to(device=device, dtype=torch.float32)
     rf = model.encode_recons(r)
     ch = rf.shape[1]
@@ -309,9 +338,13 @@ def strict_encode_delta_blocks_gpu(q_blocks, r_blocks, model, meta, device):
         ws = torch.as_tensor(ws_np, dtype=torch.long, device=device)
         ctx, pred = torch_lorenzo_context(qhat, ts, hs, ws, q_context_scale)
         qctx = ctx.reshape(-1, 8, 1, 1, 1)
-        rf_sel = rf[:, :, ts, hs, ws].permute(0, 2, 1).contiguous().view(-1, ch, 1, 1, 1)
+        rf_sel = (
+            rf[:, :, ts, hs, ws].permute(0, 2, 1).contiguous().view(-1, ch, 1, 1, 1)
+        )
         bias_norm = model.forward_from_recons_feature(rf_sel, qctx).reshape(nb, -1)
-        ref = torch.round(pred.to(torch.float64) + bias_norm.to(torch.float64) * delta_scale).to(torch.int32)
+        ref = torch.round(
+            pred.to(torch.float64) + bias_norm.to(torch.float64) * delta_scale
+        ).to(torch.int32)
         cur = q_ref[:, ts, hs, ws]
         d = cur - ref
         delta[:, ts, hs, ws] = d
@@ -320,7 +353,10 @@ def strict_encode_delta_blocks_gpu(q_blocks, r_blocks, model, meta, device):
     if not bool(torch.equal(qhat, q_ref)):
         maxdiff = int((qhat - q_ref).abs().max().item())
         raise RuntimeError(f"GPU strict encode mismatch, maxdiff={maxdiff}")
-    return [np.ascontiguousarray(x.cpu().numpy().astype(np.int32, copy=False)) for x in delta]
+    return [
+        np.ascontiguousarray(x.cpu().numpy().astype(np.int32, copy=False))
+        for x in delta
+    ]
 
 
 @torch.inference_mode()
@@ -333,7 +369,9 @@ def strict_decode_delta_blocks_gpu(delta_blocks, r_blocks, model, meta, device):
     deltas = torch.from_numpy(deltas_np).to(device=device, dtype=torch.int32)
     qhat = torch.zeros((nb, T, H, W), dtype=torch.int32, device=device)
 
-    r_np = np.stack([x.astype(np.float32, copy=False) for x in r_blocks], axis=0)[:, None]
+    r_np = np.stack([x.astype(np.float32, copy=False) for x in r_blocks], axis=0)[
+        :, None
+    ]
     r = torch.from_numpy(r_np).to(device=device, dtype=torch.float32)
     rf = model.encode_recons(r)
     ch = rf.shape[1]
@@ -344,12 +382,18 @@ def strict_decode_delta_blocks_gpu(delta_blocks, r_blocks, model, meta, device):
         ws = torch.as_tensor(ws_np, dtype=torch.long, device=device)
         ctx, pred = torch_lorenzo_context(qhat, ts, hs, ws, q_context_scale)
         qctx = ctx.reshape(-1, 8, 1, 1, 1)
-        rf_sel = rf[:, :, ts, hs, ws].permute(0, 2, 1).contiguous().view(-1, ch, 1, 1, 1)
+        rf_sel = (
+            rf[:, :, ts, hs, ws].permute(0, 2, 1).contiguous().view(-1, ch, 1, 1, 1)
+        )
         bias_norm = model.forward_from_recons_feature(rf_sel, qctx).reshape(nb, -1)
-        ref = torch.round(pred.to(torch.float64) + bias_norm.to(torch.float64) * delta_scale).to(torch.int32)
+        ref = torch.round(
+            pred.to(torch.float64) + bias_norm.to(torch.float64) * delta_scale
+        ).to(torch.int32)
         qhat[:, ts, hs, ws] = ref + deltas[:, ts, hs, ws]
 
-    return [np.ascontiguousarray(x.cpu().numpy().astype(np.int32, copy=False)) for x in qhat]
+    return [
+        np.ascontiguousarray(x.cpu().numpy().astype(np.int32, copy=False)) for x in qhat
+    ]
 
 
 def zigzag_encode_int32(a):
@@ -392,7 +436,9 @@ def bitplane_decode_uint32(streams, bit_count, shape):
     for b in range(bit_count):
         raw = dctx.decompress(streams[b])
         packed = np.frombuffer(raw, dtype=np.uint8)
-        bits = np.unpackbits(packed, bitorder="little")[:n].astype(np.uint32, copy=False)
+        bits = np.unpackbits(packed, bitorder="little")[:n].astype(
+            np.uint32, copy=False
+        )
         flat |= bits << np.uint32(b)
     return flat.reshape(shape)
 
@@ -432,7 +478,6 @@ def decode_worker_delta(task):
     idx, streams, bit_count, shape = task
     delta = decode_delta_block_from_streams(streams, bit_count, shape)
     return idx, delta
-
 
 
 _CPU_Q = None
@@ -575,7 +620,9 @@ def read_or_skip_block_streams(f, keep=True):
 
 def load_npz_data(path):
     data = np.load(path)
-    original = data["original_data"].astype(np.float32) if "original_data" in data else None
+    original = (
+        data["original_data"].astype(np.float32) if "original_data" in data else None
+    )
     recons = data["recons_data"].astype(np.float32)
     original_raw_shape = None if original is None else original.shape
     recons_raw_shape = recons.shape
@@ -630,7 +677,9 @@ def get_codec_meta(ckpt):
 def maybe_check_shape(ckpt, arr_shape):
     expected = ckpt.get("original_shape", ckpt.get("shape", None))
     if expected is not None and list(arr_shape) != list(expected):
-        raise ValueError(f"shape mismatch with checkpoint: data {arr_shape}, ckpt {expected}")
+        raise ValueError(
+            f"shape mismatch with checkpoint: data {arr_shape}, ckpt {expected}"
+        )
 
 
 def default_correction_path(ckpt_path, engine):
@@ -653,24 +702,27 @@ def decode_qhat_for_batch(delta_blocks, r_blocks, model, meta, device, args):
     return strict_decode_delta_blocks_gpu(delta_blocks, r_blocks, model, meta, device)
 
 
-
 def codec_encode_and_write_cpu(q, recons_n, meta, args, original_bytes):
-    slices = list(iter_block_slices(q.shape, meta["block_t"], meta["block_h"], meta["block_w"]))
+    slices = list(
+        iter_block_slices(q.shape, meta["block_t"], meta["block_h"], meta["block_w"])
+    )
     timer = StageTimer(torch.device("cpu"))
     tmp_path = args.correction_path + ".tmp"
     os.makedirs(os.path.dirname(os.path.abspath(args.correction_path)), exist_ok=True)
 
     file_meta = dict(meta)
-    file_meta.update({
-        "num_blocks": int(len(slices)),
-        "zstd_level": int(args.level),
-        "ckpt_file": os.path.basename(args.ckpt_path),
-        "model_format": str(args.model_format),
-        "engine": "cpu",
-        "workers": int(args.workers),
-        "delta_dtype": "int32",
-        "format": "bitplane_zstd_cpu_optimized_multiprocess_int32_uint16_v1",
-    })
+    file_meta.update(
+        {
+            "num_blocks": int(len(slices)),
+            "zstd_level": int(args.level),
+            "ckpt_file": os.path.basename(args.ckpt_path),
+            "model_format": str(args.model_format),
+            "engine": "cpu",
+            "workers": int(args.workers),
+            "delta_dtype": "int32",
+            "format": "bitplane_zstd_cpu_optimized_multiprocess_int32_uint16_v1",
+        }
+    )
 
     correction_payload_bytes = 0
     correction_stream_file_bytes = 0
@@ -699,13 +751,23 @@ def codec_encode_and_write_cpu(q, recons_n, meta, args, original_bytes):
         entropy_cpu_sum += float(out.get("entropy_sec", 0.0))
         worker_cpu_sum += float(out.get("worker_sec", 0.0))
         correction_payload_bytes += out["bytes_payload"]
-        correction_stream_file_bytes += write_block_streams(f, out["streams"], out["bit_count"])
+        correction_stream_file_bytes += write_block_streams(
+            f, out["streams"], out["bit_count"]
+        )
         delta_abs_sum += out["delta_abs_sum"]
         delta_zero_count += out["delta_zero_count"]
         total_num += out["num"]
         bit_counts.append(out["bit_count"])
-        global_delta_min = out["delta_min"] if global_delta_min is None else min(global_delta_min, out["delta_min"])
-        global_delta_max = out["delta_max"] if global_delta_max is None else max(global_delta_max, out["delta_max"])
+        global_delta_min = (
+            out["delta_min"]
+            if global_delta_min is None
+            else min(global_delta_min, out["delta_min"])
+        )
+        global_delta_max = (
+            out["delta_max"]
+            if global_delta_max is None
+            else max(global_delta_max, out["delta_max"])
+        )
         done += 1
 
     with ctx.Pool(
@@ -717,7 +779,11 @@ def codec_encode_and_write_cpu(q, recons_n, meta, args, original_bytes):
             with open(tmp_path, "wb") as f:
                 with timer.timed("write_header"):
                     write_header(f, file_meta)
-                iterator = pool.imap_unordered(cpu_encode_block_worker, tasks, chunksize=max(1, int(args.cpu_chunksize)))
+                iterator = pool.imap_unordered(
+                    cpu_encode_block_worker,
+                    tasks,
+                    chunksize=max(1, int(args.cpu_chunksize)),
+                )
                 for out in iterator:
                     buffer[out["idx"]] = out
                     while next_to_write in buffer:
@@ -748,7 +814,9 @@ def codec_encode_and_write_cpu(q, recons_n, meta, args, original_bytes):
 
 
 def codec_encode_and_write(q, recons_n, model, meta, device, args, original_bytes):
-    slices = list(iter_block_slices(q.shape, meta["block_t"], meta["block_h"], meta["block_w"]))
+    slices = list(
+        iter_block_slices(q.shape, meta["block_t"], meta["block_h"], meta["block_w"])
+    )
     batch_size = get_batch_size(args)
     timer = StageTimer(device)
 
@@ -756,16 +824,18 @@ def codec_encode_and_write(q, recons_n, model, meta, device, args, original_byte
     os.makedirs(os.path.dirname(os.path.abspath(args.correction_path)), exist_ok=True)
 
     file_meta = dict(meta)
-    file_meta.update({
-        "num_blocks": int(len(slices)),
-        "zstd_level": int(args.level),
-        "ckpt_file": os.path.basename(args.ckpt_path),
-        "model_format": str(args.model_format),
-        "engine": str(args.engine),
-        "block_batch": int(batch_size),
-        "delta_dtype": "int32",
-        "format": "bitplane_zstd_cpu_pipeline_int32_uint16_v2",
-    })
+    file_meta.update(
+        {
+            "num_blocks": int(len(slices)),
+            "zstd_level": int(args.level),
+            "ckpt_file": os.path.basename(args.ckpt_path),
+            "model_format": str(args.model_format),
+            "engine": str(args.engine),
+            "block_batch": int(batch_size),
+            "delta_dtype": "int32",
+            "format": "bitplane_zstd_cpu_pipeline_int32_uint16_v2",
+        }
+    )
 
     correction_payload_bytes = 0
     correction_stream_file_bytes = 0
@@ -789,13 +859,23 @@ def codec_encode_and_write(q, recons_n, model, meta, device, args, original_byte
         nonlocal global_delta_min, global_delta_max, done_written, entropy_cpu_sum
         entropy_cpu_sum += float(out.get("entropy_sec", 0.0))
         correction_payload_bytes += out["bytes_payload"]
-        correction_stream_file_bytes += write_block_streams(f, out["streams"], out["bit_count"])
+        correction_stream_file_bytes += write_block_streams(
+            f, out["streams"], out["bit_count"]
+        )
         delta_abs_sum += out["delta_abs_sum"]
         delta_zero_count += out["delta_zero_count"]
         total_num += out["num"]
         bit_counts.append(out["bit_count"])
-        global_delta_min = out["delta_min"] if global_delta_min is None else min(global_delta_min, out["delta_min"])
-        global_delta_max = out["delta_max"] if global_delta_max is None else max(global_delta_max, out["delta_max"])
+        global_delta_min = (
+            out["delta_min"]
+            if global_delta_min is None
+            else min(global_delta_min, out["delta_min"])
+        )
+        global_delta_max = (
+            out["delta_max"]
+            if global_delta_max is None
+            else max(global_delta_max, out["delta_max"])
+        )
         done_written += 1
 
     def flush_ready(f, block=False):
@@ -826,12 +906,23 @@ def codec_encode_and_write(q, recons_n, model, meta, device, args, original_byte
                     r_blocks = get_block_arrays(recons_n, batch_slices)
 
                     with timer.timed("neural_delta"):
-                        deltas = encode_deltas_for_batch(q_blocks, r_blocks, model, meta, device, args)
+                        deltas = encode_deltas_for_batch(
+                            q_blocks, r_blocks, model, meta, device, args
+                        )
 
                     with timer.timed("entropy_submit"):
                         for j, delta in enumerate(deltas):
                             idx = i + j
-                            pending[idx] = pool.apply_async(encode_worker_delta, ((idx, delta.astype(np.int32, copy=False), args.level),))
+                            pending[idx] = pool.apply_async(
+                                encode_worker_delta,
+                                (
+                                    (
+                                        idx,
+                                        delta.astype(np.int32, copy=False),
+                                        args.level,
+                                    ),
+                                ),
+                            )
                             done_generated += 1
 
                     flush_ready(f, block=False)
@@ -869,7 +960,11 @@ def codec_encode_and_write(q, recons_n, model, meta, device, args, original_byte
 
 
 def decode_full_correction_cpu(recons_n, meta, correction_path, args, original_bytes):
-    slices = list(iter_block_slices(recons_n.shape, meta["block_t"], meta["block_h"], meta["block_w"]))
+    slices = list(
+        iter_block_slices(
+            recons_n.shape, meta["block_t"], meta["block_h"], meta["block_w"]
+        )
+    )
     qhat_all = np.zeros(recons_n.shape, dtype=np.int32)
     timer = StageTimer(torch.device("cpu"))
     tasks = []
@@ -891,10 +986,16 @@ def decode_full_correction_cpu(recons_n, meta, correction_path, args, original_b
                 with timer.timed("file_read"):
                     for idx, sl in enumerate(slices):
                         streams, bit_count = read_or_skip_block_streams(f, keep=True)
-                        tasks.append((idx, sl, streams, bit_count, block_shape_from_slice(sl)))
+                        tasks.append(
+                            (idx, sl, streams, bit_count, block_shape_from_slice(sl))
+                        )
 
             with timer.timed("cpu_decode_workers_wall"):
-                iterator = pool.imap_unordered(cpu_decode_block_worker, tasks, chunksize=max(1, int(args.cpu_chunksize)))
+                iterator = pool.imap_unordered(
+                    cpu_decode_block_worker,
+                    tasks,
+                    chunksize=max(1, int(args.cpu_chunksize)),
+                )
                 for idx, qhat, ent_s, neu_s, work_s in iterator:
                     entropy_cpu_sum += ent_s
                     neural_cpu_sum += neu_s
@@ -910,8 +1011,14 @@ def decode_full_correction_cpu(recons_n, meta, correction_path, args, original_b
     return qhat_all, timer.times
 
 
-def decode_full_correction(recons_n, model, meta, correction_path, args, device, original_bytes):
-    slices = list(iter_block_slices(recons_n.shape, meta["block_t"], meta["block_h"], meta["block_w"]))
+def decode_full_correction(
+    recons_n, model, meta, correction_path, args, device, original_bytes
+):
+    slices = list(
+        iter_block_slices(
+            recons_n.shape, meta["block_t"], meta["block_h"], meta["block_w"]
+        )
+    )
     batch_size = get_batch_size(args)
     qhat_all = np.zeros(recons_n.shape, dtype=np.int32)
     timer = StageTimer(device)
@@ -925,7 +1032,9 @@ def decode_full_correction(recons_n, model, meta, correction_path, args, device,
 
             i = 0
             while i < len(slices):
-                batch_slices, block_shape, next_i = same_shape_batch(slices, i, batch_size)
+                batch_slices, block_shape, next_i = same_shape_batch(
+                    slices, i, batch_size
+                )
 
                 read_tasks = []
                 with timer.timed("file_read"):
@@ -937,13 +1046,17 @@ def decode_full_correction(recons_n, model, meta, correction_path, args, device,
                     if pool is None:
                         decoded = [decode_worker_delta(t) for t in read_tasks]
                     else:
-                        decoded = list(pool.imap(decode_worker_delta, read_tasks, chunksize=1))
+                        decoded = list(
+                            pool.imap(decode_worker_delta, read_tasks, chunksize=1)
+                        )
                     decoded.sort(key=lambda x: x[0])
                     delta_blocks = [x[1] for x in decoded]
 
                 r_blocks = get_block_arrays(recons_n, batch_slices)
                 with timer.timed("neural_decode"):
-                    qhat_blocks = decode_qhat_for_batch(delta_blocks, r_blocks, model, meta, device, args)
+                    qhat_blocks = decode_qhat_for_batch(
+                        delta_blocks, r_blocks, model, meta, device, args
+                    )
 
                 with timer.timed("copy_output"):
                     for sl, qhat in zip(batch_slices, qhat_blocks):
@@ -995,17 +1108,24 @@ def run_encode(args):
     original_bytes = int(original.nbytes)
     norm_t0 = time.perf_counter()
     recons_n = ((recons - meta["x_mean"]) / meta["scale"]).astype(np.float32)
-    residual_n = ((original - meta["x_mean"]) / meta["scale"] - recons_n).astype(np.float32)
+    residual_n = ((original - meta["x_mean"]) / meta["scale"] - recons_n).astype(
+        np.float32
+    )
     q = np.rint(residual_n / meta["step"]).astype(np.int32)
     norm_quant_time = time.perf_counter() - norm_t0
 
-    quant_decoded = ((recons_n + q.astype(np.float32) * float(meta["step"])) * float(meta["scale"]) + float(meta["x_mean"])).astype(np.float32)
+    quant_decoded = (
+        (recons_n + q.astype(np.float32) * float(meta["step"])) * float(meta["scale"])
+        + float(meta["x_mean"])
+    ).astype(np.float32)
     quant_nrmse = decoded_nrmse(original, quant_decoded, meta["scale"])
 
     if args.engine == "cpu":
         out = codec_encode_and_write_cpu(q, recons_n, meta, args, original_bytes)
     else:
-        out = codec_encode_and_write(q, recons_n, model, meta, device, args, original_bytes)
+        out = codec_encode_and_write(
+            q, recons_n, model, meta, device, args, original_bytes
+        )
     out["timings"]["load_npz"] = load_time
     out["timings"]["normalize_quantize"] = norm_quant_time
 
@@ -1029,6 +1149,7 @@ def run_encode(args):
     print(f"Total bytes: {total_bytes:.1f}")
     print(f"Encode time: {end_to_end:.3f} sec")
 
+
 def run_decode(args):
     if not args.correction_path:
         raise ValueError("decode mode requires --correction_path")
@@ -1042,22 +1163,30 @@ def run_decode(args):
     load_t0 = time.perf_counter()
     data, original, recons, _, recons_raw_shape = load_npz_data(args.path)
     load_time = time.perf_counter() - load_t0
-    original_bytes = int(original.nbytes) if original is not None else int(recons.nbytes)
+    original_bytes = (
+        int(original.nbytes) if original is not None else int(recons.nbytes)
+    )
 
     norm_t0 = time.perf_counter()
     recons_n = ((recons - meta["x_mean"]) / meta["scale"]).astype(np.float32)
     norm_time = time.perf_counter() - norm_t0
 
     if args.engine == "cpu":
-        qhat, timings = decode_full_correction_cpu(recons_n, meta, args.correction_path, args, original_bytes)
+        qhat, timings = decode_full_correction_cpu(
+            recons_n, meta, args.correction_path, args, original_bytes
+        )
     else:
-        qhat, timings = decode_full_correction(recons_n, model, meta, args.correction_path, args, device, original_bytes)
+        qhat, timings = decode_full_correction(
+            recons_n, model, meta, args.correction_path, args, device, original_bytes
+        )
     timings["load_npz"] = load_time
     timings["normalize_recons"] = norm_time
 
     recon_t0 = time.perf_counter()
     decoded_n = recons_n + qhat.astype(np.float32) * float(meta["step"])
-    decoded = (decoded_n * float(meta["scale"]) + float(meta["x_mean"])).astype(np.float32)
+    decoded = (decoded_n * float(meta["scale"]) + float(meta["x_mean"])).astype(
+        np.float32
+    )
     recon_time = time.perf_counter() - recon_t0
     timings["final_reconstruct"] = recon_time
 
@@ -1080,7 +1209,9 @@ def run_decode(args):
     cr = original_bytes / total_bytes if total_bytes > 0 else 0.0
 
     decode_wall = timings.get("decode_total_wall", 0.0)
-    end_to_end = load_time + norm_time + decode_wall + timings.get("final_reconstruct", 0.0)
+    end_to_end = (
+        load_time + norm_time + decode_wall + timings.get("final_reconstruct", 0.0)
+    )
     if "eval_nrmse" in timings:
         end_to_end += timings["eval_nrmse"]
     timings["end_to_end_estimated"] = end_to_end
@@ -1098,12 +1229,16 @@ def run_decode(args):
     print(f"Decode time: {end_to_end:.3f} sec")
 
     if args.save_decode:
-        out_path = args.decode_out or os.path.splitext(args.correction_path)[0] + "_decoded.npz"
+        out_path = (
+            args.decode_out
+            or os.path.splitext(args.correction_path)[0] + "_decoded.npz"
+        )
         if final_nrmse is not None:
             np.savez(out_path, decoded_data=decoded_to_save, final_nrmse=final_nrmse)
         else:
             np.savez(out_path, decoded_data=decoded_to_save)
         print("Saved decode output:", out_path)
+
 
 def main():
     parser = argparse.ArgumentParser()

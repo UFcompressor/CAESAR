@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import zstandard as zstd
+
 """
 
 /*
@@ -19,6 +20,7 @@ import zstandard as zstd
  */
 
 """
+
 
 def charbonnier(x, eps=1e-6):
     return torch.mean(torch.sqrt(x * x + eps * eps))
@@ -42,7 +44,9 @@ def block_slices(shape, bt, bh, bw):
             for t0 in range(0, T, bt):
                 for h0 in range(0, H, bh):
                     for w0 in range(0, W, bw):
-                        yield b, c, t0, min(t0 + bt, T), h0, min(h0 + bh, H), w0, min(w0 + bw, W)
+                        yield b, c, t0, min(t0 + bt, T), h0, min(h0 + bh, H), w0, min(
+                            w0 + bw, W
+                        )
 
 
 def recons_features(x):
@@ -135,7 +139,6 @@ def q_context(q, scale):
     return ctx / float(max(scale, 1.0))
 
 
-
 def lorenzo_pred_torch(q):
     p = torch.zeros_like(q)
     p[1:] += q[:-1]
@@ -220,13 +223,18 @@ def safe_global_quantize(x, rn, residual, target, iters, mean, scale):
 
     low = 0.0
     high = max(float(target) * np.sqrt(12.0), 1e-12)
-    while decode_sse(x, rn, residual, high, qbuf, ybuf, ebuf, mean, scale) <= target_sse:
+    while (
+        decode_sse(x, rn, residual, high, qbuf, ybuf, ebuf, mean, scale) <= target_sse
+    ):
         low = high
         high *= 2.0
 
     for _ in range(iters):
         mid = 0.5 * (low + high)
-        if decode_sse(x, rn, residual, mid, qbuf, ybuf, ebuf, mean, scale) <= target_sse:
+        if (
+            decode_sse(x, rn, residual, mid, qbuf, ybuf, ebuf, mean, scale)
+            <= target_sse
+        ):
             low = mid
         else:
             high = mid
@@ -246,7 +254,9 @@ def estimate_scales(q, args):
     q_sum = 0.0
     d_sum = 0.0
     n = 0
-    for b, c, t0, t1, h0, h1, w0, w1 in block_slices(q.shape, args.block_t, args.block_h, args.block_w):
+    for b, c, t0, t1, h0, h1, w0, w1 in block_slices(
+        q.shape, args.block_t, args.block_h, args.block_w
+    ):
         qb = np.ascontiguousarray(q[b, c, t0:t1, h0:h1, w0:w1])
         d = lorenzo_delta(qb)
         q_sum += float(np.abs(qb).sum())
@@ -265,7 +275,9 @@ def load_npz(path, latent_bit_arg):
         r = r[:, None]
     if x.shape != r.shape:
         raise ValueError(f"shape mismatch: {x.shape} vs {r.shape}")
-    latent_bit = int(z["latent_bit"]) if "latent_bit" in z.files else int(latent_bit_arg)
+    latent_bit = (
+        int(z["latent_bit"]) if "latent_bit" in z.files else int(latent_bit_arg)
+    )
     return x, r, latent_bit
 
 
@@ -304,7 +316,9 @@ def prepare_data(args, ckpt):
 
     xn, rn, residual = normalize(x, r, mean, scale)
     if ckpt is None:
-        step, q, final_nrmse = safe_global_quantize(x, rn, residual, args.nrmse, args.quant_iter, mean, scale)
+        step, q, final_nrmse = safe_global_quantize(
+            x, rn, residual, args.nrmse, args.quant_iter, mean, scale
+        )
     else:
         step = float(ckpt["step"])
         q = quantize_with_step(residual, step)
@@ -321,7 +335,9 @@ def prepare_data(args, ckpt):
         "shape": list(x.shape),
         "original_bytes": int(x.nbytes),
         "latent_bit": int(args.latent_bit or latent_bit),
-        "base_nrmse": decoded_nrmse(x, rn, np.zeros_like(q, dtype=np.int32), 1.0, mean, scale),
+        "base_nrmse": decoded_nrmse(
+            x, rn, np.zeros_like(q, dtype=np.int32), 1.0, mean, scale
+        ),
         "quant_nrmse": float(final_nrmse),
         "block_t": int(args.block_t),
         "block_h": int(args.block_h),
@@ -332,21 +348,28 @@ def prepare_data(args, ckpt):
 
 def checkpoint(model, args, meta, best_loss, best_epoch):
     out = dict(meta)
-    out.update({
-        "model": {k.replace("_orig_mod.", ""): v.detach().cpu() for k, v in model.state_dict().items()},
-        "hidden": int(args.hidden),
-        "q_hidden": int(args.q_hidden),
-        "model_blocks": int(args.model_blocks),
-        "best_loss": float(best_loss),
-        "best_epoch": int(best_epoch),
-    })
+    out.update(
+        {
+            "model": {
+                k.replace("_orig_mod.", ""): v.detach().cpu()
+                for k, v in model.state_dict().items()
+            },
+            "hidden": int(args.hidden),
+            "q_hidden": int(args.q_hidden),
+            "model_blocks": int(args.model_blocks),
+            "best_loss": float(best_loss),
+            "best_epoch": int(best_epoch),
+        }
+    )
     return out
 
 
 def train(rn, q, meta, args, device, ckpt):
     path = model_path(args)
     slices = list(block_slices(q.shape, args.block_t, args.block_h, args.block_w))
-    model = torch.compile(CausalNeuralLorenzoNet(args.hidden, args.q_hidden, args.model_blocks).to(device))
+    model = torch.compile(
+        CausalNeuralLorenzoNet(args.hidden, args.q_hidden, args.model_blocks).to(device)
+    )
     best_loss = float("inf")
     best_epoch = 0
 
@@ -356,9 +379,13 @@ def train(rn, q, meta, args, device, ckpt):
         best_epoch = int(ckpt.get("best_epoch", 0))
         print(f"Resume: {path}")
 
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    opt = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
     print(f"Target {args.nrmse:g} | blocks {len(slices)} | step {meta['step']:.8e}")
-    print(f"Base NRMSE {meta['base_nrmse']:.8e} | Quant NRMSE {meta['quant_nrmse']:.8e}")
+    print(
+        f"Base NRMSE {meta['base_nrmse']:.8e} | Quant NRMSE {meta['quant_nrmse']:.8e}"
+    )
     print(f"q_scale {meta['q_scale']:.6g} | d_scale {meta['d_scale']:.6g}")
     print(f"Model: {path}")
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -381,9 +408,9 @@ def train(rn, q, meta, args, device, ckpt):
 
     batch_groups = []
     for shape, g in groups.items():
-        r_g = torch.stack(g["r"]).unsqueeze(1)   # [N,1,T,H,W]
-        c_g = torch.stack(g["c"])                # [N,8,T,H,W]
-        d_g = torch.stack(g["d"]).unsqueeze(1)   # [N,1,T,H,W]
+        r_g = torch.stack(g["r"]).unsqueeze(1)  # [N,1,T,H,W]
+        c_g = torch.stack(g["c"])  # [N,8,T,H,W]
+        d_g = torch.stack(g["d"]).unsqueeze(1)  # [N,1,T,H,W]
         batch_groups.append((r_g, c_g, d_g))
     print(f"Precomputed {len(slices)} blocks into {len(batch_groups)} shape group(s)")
 
@@ -399,7 +426,7 @@ def train(rn, q, meta, args, device, ckpt):
             N = r_g.shape[0]
             perm = torch.randperm(N, device=device)
             for i in range(0, N, args.batch_size):
-                idx = perm[i:i + args.batch_size]
+                idx = perm[i : i + args.batch_size]
                 r_b, c_b, d_b = r_g[idx], c_g[idx], d_g[idx]
 
                 pred = model(r_b, c_b)
@@ -409,7 +436,9 @@ def train(rn, q, meta, args, device, ckpt):
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 # maybe remove the error_if_nonfinite ?????????
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip, error_if_nonfinite=False)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip, error_if_nonfinite=False
+                )
                 opt.step()
 
                 bs = idx.numel()
@@ -419,7 +448,9 @@ def train(rn, q, meta, args, device, ckpt):
                 if profiler is not None:
                     profiler.step()
 
-        return (loss_sum / n_total).item(), (remain_sum / n_total).item() * meta["d_scale"]
+        return (loss_sum / n_total).item(), (remain_sum / n_total).item() * meta[
+            "d_scale"
+        ]
 
     for epoch in range(1, args.train_epochs + 1):
         if device.type == "cuda":
@@ -428,7 +459,10 @@ def train(rn, q, meta, args, device, ckpt):
 
         if args.profile and epoch == 1:
             with torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
                 record_shapes=False,
             ) as prof:
                 avg_loss, avg_remain = run_epoch(profiler=prof)
@@ -447,8 +481,11 @@ def train(rn, q, meta, args, device, ckpt):
                 save_atomic(checkpoint(model, args, meta, best_loss, best_epoch), path)
 
         if epoch % args.print_interval == 0 or epoch == args.train_epochs:
-            print(f"Epoch {epoch} | Loss {avg_loss:.6e} | RemainAbs {avg_remain:.6e} "
-                  f"| BestEpoch {best_epoch} | Time {epoch_time:.2f}s", flush=True)
+            print(
+                f"Epoch {epoch} | Loss {avg_loss:.6e} | RemainAbs {avg_remain:.6e} "
+                f"| BestEpoch {best_epoch} | Time {epoch_time:.2f}s",
+                flush=True,
+            )
 
     if not os.path.exists(path):
         save_atomic(checkpoint(model, args, meta, best_loss, best_epoch), path)
@@ -476,7 +513,9 @@ def diagonals(shape):
             hs_all.append(hs)
             ws_all.append((s - t - hs).astype(np.int64))
         if ts_all:
-            out.append((np.concatenate(ts_all), np.concatenate(hs_all), np.concatenate(ws_all)))
+            out.append(
+                (np.concatenate(ts_all), np.concatenate(hs_all), np.concatenate(ws_all))
+            )
     _DIAG_CACHE[key] = out
     return out
 
@@ -528,7 +567,14 @@ def strict_delta(qb, rb, model, q_scale, d_scale, device):
         hh = torch.as_tensor(hs, dtype=torch.long, device=device)
         ww = torch.as_tensor(ws, dtype=torch.long, device=device)
         rf_sel = rf[0, :, tt, hh, ww].transpose(0, 1).contiguous().view(-1, ch, 1, 1, 1)
-        bias = model.forward_from_feature(rf_sel, qctx).reshape(-1).cpu().numpy().astype(np.float64) * d_scale
+        bias = (
+            model.forward_from_feature(rf_sel, qctx)
+            .reshape(-1)
+            .cpu()
+            .numpy()
+            .astype(np.float64)
+            * d_scale
+        )
         ref = np.rint(pred.astype(np.float64) + bias).astype(np.int64)
         delta[ts, hs, ws] = qref[ts, hs, ws] - ref
         qhat[ts, hs, ws] = qref[ts, hs, ws]
@@ -555,7 +601,9 @@ def bitplane_size(delta, level):
 @torch.inference_mode()
 def evaluate(model_file, x, rn, q, meta, args, device):
     ckpt = torch.load(model_file, map_location="cpu")
-    model = CausalNeuralLorenzoNet(ckpt["hidden"], ckpt["q_hidden"], ckpt["model_blocks"]).to(device)
+    model = CausalNeuralLorenzoNet(
+        ckpt["hidden"], ckpt["q_hidden"], ckpt["model_blocks"]
+    ).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
 
@@ -577,7 +625,9 @@ def evaluate(model_file, x, rn, q, meta, args, device):
         d_abs_sum += float(np.abs(d).sum())
         d_zero += int(np.sum(d == 0))
         d_num += d.size
-        if args.progress_interval and (i % args.progress_interval == 0 or i == len(slices)):
+        if args.progress_interval and (
+            i % args.progress_interval == 0 or i == len(slices)
+        ):
             print(f"Eval block {i}/{len(slices)}", flush=True)
 
     final_nrmse = decoded_nrmse(x, rn, q, meta["step"], meta["mean"], meta["scale"])
@@ -589,7 +639,9 @@ def evaluate(model_file, x, rn, q, meta, args, device):
     print("-" * 80)
     print("Best model evaluation")
     print("Best model:", model_file)
-    print(f"Best loss: {ckpt.get('best_loss', 0.0):.6e} | Best epoch: {ckpt.get('best_epoch', 0)}")
+    print(
+        f"Best loss: {ckpt.get('best_loss', 0.0):.6e} | Best epoch: {ckpt.get('best_epoch', 0)}"
+    )
     print(f"Final NRMSE: {final_nrmse:.8e}")
     print(f"CR: {cr:.3f}")
     print("Latent bytes:", latent_bytes)
@@ -636,7 +688,9 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = torch.device(
+        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    )
     print("Device:", device)
 
     ckpt = load_resume_checkpoint(args)
