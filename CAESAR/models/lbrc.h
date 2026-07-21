@@ -2,10 +2,8 @@
 #include "model_utils.h"
 #include <zstd.h>
 #include <atomic>
-#include <cmath>
 #include <stdexcept>
 #include <thread>
-#include <vector>
 #include <cstdint>
 #include <array>
 

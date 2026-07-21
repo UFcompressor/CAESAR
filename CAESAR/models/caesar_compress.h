@@ -8,7 +8,6 @@
 #include "runGaeCuda.h" 
 #include "model_utils.h"
 #include <fstream>
-#include <cmath>
 #include <limits>
 #include <utility>
 #ifdef USE_CUDA

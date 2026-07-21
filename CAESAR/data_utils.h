@@ -1,8 +1,6 @@
 #pragma once
 #include <torch/torch.h>
-#include <vector>
 #include <cstdint>
-#include <cmath>
 #include <stdexcept>
 #include "models/model_utils.h"
 /**
