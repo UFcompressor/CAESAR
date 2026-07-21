@@ -124,6 +124,40 @@ void save_complete_metadata(const std::string& filename,
   file.write(reinterpret_cast<const char*>(&size), sizeof(size));
   file.write(reinterpret_cast<const char*>(comp.gae_comp_data.data()), size);
 
+  // Save use_lbrc
+  file.write(reinterpret_cast<const char*>(&comp.use_lbrc),
+             sizeof(comp.use_lbrc));
+
+  // Save LBRCMetaData
+  const auto& lbrc_meta = comp.lbrcMetaData;
+  file.write(reinterpret_cast<const char*>(&lbrc_meta.lbrc_correction_occur),
+             sizeof(lbrc_meta.lbrc_correction_occur));
+  file.write(reinterpret_cast<const char*>(&lbrc_meta.x_mean),
+             sizeof(lbrc_meta.x_mean));
+  file.write(reinterpret_cast<const char*>(&lbrc_meta.scale),
+             sizeof(lbrc_meta.scale));
+  file.write(reinterpret_cast<const char*>(&lbrc_meta.block_size),
+             sizeof(lbrc_meta.block_size));
+
+  // Save lbrc_blocks
+  size = comp.lbrc_blocks.size();
+  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+  for (const auto& blk : comp.lbrc_blocks) {
+    file.write(reinterpret_cast<const char*>(&blk.step), sizeof(blk.step));
+    file.write(reinterpret_cast<const char*>(&blk.bit_count),
+               sizeof(blk.bit_count));
+
+    size_t num_streams = blk.streams.size();
+    file.write(reinterpret_cast<const char*>(&num_streams), sizeof(num_streams));
+    for (const auto& s : blk.streams) {
+      size_t stream_len = s.size();
+      file.write(reinterpret_cast<const char*>(&stream_len), sizeof(stream_len));
+      if (stream_len) {
+      file.write(reinterpret_cast<const char*>(s.data()), static_cast<std::streamsize>(stream_len));
+      }
+    }
+  }
+
   file.close();
 }
 
@@ -248,6 +282,39 @@ CompressionResult load_complete_metadata(const std::string& filename,
   file.read(reinterpret_cast<char*>(&size), sizeof(size));
   comp.gae_comp_data.resize(size);
   file.read(reinterpret_cast<char*>(comp.gae_comp_data.data()), size);
+
+  // Load use_lbrc
+  file.read(reinterpret_cast<char*>(&comp.use_lbrc), sizeof(comp.use_lbrc));
+
+  // Load LBRCMetaData
+  LBRCMetaData lbrc_meta;
+  file.read(reinterpret_cast<char*>(&lbrc_meta.lbrc_correction_occur),
+            sizeof(lbrc_meta.lbrc_correction_occur));
+  file.read(reinterpret_cast<char*>(&lbrc_meta.x_mean), sizeof(lbrc_meta.x_mean));
+  file.read(reinterpret_cast<char*>(&lbrc_meta.scale), sizeof(lbrc_meta.scale));
+  file.read(reinterpret_cast<char*>(&lbrc_meta.block_size),
+            sizeof(lbrc_meta.block_size));
+  comp.lbrcMetaData = lbrc_meta;
+
+  // Load lbrc_blocks
+  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  comp.lbrc_blocks.resize(size);
+  for (auto& blk : comp.lbrc_blocks) {
+    file.read(reinterpret_cast<char*>(&blk.step), sizeof(blk.step));
+    file.read(reinterpret_cast<char*>(&blk.bit_count), sizeof(blk.bit_count));
+
+    size_t num_streams;
+    file.read(reinterpret_cast<char*>(&num_streams), sizeof(num_streams));
+    blk.streams.resize(num_streams);
+    for (auto& s : blk.streams) {
+      size_t stream_len;
+      file.read(reinterpret_cast<char*>(&stream_len), sizeof(stream_len));
+      if (stream_len) {
+        s.resize(stream_len);
+        file.read(reinterpret_cast<char*>(s.data()), static_cast<std::streamsize>(stream_len));
+      }
+    }
+  }
 
   file.close();
 
