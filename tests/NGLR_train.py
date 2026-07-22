@@ -368,7 +368,10 @@ def train(rn, q, meta, args, device, ckpt):
     path = model_path(args)
     slices = list(block_slices(q.shape, args.block_t, args.block_h, args.block_w))
     model = torch.compile(
-        CausalNeuralLorenzoNet(args.hidden, args.q_hidden, args.model_blocks).to(device)
+        CausalNeuralLorenzoNet(args.hidden, args.q_hidden, args.model_blocks).to(
+            device
+        ),
+        mode="reduce-overhead",
     )
     best_loss = float("inf")
     best_epoch = 0
@@ -429,9 +432,10 @@ def train(rn, q, meta, args, device, ckpt):
                 idx = perm[i : i + args.batch_size]
                 r_b, c_b, d_b = r_g[idx], c_g[idx], d_g[idx]
 
-                pred = model(r_b, c_b)
-                remain = d_b - pred
-                loss = charbonnier(remain)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    pred = model(r_b, c_b)
+                    remain = d_b - pred
+                    loss = charbonnier(remain)
 
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
