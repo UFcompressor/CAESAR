@@ -457,10 +457,34 @@ model = CompressorMix(
     device=device,
 )
 
+
+def strip_orig_mod_prefix(state_dict):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        new_key = k.replace("_orig_mod.", "")
+        new_state_dict[new_key] = v
+    return new_state_dict
+
+
 state_dict = remove_module_prefix(
     torch.load("./pretrained/caesar_v.pt", map_location=device)
 )
-model.load_state_dict(state_dict)
+
+try:
+    model.load_state_dict(state_dict)
+    print("Loaded state dict without needing _orig_mod. stripping.")
+except RuntimeError:
+    try:
+        state_dict = strip_orig_mod_prefix(state_dict)
+        model.load_state_dict(state_dict)
+        print("Loaded state dict after stripping _orig_mod. prefix.")
+    except RuntimeError as e:
+        raise RuntimeError(
+            "Failed to load state_dict even after stripping 'module.' and "
+            "'_orig_mod.' prefixes. The checkpoint may not match this model "
+            "architecture."
+        ) from e
+
 model = model.float()
 
 quantized_cdf, cdf_length, offset = model.entropy_model.prior._update(30)
