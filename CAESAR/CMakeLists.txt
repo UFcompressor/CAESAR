@@ -62,6 +62,7 @@ set(CAESAR_SRC
     models/caesar_decompress.cpp
     models/model_utils.cpp
     models/runGaeCuda.cpp
+    models/gpu_lossess.cpp
     models/lbrc.cpp
     data_utils.cpp
 )

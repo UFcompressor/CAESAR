@@ -1,95 +1,100 @@
 #pragma once
-#include "lbrc.h"
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
-#include "model_cache.h"
-#include "array_utils.h"
-#include "../dataset/dataset.h"
-#include "range_coder/rans_coder.hpp"
-#include "runGaeCuda.h" 
-#include "model_utils.h"
+
 #include <fstream>
 #include <limits>
 #include <utility>
+
+#include "../dataset/dataset.h"
+#include "array_utils.h"
+#include "lbrc.h"
+#include "model_cache.h"
+#include "model_utils.h"
+#include "range_coder/rans_coder.hpp"
+#include "runGaeCuda.h"
 #ifdef USE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
-
-
 struct GAEMetaData {
-    bool GAE_correction_occur;
-    std::vector<int> padding_recon_info; // global info before GAE (GAE preparation)
-    std::vector<std::vector<float>> pcaBasis; // tensor is converted into vector for adios
-    std::vector<float> uniqueVals; // tensor is converted into vector for adios
-    double quanBin;
-    int64_t nVec;
-    int64_t prefixLength;
-    int64_t dataBytes;
-    size_t coeffIntBytes;
+  bool GAE_correction_occur;
+  std::vector<int>
+      padding_recon_info;  // global info before GAE (GAE preparation)
+  std::vector<std::vector<float>>
+      pcaBasis;                   // tensor is converted into vector for adios
+  std::vector<float> uniqueVals;  // tensor is converted into vector for adios
+  double quanBin;
+  int64_t nVec;
+  int64_t prefixLength;
+  int64_t dataBytes;
+  size_t coeffIntBytes;
 };
 
 struct CompressionMetaData {
-    std::vector<float> offsets; // local info - corresponding to latent
-    std::vector<float> scales; // local info - corresponding to latent
-    std::vector<std::vector<int32_t>> indexes; // local info - corresponding to latent
-    std::tuple<int32_t , int32_t , std::vector<int32_t>> block_info; // global info
-    std::vector<int32_t> data_input_shape; // global info
-    std::vector<std::pair<int32_t , float>> filtered_blocks; // global info
-    float global_scale; // global info
-    float global_offset; // global info
-    int64_t pad_T; // global_info
-    bool all_filtered = false; // all data is the same 
+  std::vector<float> offsets;  // local info - corresponding to latent
+  std::vector<float> scales;   // local info - corresponding to latent
+  std::vector<std::vector<int32_t>>
+      indexes;  // local info - corresponding to latent
+  std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info;  // global info
+  std::vector<int32_t> data_input_shape;                          // global info
+  std::vector<std::pair<int32_t, float>> filtered_blocks;         // global info
+  float global_scale;                                             // global info
+  float global_offset;                                            // global info
+  int64_t pad_T;                                                  // global_info
+  bool all_filtered = false;  // all data is the same
 };
-
 
 struct CompressionResult {
-    std::vector<std::string> encoded_latents;
-    std::vector<std::string> encoded_hyper_latents;
-    // std::vector<std::vector<uint8_t>> latent_indexes;
+  std::vector<std::string> encoded_latents;
+  std::vector<std::string> encoded_hyper_latents;
+  // std::vector<std::vector<uint8_t>> latent_indexes;
 
-    // GAE compressed data
-    std::vector<uint8_t> gae_comp_data;
+  // GAE compressed data
+  std::vector<uint8_t> gae_comp_data;
 
-    // LBRC compressed data
-    std::vector<LBRCBlock> lbrc_blocks; 
-    LBRCMetaData    lbrcMetaData;
-    
-    // record metadata for decompression
-    CompressionMetaData compressionMetaData;
-    GAEMetaData gaeMetaData;
+  // LBRC compressed data
+  std::vector<LBRCBlock> lbrc_blocks;
+  LBRCMetaData lbrcMetaData;
 
-    bool use_lbrc = true;   
+  // record metadata for decompression
+  CompressionMetaData compressionMetaData;
+  GAEMetaData gaeMetaData;
+
+  bool use_lbrc = true;
 };
- 
+
 class Compressor {
-public:
-    explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
-    ~Compressor() = default;
+ public:
+  explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
+  ~Compressor() = default;
 
-    CompressionResult compress(const DatasetConfig& config , int batch_size = 32 , float rel_eb = 0.1);
-private:
-    torch::Device device_;
-    
- 
-    torch::inductor::AOTIModelPackageLoader* compressor_model_;
-    torch::inductor::AOTIModelPackageLoader* hyper_decompressor_model_;
-    torch::inductor::AOTIModelPackageLoader* decompressor_model_;
-    
-    torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data, int64_t batch_size);
-    torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW, const std::vector<int64_t>& padding);
-    torch::Tensor recons_data(const torch::Tensor& recons_data, std::vector<int32_t> shape, int64_t pad_T) const;
-    
-    void load_models();
-    void load_probability_tables();
-    void load_text_files();
-    
-    std::vector<std::vector<int32_t>> vbr_quantized_cdf_;
-    std::vector<int32_t> vbr_cdf_length_;
-    std::vector<int32_t> vbr_offset_;
-    std::vector<std::vector<int32_t>> gs_quantized_cdf_;
-    std::vector<int32_t> gs_cdf_length_;
-    std::vector<int32_t> gs_offset_;
+  CompressionResult compress(const DatasetConfig& config, int batch_size = 32,
+                             float rel_eb = 0.1);
 
-    std::string model_name_;
-    std::string device_type_;
+ private:
+  torch::Device device_;
+
+  torch::inductor::AOTIModelPackageLoader* compressor_model_;
+  torch::inductor::AOTIModelPackageLoader* hyper_decompressor_model_;
+  torch::inductor::AOTIModelPackageLoader* decompressor_model_;
+
+  torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data,
+                                    int64_t batch_size);
+  torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW,
+                          const std::vector<int64_t>& padding);
+  torch::Tensor recons_data(const torch::Tensor& recons_data,
+                            std::vector<int32_t> shape, int64_t pad_T) const;
+
+  void load_models();
+  void load_probability_tables();
+
+  std::vector<std::vector<int32_t>> vbr_quantized_cdf_;
+  std::vector<int32_t> vbr_cdf_length_;
+  std::vector<int32_t> vbr_offset_;
+  std::vector<std::vector<int32_t>> gs_quantized_cdf_;
+  std::vector<int32_t> gs_cdf_length_;
+  std::vector<int32_t> gs_offset_;
+
+  std::string model_name_;
+  std::string device_type_;
 };
