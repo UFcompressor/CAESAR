@@ -24,15 +24,15 @@
 #include <vector>
 
 struct NvcompBatchCompressResult {
-  torch::Tensor compressed;  // CPU kUInt8 tensor
+  torch::Tensor compressed; // CPU kUInt8 tensor
   size_t rawBytes;
 };
 
-std::vector<NvcompBatchCompressResult> nvcomp_batch_compress(
-    const std::vector<torch::Tensor>& inputs);
+std::vector<NvcompBatchCompressResult>
+nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs);
 
-std::vector<std::vector<uint8_t>> nvcomp_batch_decompress(
-    const std::vector<const uint8_t*>& comp_ptrs,
-    const std::vector<size_t>& comp_sizes,
-    const std::vector<size_t>& decomp_sizes);
-#endif  // USE_CUDA && ENABLE_NVCOMP
+std::vector<std::vector<uint8_t>>
+nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
+                        const std::vector<size_t> &comp_sizes,
+                        const std::vector<size_t> &decomp_sizes);
+#endif // USE_CUDA && ENABLE_NVCOMP

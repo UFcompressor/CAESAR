@@ -1,30 +1,30 @@
 #include "caesar_decompress.h"
 
-torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW,
-                        const std::vector<int64_t>& padding);
+torch::Tensor deblockHW(const torch::Tensor &data, int64_t nH, int64_t nW,
+                        const std::vector<int64_t> &padding);
 
-std::tuple<torch::Tensor, std::vector<int>> padding(
-    const torch::Tensor& data, std::pair<int, int> block_size = {8, 8});
-torch::Tensor recons_data(const torch::Tensor& recons_data,
-                          const std::vector<int32_t>& shape, int64_t pad_T) {
+std::tuple<torch::Tensor, std::vector<int>>
+padding(const torch::Tensor &data, std::pair<int, int> block_size = {8, 8});
+torch::Tensor recons_data(const torch::Tensor &recons_data,
+                          const std::vector<int32_t> &shape, int64_t pad_T) {
   int64_t stop_t = shape[2] - pad_T;
   return recons_data.index({torch::indexing::Slice(), torch::indexing::Slice(),
                             torch::indexing::Slice(0, stop_t),
                             torch::indexing::Slice(),
                             torch::indexing::Slice()});
 }
-torch::Tensor unpadding(const torch::Tensor& padded_data,
-                        const std::vector<int>& padding);
+torch::Tensor unpadding(const torch::Tensor &padded_data,
+                        const std::vector<int> &padding);
 
 template <typename T>
-std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
+std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
   torch::Tensor cpu_tensor = tensor.cpu().contiguous();
-  const T* tensor_data_ptr = cpu_tensor.data_ptr<T>();
+  const T *tensor_data_ptr = cpu_tensor.data_ptr<T>();
   int64_t num_elements = cpu_tensor.numel();
   return std::vector<T>(tensor_data_ptr, tensor_data_ptr + num_elements);
 }
 
-torch::Tensor build_indexes_tensor(const std::vector<int32_t>& size) {
+torch::Tensor build_indexes_tensor(const std::vector<int32_t> &size) {
   int64_t dims = size.size();
   TORCH_CHECK(dims >= 2,
               "Input size must have at least 2 dimensions (N, C, ...)");
@@ -63,7 +63,7 @@ void Decompressor::load_text_files() {
   device_type_ = ModelCache::instance().get_model_device();
 }
 
-torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
+torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor &batch_data,
                                                 int64_t batch_size,
                                                 int64_t n_frame) {
   auto sizes = batch_data.sizes();
@@ -77,7 +77,7 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
 
 torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                                        const unsigned int n_frame,
-                                       const CompressionResult& comp_result) {
+                                       const CompressionResult &comp_result) {
   c10::InferenceMode guard;
 
   DecompressionResult result;
@@ -86,7 +86,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
   RansDecoder range_decoder;
 
-  auto& meta = comp_result.compressionMetaData;
+  auto &meta = comp_result.compressionMetaData;
 
   torch::TensorOptions opts =
       torch::TensorOptions().dtype(torch::kFloat32).device(device_);
@@ -97,7 +97,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   if (!meta.all_filtered && !meta.indexes.empty()) {
     std::vector<int32_t> flat_indexes;
     flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
-    for (const auto& v : meta.indexes)
+    for (const auto &v : meta.indexes)
       flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
 
     torch::TensorOptions idx_opts_cpu =
@@ -248,7 +248,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     const int64_t samples = T / nf;
     const int64_t SS = S * samples;
 
-    for (const auto& pair : meta.filtered_blocks) {
+    for (const auto &pair : meta.filtered_blocks) {
       const int64_t label = pair.first;
       const float value = pair.second;
       const int64_t v = label / SS;
@@ -322,7 +322,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::vector<float> pca_vec;
     pca_vec.reserve(pca_rows * pca_cols);
 
-    for (const auto& row_vec : comp_result.gaeMetaData.pcaBasis) {
+    for (const auto &row_vec : comp_result.gaeMetaData.pcaBasis) {
       pca_vec.insert(pca_vec.end(), row_vec.begin(), row_vec.end());
     }
     torch::Tensor pca_vec_1d = torch::tensor(pca_vec);

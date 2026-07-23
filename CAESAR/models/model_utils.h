@@ -1,10 +1,10 @@
 #pragma once
-#include <string>
-#include <filesystem>
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <chrono>
+#include <string>
 #include <torch/torch.h>
 #if __has_include(<torch/mps.h>)
 #include <torch/mps.h>
@@ -14,11 +14,11 @@
 #endif
 
 #ifdef USE_CUDA
-    #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
-        #include <hip/hip_runtime.h>
-    #else
-        #include <cuda_runtime.h>
-    #endif
+#if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
+#include <hip/hip_runtime.h>
+#else
+#include <cuda_runtime.h>
+#endif
 #endif
 namespace fs = std::filesystem;
 
@@ -34,8 +34,7 @@ namespace fs = std::filesystem;
  * @return Full filesystem path to the model file
  * @throws std::runtime_error if the file cannot be found
  */
-fs::path get_model_file(const std::string& filename);
-
+fs::path get_model_file(const std::string &filename);
 
 double rss_gb();
 
@@ -43,24 +42,24 @@ double rss_gb();
 double gpu_used_gb();
 #endif
 
-static inline double tensor_gb(const torch::Tensor& t) {
-    if (!t.defined()) return 0.0;
-    return (double)t.numel() * t.element_size() / (1024.0 * 1024 * 1024);
+static inline double tensor_gb(const torch::Tensor &t) {
+  if (!t.defined())
+    return 0.0;
+  return (double)t.numel() * t.element_size() / (1024.0 * 1024 * 1024);
 }
 
-static inline void mem_print(const char* tag) {
+static inline void mem_print(const char *tag) {
 #ifdef USE_CUDA
-    std::cout << "[MEM] " << tag
-              << "  rss="      << rss_gb()      << " GiB"
-              << "  gpu_used=" << gpu_used_gb() << " GiB\n";
+  std::cout << "[MEM] " << tag << "  rss=" << rss_gb() << " GiB"
+            << "  gpu_used=" << gpu_used_gb() << " GiB\n";
 #else
-    std::cout << "[MEM] " << tag
-              << "  rss=" << rss_gb() << " GiB\n";
+  std::cout << "[MEM] " << tag << "  rss=" << rss_gb() << " GiB\n";
 #endif
 }
 
 std::chrono::high_resolution_clock::time_point get_start_time();
-std::chrono::duration<double> get_time(std::chrono::high_resolution_clock::time_point start);
+std::chrono::duration<double>
+get_time(std::chrono::high_resolution_clock::time_point start);
 
 int get_allocated_cores();
 

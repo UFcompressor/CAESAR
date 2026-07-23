@@ -16,39 +16,39 @@
 #include "model_utils.h"
 
 class PCA {
- public:
-  PCA(int numComponents = -1, const std::string& device = "cuda");
-  PCA& fit(const torch::Tensor& x);
+public:
+  PCA(int numComponents = -1, const std::string &device = "cuda");
+  PCA &fit(const torch::Tensor &x);
   torch::Tensor components() const { return components_; }
   torch::Tensor mean() const { return mean_; }
 
- private:
+private:
   int numComponents_;
   torch::Device device_;
   torch::Tensor components_;
   torch::Tensor mean_;
 };
 
-torch::Tensor block2Vector(const torch::Tensor& blockdata,
+torch::Tensor block2Vector(const torch::Tensor &blockdata,
                            std::pair<int, int> pathSize = {8, 8});
-torch::Tensor vector2Block(const torch::Tensor& vectors,
-                           const std::vector<int64_t>& originalShape,
+torch::Tensor vector2Block(const torch::Tensor &vectors,
+                           const std::vector<int64_t> &originalShape,
                            std::pair<int, int> patchSize);
-std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(
-    const torch::Tensor& arr2d);
-torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
-                               const torch::Tensor& maskLength,
+std::pair<torch::Tensor, torch::Tensor>
+indexMaskPrefix(const torch::Tensor &arr2d);
+torch::Tensor indexMaskReverse(const torch::Tensor &prefixMask,
+                               const torch::Tensor &maskLength,
                                int64_t numCols);
 
 class BitUtils {
- public:
-  static torch::Tensor bitsToBytes(const torch::Tensor& bitArray);
-  static torch::Tensor bytesToBits(const torch::Tensor& byteSeq,
+public:
+  static torch::Tensor bitsToBytes(const torch::Tensor &bitArray);
+  static torch::Tensor bytesToBits(const torch::Tensor &byteSeq,
                                    int64_t numBits = -1);
 
- private:
-  static uint8_t packByte(const uint8_t* bits);
-  static void unpackByte(uint8_t byte, uint8_t* bits);
+private:
+  static uint8_t packByte(const uint8_t *bits);
+  static void unpackByte(uint8_t byte, uint8_t *bits);
 };
 
 struct CompressedData {
@@ -81,26 +81,26 @@ struct GAECompressionResult {
 };
 
 class PCACompressor {
- public:
+public:
   PCACompressor(double nrmse = -1, double quanFactor = -1,
-                const std::string& device = "cuda",
-                const std::string& codecAlgorithm = "Zstd",
+                const std::string &device = "cuda",
+                const std::string &codecAlgorithm = "Zstd",
                 std::pair<int, int> patchSize = {8, 8});
   ~PCACompressor();
 
   GAECompressionResult compress(torch::Tensor originalData,
                                 torch::Tensor reconsData);
 
-  torch::Tensor decompress(const torch::Tensor& reconsData,
-                           const MetaData& metaData,
-                           const CompressedData& compressedData);
-  std::pair<std::unique_ptr<CompressedData>, int64_t> compressLossless(
-      const MetaData& metaData, const MainData& mainData);
+  torch::Tensor decompress(const torch::Tensor &reconsData,
+                           const MetaData &metaData,
+                           const CompressedData &compressedData);
+  std::pair<std::unique_ptr<CompressedData>, int64_t>
+  compressLossless(const MetaData &metaData, const MainData &mainData);
 
-  MainData decompressLossless(const MetaData& metaData,
-                              const CompressedData& compressedData);
+  MainData decompressLossless(const MetaData &metaData,
+                              const CompressedData &compressedData);
 
- private:
+private:
   double quanBin_;
   torch::Device device_;
   std::string codecAlgorithm_;
