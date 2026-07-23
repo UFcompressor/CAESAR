@@ -332,12 +332,12 @@ int main() {
     torch::Tensor diff = recon_cpu - raw_for_metrics;
     raw_for_metrics = torch::Tensor();
 
-    double mse = diff.pow(2).mean().item<double>();
+    float mse = diff.pow(2).mean().item<float>();
     diff = torch::Tensor();
-    double rmse = std::sqrt(mse);
-    double nrmse = rmse / (static_cast<double>(raw_max) - static_cast<double>(raw_min));
+    float rmse = std::sqrt(mse);
+    float nrmse = rmse / (static_cast<float>(raw_max) - static_cast<float>(raw_min));
 
-    double tolerance = std::numeric_limits<float>::epsilon();
+    float tolerance = std::numeric_limits<float>::epsilon();
     std::cout << "=== Quality Metrics ===" << "\n";
     std::cout << "NRMSE: " << nrmse << "\n";
     std::cout << "Relative error bound: " << rel_eb << "\n";
