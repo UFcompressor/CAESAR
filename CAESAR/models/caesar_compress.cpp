@@ -184,6 +184,12 @@ void Compressor::load_text_files() {
 
 CompressionResult Compressor::compress(const DatasetConfig& config,
                                        int batch_size, float rel_eb) {
+
+  if (rel_eb < std::numeric_limits<float>::epsilon() * 2) {
+    throw std::invalid_argument(
+        "rel_eb must be greater than single percision epsilon ");
+  }
+  
   c10::InferenceMode guard;
 
   ScientificDataset dataset(config, device_);
@@ -465,7 +471,11 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
 
   // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!
   // ---------------------------------------------------------
-  result.use_lbrc = false;
+  if (rel_eb < 0.07) { // i know magic  number, but bassicaly lbrc is always better than GAE 
+    result.use_lbrc = true;
+  } else {
+    result.use_lbrc = false;
+  }
 
   if (result.use_lbrc) {
     torch::Tensor original_ =
