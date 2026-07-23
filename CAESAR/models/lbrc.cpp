@@ -426,7 +426,6 @@ static torch::Tensor lorenzo_3d(const torch::Tensor& q) {
   return q - t_ - h_ - w_ + th + tw + hw - thw;
 }
 
-// Exact inverse: W, then H, then T -- same order as the CPU version.
 static torch::Tensor inv_lorenzo_3d(torch::Tensor q) {
   q = q.cumsum(3);
   q = q.cumsum(2);
@@ -444,7 +443,6 @@ static torch::Tensor zigzag_decode(const torch::Tensor& zz /*int64, >=0*/) {
   return torch::where(odd, -(zz + 1) / 2, zz / 2).to(torch::kInt32);
 }
 
-// bits01: uint8 [..., N] of 0/1, N % 8 == 0 -> packed uint8 [..., N/8]
 static torch::Tensor pack_bits(const torch::Tensor& bits01) {
   auto sizes = bits01.sizes().vec();
   int64_t N = sizes.back();
@@ -466,8 +464,6 @@ static torch::Tensor unpack_bits(const torch::Tensor& packed, int64_t N) {
 }
 
 // Batched binary-search quantization across all Nblocks at once.
-// x,x0n,r: [Nblocks, bt,bh,bw] float. Returns {step [Nblocks], q
-// [Nblocks,bt,bh,bw] int32}.
 static std::pair<torch::Tensor, torch::Tensor> quantize_batched(
     const torch::Tensor& x, const torch::Tensor& x0n, const torch::Tensor& r,
     double target_nrmse, int qiter, float mean, float scale) {
@@ -488,14 +484,12 @@ static std::pair<torch::Tensor, torch::Tensor> quantize_batched(
   auto sse0 = sse_at(huge);
   auto zero_correction = sse0 <= target_sse;  // [Nblocks] bool
 
-  // Single global upper bound: past 2x the largest residual anywhere,
-  // quantization always rounds to 0, so sse(high) == sse0 for every
-  // block -- which is already > target_sse for anything not caught by
-  // zero_correction above. No growth loop needed.
-  double high0 = std::max(2.0 * r.abs().max().item<double>() + 1e-6, 1e-12);
   auto opts = x.options();
   auto low = torch::zeros({Nb}, opts);
-  auto high = torch::full({Nb}, high0, opts);
+  auto max_r = r.abs().amax();  // 0-dim, stays on GPU
+  auto high0 =
+      torch::clamp_min(2.0 * max_r + 1e-6, 1e-12);  // 0-dim, stays on GPU
+  auto high = low + high0;  // broadcasts to [Nb], no sync
 
   for (int i = 0; i < qiter; ++i) {
     auto mid = 0.5 * (low + high);
@@ -515,14 +509,28 @@ static std::pair<torch::Tensor, torch::Tensor> quantize_batched(
   return {step, q};
 }
 
-// Compress/decompress one packed bit-plane per row, reusing the same
-// zstd_compress/zstd_decompress/parallel_for already defined above for the
-// CPU path -- no separate thread pool. nvcomp is a straight drop-in for
-// these two functions later; nothing else in this file needs to change
-// when that happens.
 static std::vector<std::vector<uint8_t>> compress_planes(
     const torch::Tensor& planes /*[Nblocks, packed_bytes] uint8, CUDA*/,
     int zstd_level, int workers) {
+#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+  (void)zstd_level;
+  (void)workers;
+  // Row of a contiguous [Nb, bytes] tensor is already contiguous -- this is
+  // pointer slicing, not a copy, and nothing here touches the host.
+  int64_t Nb = planes.size(0);
+  std::vector<torch::Tensor> rows(Nb);
+  for (int64_t i = 0; i < Nb; ++i) rows[i] = planes[i];
+
+  auto results = nvcomp_batch_compress(rows);  // one batched device call
+
+  std::vector<std::vector<uint8_t>> out(Nb);
+  for (int64_t i = 0; i < Nb; ++i) {
+    auto& t = results[i].compressed;  // CPU kUInt8 tensor, already D2H'd
+    const uint8_t* p = t.data_ptr<uint8_t>();
+    out[i].assign(p, p + t.numel());
+  }
+  return out;
+#else
   auto planes_cpu = planes.to(torch::kCPU).contiguous();
   int64_t Nb = planes_cpu.size(0), bytes = planes_cpu.size(1);
   const uint8_t* base = planes_cpu.data_ptr<uint8_t>();
@@ -532,11 +540,34 @@ static std::vector<std::vector<uint8_t>> compress_planes(
     out[i] = zstd_compress(raw, zstd_level);
   });
   return out;
+#endif
 }
 
 static torch::Tensor decompress_planes(
     const std::vector<std::vector<uint8_t>>& compressed, int64_t packed_bytes,
     const torch::TensorOptions& gpu_opts, int workers) {
+#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+  (void)workers;
+  int64_t Nb = static_cast<int64_t>(compressed.size());
+  std::vector<const uint8_t*> comp_ptrs(Nb);
+  std::vector<size_t> comp_sizes(Nb);
+  std::vector<size_t> decomp_sizes(Nb, static_cast<size_t>(packed_bytes));
+  for (int64_t i = 0; i < Nb; ++i) {
+    comp_ptrs[i] = compressed[i].data();
+    comp_sizes[i] = compressed[i].size();
+    if (compressed[i].empty()) decomp_sizes[i] = 0;  // no plane at this bit
+  }
+
+  auto results = nvcomp_batch_decompress(comp_ptrs, comp_sizes, decomp_sizes);
+
+  torch::Tensor out_cpu = torch::zeros({Nb, packed_bytes}, torch::kUInt8);
+  uint8_t* base = out_cpu.data_ptr<uint8_t>();
+  for (int64_t i = 0; i < Nb; ++i) {
+    if (results[i].empty()) continue;  // stays 0, same as zstd path
+    std::memcpy(base + i * packed_bytes, results[i].data(), packed_bytes);
+  }
+  return out_cpu.to(gpu_opts.device());
+#else
   int64_t Nb = static_cast<int64_t>(compressed.size());
   torch::Tensor out_cpu = torch::zeros({Nb, packed_bytes}, torch::kUInt8);
   uint8_t* base = out_cpu.data_ptr<uint8_t>();
@@ -548,6 +579,7 @@ static torch::Tensor decompress_planes(
     std::memcpy(base + i * packed_bytes, bytes.data(), packed_bytes);
   });
   return out_cpu.to(gpu_opts.device());
+#endif
 }
 
 static void compress_gpu(const torch::Tensor& original,
@@ -566,8 +598,10 @@ static void compress_gpu(const torch::Tensor& original,
   auto orig_c = original.contiguous();
   auto rec_c = recons.contiguous();
 
-  float x_mean = orig_c.mean().item<float>();
-  float scale = orig_c.max().item<float>() - orig_c.min().item<float>();
+  auto stats = torch::stack({orig_c.mean(), orig_c.amax(), orig_c.amin()})
+                   .to(torch::kCPU);
+  const float x_mean = stats[0].item<float>();
+  const float scale = stats[1].item<float>() - stats[2].item<float>();
   TORCH_CHECK(scale > 0, "LBRC compress (gpu): zero data range");
 
   auto x0n = (rec_c - x_mean) / scale;
@@ -627,9 +661,11 @@ static void compress_gpu(const torch::Tensor& original,
       if (bit < bit_count[i]) blocks[i].streams.push_back(std::move(planes[i]));
   }
 
+  auto step_cpu = step.to(torch::kFloat64).to(torch::kCPU);
+  auto step_acc = step_cpu.accessor<double, 1>();
   for (int64_t i = 0; i < Nb; ++i) {
     blocks[i].bit_count = bit_count[i];
-    blocks[i].step = step[i].item<double>();
+    blocks[i].step = step_acc[i];
   }
 
   meta.x_mean = x_mean;
@@ -699,7 +735,7 @@ void compress(const torch::Tensor& original, const torch::Tensor& recons,
               double target_nrmse, LBRCMetaData& meta,
               std::vector<LBRCBlock>& blocks, int workers) {
   // only suport nvida/amd
-  if (original.is_cuda()) {
+  if (torch::cuda::is_available()) {
     gpu::compress_gpu(original, recons, target_nrmse, meta, blocks, workers);
   } else {
     compress_cpu(original, recons, target_nrmse, meta, blocks, workers);

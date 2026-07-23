@@ -9,27 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include "gpu_lossess.h"
 #include "model_utils.h"
-
-#ifdef USE_CUDA
-#if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
-#include <c10/hip/HIPCachingAllocator.h>
-#include <hip/hip_runtime.h>
-#else
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <cuda_runtime.h>
-#ifdef ENABLE_NVCOMP
-#include <nvcomp/zstd.h>
-#endif
-#endif
-#endif
-
-#if defined(USE_CUDA) && defined(ENABLE_NVCOMP) && !defined(USE_ROCM) && \
-    !defined(__HIP_PLATFORM_AMD__)
-#define LBRC_HAS_GPU_COMPRESS 1
-#else
-#define LBRC_HAS_GPU_COMPRESS 0
-#endif
 
 struct LBRCBlock {
   double step = 1.0;
