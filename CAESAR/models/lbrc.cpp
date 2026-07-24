@@ -507,10 +507,17 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
 
   auto opts = x.options();
   auto low = torch::zeros({Nb}, opts);
-  auto max_r = r.abs().amax(); // 0-dim, stays on GPU
-  auto high0 =
-      torch::clamp_min(2.0 * max_r + 1e-6, 1e-12); // 0-dim, stays on GPU
-  auto high = low + high0; // broadcasts to [Nb], no sync
+  const double init_high =
+      target_nrmse * 3.4641016151377544; // target*sqrt(12), literal constant
+  auto high = torch::full({Nb}, init_high > 1e-12 ? init_high : 1e-12, opts);
+
+  const int max_growth =
+      40; // fixed iters, no host sync -- same style as qiter below
+  for (int g = 0; g < max_growth; ++g) {
+    auto passing = sse_at(high.view({Nb, 1, 1, 1})) <= target_sse;
+    low = torch::where(passing, high, low);
+    high = torch::where(passing, high * 2.0, high);
+  }
 
   for (int i = 0; i < qiter; ++i) {
     auto mid = 0.5 * (low + high);
