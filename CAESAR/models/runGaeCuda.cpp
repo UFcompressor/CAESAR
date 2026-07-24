@@ -1,9 +1,9 @@
 #include "runGaeCuda.h"
 
-PCA::PCA(int numComponents, const std::string& device)
+PCA::PCA(int numComponents, const std::string &device)
     : numComponents_(numComponents), device_(torch::Device(device)) {}
 
-PCA& PCA::fit(const torch::Tensor& x) {
+PCA &PCA::fit(const torch::Tensor &x) {
   auto xDevice = x.to(device_);
   mean_ = torch::mean(xDevice, 0);
   auto xCentered = xDevice - mean_;
@@ -24,7 +24,7 @@ PCA& PCA::fit(const torch::Tensor& x) {
   return *this;
 }
 
-torch::Tensor block2Vector(const torch::Tensor& blockData,
+torch::Tensor block2Vector(const torch::Tensor &blockData,
                            std::pair<int, int> patchSize) {
   int patchH = patchSize.first;
   int patchW = patchSize.second;
@@ -40,7 +40,8 @@ torch::Tensor block2Vector(const torch::Tensor& blockData,
   int nW = W / patchW;
 
   std::vector<int64_t> newShape;
-  for (int i = 0; i < dims - 3; ++i) newShape.push_back(sizes[i]);
+  for (int i = 0; i < dims - 3; ++i)
+    newShape.push_back(sizes[i]);
   newShape.push_back(T);
   newShape.push_back(nH);
   newShape.push_back(patchH);
@@ -67,8 +68,8 @@ torch::Tensor block2Vector(const torch::Tensor& blockData,
   int64_t finalDim = patchH * patchW;
   return permuted.reshape({-1, finalDim});
 }
-torch::Tensor vector2Block(const torch::Tensor& vectors,
-                           const std::vector<int64_t>& originalShape,
+torch::Tensor vector2Block(const torch::Tensor &vectors,
+                           const std::vector<int64_t> &originalShape,
                            std::pair<int, int> patchSize) {
   int patchH = patchSize.first;
   int patchW = patchSize.second;
@@ -109,8 +110,8 @@ torch::Tensor vector2Block(const torch::Tensor& vectors,
   return permuted.reshape(originalShape);
 }
 
-std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(
-    const torch::Tensor& arr2d) {
+std::pair<torch::Tensor, torch::Tensor>
+indexMaskPrefix(const torch::Tensor &arr2d) {
   int64_t numCols = arr2d.size(1);
 
   auto reversedArr = torch::flip(arr2d, {1});
@@ -126,8 +127,8 @@ std::pair<torch::Tensor, torch::Tensor> indexMaskPrefix(
   return {result, maskLenUint8};
 }
 
-torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
-                               const torch::Tensor& maskLength,
+torch::Tensor indexMaskReverse(const torch::Tensor &prefixMask,
+                               const torch::Tensor &maskLength,
                                int64_t numCols) {
   auto device = prefixMask.device();
   auto arange =
@@ -142,7 +143,7 @@ torch::Tensor indexMaskReverse(const torch::Tensor& prefixMask,
   return arr2d;
 }
 
-torch::Tensor BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
+torch::Tensor BitUtils::bitsToBytes(const torch::Tensor &bitArray) {
   torch::Tensor bits = bitArray.dtype() == torch::kUInt8
                            ? bitArray.flatten()
                            : bitArray.to(torch::kUInt8).flatten();
@@ -167,13 +168,14 @@ torch::Tensor BitUtils::bitsToBytes(const torch::Tensor& bitArray) {
       .contiguous();
 }
 
-torch::Tensor BitUtils::bytesToBits(const torch::Tensor& byteSeq,
+torch::Tensor BitUtils::bytesToBits(const torch::Tensor &byteSeq,
                                     int64_t numBits) {
   torch::Tensor bytes = byteSeq.flatten().to(torch::kUInt8);
   int64_t numBytes = bytes.numel();
   int64_t totalBits = numBytes * 8;
 
-  if (numBits == -1) numBits = totalBits;
+  if (numBits == -1)
+    numBits = totalBits;
   numBits = std::min(numBits, totalBits);
 
   // Broadcast each byte against MSB-first weights to extract individual bits.
@@ -187,7 +189,7 @@ torch::Tensor BitUtils::bytesToBits(const torch::Tensor& byteSeq,
   return bits.narrow(0, 0, numBits);
 }
 
-uint8_t BitUtils::packByte(const uint8_t* bits) {
+uint8_t BitUtils::packByte(const uint8_t *bits) {
   uint8_t byte = 0;
   for (int i = 0; i < 8; ++i) {
     if (bits[i]) {
@@ -197,26 +199,24 @@ uint8_t BitUtils::packByte(const uint8_t* bits) {
   return byte;
 }
 
-void BitUtils::unpackByte(uint8_t byte, uint8_t* bits) {
+void BitUtils::unpackByte(uint8_t byte, uint8_t *bits) {
   for (int i = 0; i < 8; ++i) {
     bits[i] = (byte >> (7 - i)) & 1;
   }
 }
 
 PCACompressor::PCACompressor(double nrmse, double quanFactor,
-                             const std::string& device,
-                             const std::string& codecAlgorithm,
+                             const std::string &device,
+                             const std::string &codecAlgorithm,
                              std::pair<int, int> patchSize)
     : quanBin_(nrmse * quanFactor),
       device_(device.rfind("cuda", 0) == 0  ? torch::kCUDA
               : device.rfind("mps", 0) == 0 ? torch::kMPS
               : device.rfind("xpu", 0) == 0 ? torch::kXPU
                                             : torch::kCPU),
-      codecAlgorithm_(codecAlgorithm),
-      patchSize_(patchSize),
+      codecAlgorithm_(codecAlgorithm), patchSize_(patchSize),
       vectorSize_(patchSize.first * patchSize.second),
-      errorBound_(nrmse * std::sqrt(vectorSize_)),
-      error_(nrmse) {}
+      errorBound_(nrmse * std::sqrt(vectorSize_)), error_(nrmse) {}
 
 PCACompressor::~PCACompressor() {
 #ifdef USE_CUDA
@@ -513,9 +513,9 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData,
   return {metaData, std::move(compressResult.first), compressResult.second};
 }
 
-torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData,
-                                        const MetaData& metaData,
-                                        const CompressedData& compressedData) {
+torch::Tensor PCACompressor::decompress(const torch::Tensor &reconsData,
+                                        const MetaData &metaData,
+                                        const CompressedData &compressedData) {
   if (metaData.dataBytes == 0 || metaData.pcaBasis.numel() == 0) {
     return reconsData;
   }
@@ -566,9 +566,9 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData,
   torch::Tensor pcaReconstruction = torch::matmul(coeff, pcaBasisDevice);
   coeff = torch::Tensor();
 
-  reconsDevice.index_put_(
-      {mainData.processMask},
-      reconsDevice.index({mainData.processMask}) + pcaReconstruction);
+  reconsDevice.index_put_({mainData.processMask},
+                          reconsDevice.index({mainData.processMask}) +
+                              pcaReconstruction);
   pcaReconstruction = torch::Tensor();
 
   int64_t n_processed = torch::sum(mainData.processMask).item<int64_t>();
@@ -582,8 +582,8 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor& reconsData,
 }
 
 std::pair<std::unique_ptr<CompressedData>, int64_t>
-PCACompressor::compressLossless(const MetaData& metaData,
-                                const MainData& mainData) {
+PCACompressor::compressLossless(const MetaData &metaData,
+                                const MainData &mainData) {
   auto compressedData = std::make_unique<CompressedData>();
   int64_t totalBytes = 0;
 
@@ -649,15 +649,15 @@ PCACompressor::compressLossless(const MetaData& metaData,
 #endif
 
   if (!use_nvcomp) {
-    auto zstd_compress_mt = [&](const torch::Tensor& in_tensor,
-                                std::vector<uint8_t>& out, int level,
+    auto zstd_compress_mt = [&](const torch::Tensor &in_tensor,
+                                std::vector<uint8_t> &out, int level,
                                 int workers) -> size_t {
       if (in_tensor.numel() == 0) {
         out.clear();
         return 0;
       }
 
-      const uint8_t* data = in_tensor.data_ptr<uint8_t>();
+      const uint8_t *data = in_tensor.data_ptr<uint8_t>();
       size_t data_size = (size_t)in_tensor.numel();
 
 // sanity: require zstd >= 1.4.0 for ZSTD_c_nbWorkers
@@ -666,8 +666,9 @@ PCACompressor::compressLossless(const MetaData& metaData,
           "zstd too old: need >= 1.4.0 for multithread (ZSTD_c_nbWorkers)");
 #endif
 
-      ZSTD_CCtx* cctx = ZSTD_createCCtx();
-      if (!cctx) throw std::runtime_error("ZSTD_createCCtx failed");
+      ZSTD_CCtx *cctx = ZSTD_createCCtx();
+      if (!cctx)
+        throw std::runtime_error("ZSTD_createCCtx failed");
 
       // enable multithread
       size_t s1 = ZSTD_CCtx_setParameter(cctx, ZSTD_c_nbWorkers, workers);
@@ -761,8 +762,8 @@ PCACompressor::compressLossless(const MetaData& metaData,
       compressedData->data.push_back((sz >> (i * 8)) & 0xFF);
   }
 
-  auto append_tensor = [&](const torch::Tensor& t) {
-    const uint8_t* p = t.data_ptr<uint8_t>();
+  auto append_tensor = [&](const torch::Tensor &t) {
+    const uint8_t *p = t.data_ptr<uint8_t>();
     compressedData->data.insert(compressedData->data.end(), p, p + t.numel());
   };
   append_tensor(processMaskCompressed);
@@ -776,15 +777,16 @@ PCACompressor::compressLossless(const MetaData& metaData,
   return {std::move(compressedData), totalBytes};
 }
 
-MainData PCACompressor::decompressLossless(
-    const MetaData& metaData, const CompressedData& compressedData) {
+MainData
+PCACompressor::decompressLossless(const MetaData &metaData,
+                                  const CompressedData &compressedData) {
   MainData mainData;
   size_t offset = 0;
 
-#define CHECK_ZSTD_BLOCK(name, off, csz)                             \
-  do {                                                               \
-    if ((off) + (csz) > compressedData.data.size())                  \
-      throw std::runtime_error(std::string("OOB block: ") + (name)); \
+#define CHECK_ZSTD_BLOCK(name, off, csz)                                       \
+  do {                                                                         \
+    if ((off) + (csz) > compressedData.data.size())                            \
+      throw std::runtime_error(std::string("OOB block: ") + (name));           \
   } while (0)
 
   std::vector<size_t> compressedSizes(4);
@@ -809,17 +811,17 @@ MainData PCACompressor::decompressLossless(
     // ── Step 1: decompress processMask alone (we need it to compute
     // maskLength's size) ──
     {
-      std::vector<const uint8_t*> ptrs = {compressedData.data.data() + offset};
+      std::vector<const uint8_t *> ptrs = {compressedData.data.data() + offset};
       std::vector<size_t> comp_sizes = {compressedSizes[0]};
       std::vector<size_t> decomp_sizes = {processMaskOrigSize};
 
       auto res = nvcomp_batch_decompress(ptrs, comp_sizes, decomp_sizes);
       mainData.processMask =
-          BitUtils::bytesToBits(
-              torch::from_blob(res[0].data(), {(int64_t)res[0].size()},
-                               torch::kUInt8)
-                  .clone(),
-              metaData.nVec)
+          BitUtils::bytesToBits(torch::from_blob(res[0].data(),
+                                                 {(int64_t)res[0].size()},
+                                                 torch::kUInt8)
+                                    .clone(),
+                                metaData.nVec)
               .to(device_);
     }
     offset += compressedSizes[0];
@@ -829,7 +831,7 @@ MainData PCACompressor::decompressLossless(
     // ── Step 2: batch decompress the remaining 3 (prefixMask, maskLength,
     // coeffInt) ──
     {
-      std::vector<const uint8_t*> ptrs = {
+      std::vector<const uint8_t *> ptrs = {
           compressedData.data.data() + offset,
           compressedData.data.data() + offset + compressedSizes[1],
           compressedData.data.data() + offset + compressedSizes[1] +
@@ -843,11 +845,11 @@ MainData PCACompressor::decompressLossless(
 
       // prefixMask
       mainData.prefixMask =
-          BitUtils::bytesToBits(
-              torch::from_blob(res[0].data(), {(int64_t)res[0].size()},
-                               torch::kUInt8)
-                  .clone(),
-              metaData.prefixLength)
+          BitUtils::bytesToBits(torch::from_blob(res[0].data(),
+                                                 {(int64_t)res[0].size()},
+                                                 torch::kUInt8)
+                                    .clone(),
+                                metaData.prefixLength)
               .to(device_);
 
       // maskLength
@@ -893,11 +895,11 @@ MainData PCACompressor::decompressLossless(
       throw std::runtime_error("process_mask decompression failed");
   }
   mainData.processMask =
-      BitUtils::bytesToBits(
-          torch::from_blob(processMaskVec.data(),
-                           {(int64_t)processMaskVec.size()}, torch::kUInt8)
-              .clone(),
-          metaData.nVec)
+      BitUtils::bytesToBits(torch::from_blob(processMaskVec.data(),
+                                             {(int64_t)processMaskVec.size()},
+                                             torch::kUInt8)
+                                .clone(),
+                            metaData.nVec)
           .to(device_);
   offset += compressedSizes[0];
 
@@ -913,11 +915,11 @@ MainData PCACompressor::decompressLossless(
       throw std::runtime_error("prefix_mask decompression failed");
   }
   mainData.prefixMask =
-      BitUtils::bytesToBits(
-          torch::from_blob(prefixMaskVec.data(),
-                           {(int64_t)prefixMaskVec.size()}, torch::kUInt8)
-              .clone(),
-          metaData.prefixLength)
+      BitUtils::bytesToBits(torch::from_blob(prefixMaskVec.data(),
+                                             {(int64_t)prefixMaskVec.size()},
+                                             torch::kUInt8)
+                                .clone(),
+                            metaData.prefixLength)
           .to(device_);
   offset += compressedSizes[1];
 

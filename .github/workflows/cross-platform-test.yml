@@ -7,6 +7,34 @@ on:
     branches: ['*']
 
 jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install formatters
+        run: pip install clang-format==14.0.6 black==26.1.0
+
+      - name: Check C/C++ formatting
+        run: |
+          FILES=$(find . \( -name "*.cpp" -o -name "*.hpp" -o -name "*.cc" -o -name "*.h" -o -name "*.cxx" \))
+          if [ -z "$FILES" ]; then
+            echo "No C/C++ files found."
+            exit 0
+          fi
+          echo "$FILES" | xargs clang-format --dry-run --Werror
+
+      - name: Check Python formatting
+        run: black --check --diff .
+        
   build-test:
     strategy:
       matrix:

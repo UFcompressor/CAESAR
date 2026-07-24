@@ -4,9 +4,9 @@
 #include "models/caesar_compress.h"
 #include "models/caesar_decompress.h"
 
-void save_complete_metadata(const std::string& filename,
-                            const PaddingInfo& padding_info,
-                            const CompressionResult& comp) {
+void save_complete_metadata(const std::string &filename,
+                            const PaddingInfo &padding_info,
+                            const CompressionResult &comp) {
   std::ofstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Cannot open metadata file for writing: " +
@@ -15,145 +15,149 @@ void save_complete_metadata(const std::string& filename,
 
   // Save PaddingInfo
   size_t size = padding_info.original_shape.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(padding_info.original_shape.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(padding_info.original_shape.data()),
              size * sizeof(int64_t));
 
-  file.write(reinterpret_cast<const char*>(&padding_info.original_length),
+  file.write(reinterpret_cast<const char *>(&padding_info.original_length),
              sizeof(padding_info.original_length));
 
   size = padding_info.padded_shape.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(padding_info.padded_shape.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(padding_info.padded_shape.data()),
              size * sizeof(int64_t));
 
-  file.write(reinterpret_cast<const char*>(&padding_info.H),
+  file.write(reinterpret_cast<const char *>(&padding_info.H),
              sizeof(padding_info.H));
-  file.write(reinterpret_cast<const char*>(&padding_info.W),
+  file.write(reinterpret_cast<const char *>(&padding_info.W),
              sizeof(padding_info.W));
-  file.write(reinterpret_cast<const char*>(&padding_info.was_padded),
+  file.write(reinterpret_cast<const char *>(&padding_info.was_padded),
              sizeof(padding_info.was_padded));
 
   // Save CompressionMetaData
-  const auto& meta = comp.compressionMetaData;
+  const auto &meta = comp.compressionMetaData;
 
   size = meta.offsets.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(meta.offsets.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(meta.offsets.data()),
              size * sizeof(float));
 
   size = meta.scales.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(meta.scales.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(meta.scales.data()),
              size * sizeof(float));
 
   size = meta.indexes.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  for (const auto& idx_vec : meta.indexes) {
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  for (const auto &idx_vec : meta.indexes) {
     size_t inner_size = idx_vec.size();
-    file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-    file.write(reinterpret_cast<const char*>(idx_vec.data()),
+    file.write(reinterpret_cast<const char *>(&inner_size), sizeof(inner_size));
+    file.write(reinterpret_cast<const char *>(idx_vec.data()),
                inner_size * sizeof(int32_t));
   }
 
   auto nH = std::get<0>(meta.block_info);
   auto nW = std::get<1>(meta.block_info);
-  file.write(reinterpret_cast<const char*>(&nH), sizeof(nH));
-  file.write(reinterpret_cast<const char*>(&nW), sizeof(nW));
+  file.write(reinterpret_cast<const char *>(&nH), sizeof(nH));
+  file.write(reinterpret_cast<const char *>(&nW), sizeof(nW));
   size = std::get<2>(meta.block_info).size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(std::get<2>(meta.block_info).data()),
-             size * sizeof(int32_t));
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(
+      reinterpret_cast<const char *>(std::get<2>(meta.block_info).data()),
+      size * sizeof(int32_t));
 
   size = meta.data_input_shape.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(meta.data_input_shape.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(meta.data_input_shape.data()),
              size * sizeof(int32_t));
 
   size = meta.filtered_blocks.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  for (const auto& fb : meta.filtered_blocks) {
-    file.write(reinterpret_cast<const char*>(&fb.first), sizeof(fb.first));
-    file.write(reinterpret_cast<const char*>(&fb.second), sizeof(fb.second));
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  for (const auto &fb : meta.filtered_blocks) {
+    file.write(reinterpret_cast<const char *>(&fb.first), sizeof(fb.first));
+    file.write(reinterpret_cast<const char *>(&fb.second), sizeof(fb.second));
   }
 
-  file.write(reinterpret_cast<const char*>(&meta.global_scale),
+  file.write(reinterpret_cast<const char *>(&meta.global_scale),
              sizeof(meta.global_scale));
-  file.write(reinterpret_cast<const char*>(&meta.global_offset),
+  file.write(reinterpret_cast<const char *>(&meta.global_offset),
              sizeof(meta.global_offset));
-  file.write(reinterpret_cast<const char*>(&meta.pad_T), sizeof(meta.pad_T));
+  file.write(reinterpret_cast<const char *>(&meta.pad_T), sizeof(meta.pad_T));
 
   // Save GAEMetaData
-  const auto& gae_meta = comp.gaeMetaData;
+  const auto &gae_meta = comp.gaeMetaData;
 
-  file.write(reinterpret_cast<const char*>(&gae_meta.GAE_correction_occur),
+  file.write(reinterpret_cast<const char *>(&gae_meta.GAE_correction_occur),
              sizeof(gae_meta.GAE_correction_occur));
 
   size = gae_meta.padding_recon_info.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(gae_meta.padding_recon_info.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(gae_meta.padding_recon_info.data()),
              size * sizeof(int32_t));
 
   size = gae_meta.pcaBasis.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  for (const auto& basis_vec : gae_meta.pcaBasis) {
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  for (const auto &basis_vec : gae_meta.pcaBasis) {
     size_t inner_size = basis_vec.size();
-    file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-    file.write(reinterpret_cast<const char*>(basis_vec.data()),
+    file.write(reinterpret_cast<const char *>(&inner_size), sizeof(inner_size));
+    file.write(reinterpret_cast<const char *>(basis_vec.data()),
                inner_size * sizeof(float));
   }
 
   size = gae_meta.uniqueVals.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(gae_meta.uniqueVals.data()),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(gae_meta.uniqueVals.data()),
              size * sizeof(float));
 
-  file.write(reinterpret_cast<const char*>(&gae_meta.quanBin),
+  file.write(reinterpret_cast<const char *>(&gae_meta.quanBin),
              sizeof(gae_meta.quanBin));
-  file.write(reinterpret_cast<const char*>(&gae_meta.nVec),
+  file.write(reinterpret_cast<const char *>(&gae_meta.nVec),
              sizeof(gae_meta.nVec));
-  file.write(reinterpret_cast<const char*>(&gae_meta.prefixLength),
+  file.write(reinterpret_cast<const char *>(&gae_meta.prefixLength),
              sizeof(gae_meta.prefixLength));
-  file.write(reinterpret_cast<const char*>(&gae_meta.dataBytes),
+  file.write(reinterpret_cast<const char *>(&gae_meta.dataBytes),
              sizeof(gae_meta.dataBytes));
-  file.write(reinterpret_cast<const char*>(&gae_meta.coeffIntBytes),
+  file.write(reinterpret_cast<const char *>(&gae_meta.coeffIntBytes),
              sizeof(gae_meta.coeffIntBytes));
 
   // Save gae_comp_data
   size = comp.gae_comp_data.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char*>(comp.gae_comp_data.data()), size);
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  file.write(reinterpret_cast<const char *>(comp.gae_comp_data.data()), size);
 
   // Save use_lbrc
-  file.write(reinterpret_cast<const char*>(&comp.use_lbrc),
+  file.write(reinterpret_cast<const char *>(&comp.use_lbrc),
              sizeof(comp.use_lbrc));
 
   // Save LBRCMetaData
-  const auto& lbrc_meta = comp.lbrcMetaData;
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.lbrc_correction_occur),
+  const auto &lbrc_meta = comp.lbrcMetaData;
+  file.write(reinterpret_cast<const char *>(&lbrc_meta.lbrc_correction_occur),
              sizeof(lbrc_meta.lbrc_correction_occur));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.x_mean),
+  file.write(reinterpret_cast<const char *>(&lbrc_meta.x_mean),
              sizeof(lbrc_meta.x_mean));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.scale),
+  file.write(reinterpret_cast<const char *>(&lbrc_meta.scale),
              sizeof(lbrc_meta.scale));
-  file.write(reinterpret_cast<const char*>(&lbrc_meta.block_size),
+  file.write(reinterpret_cast<const char *>(&lbrc_meta.block_size),
              sizeof(lbrc_meta.block_size));
 
   // Save lbrc_blocks
   size = comp.lbrc_blocks.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  for (const auto& blk : comp.lbrc_blocks) {
-    file.write(reinterpret_cast<const char*>(&blk.step), sizeof(blk.step));
-    file.write(reinterpret_cast<const char*>(&blk.bit_count),
+  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
+  for (const auto &blk : comp.lbrc_blocks) {
+    file.write(reinterpret_cast<const char *>(&blk.step), sizeof(blk.step));
+    file.write(reinterpret_cast<const char *>(&blk.bit_count),
                sizeof(blk.bit_count));
 
     size_t num_streams = blk.streams.size();
-    file.write(reinterpret_cast<const char*>(&num_streams), sizeof(num_streams));
-    for (const auto& s : blk.streams) {
+    file.write(reinterpret_cast<const char *>(&num_streams),
+               sizeof(num_streams));
+    for (const auto &s : blk.streams) {
       size_t stream_len = s.size();
-      file.write(reinterpret_cast<const char*>(&stream_len), sizeof(stream_len));
+      file.write(reinterpret_cast<const char *>(&stream_len),
+                 sizeof(stream_len));
       if (stream_len) {
-      file.write(reinterpret_cast<const char*>(s.data()), static_cast<std::streamsize>(stream_len));
+        file.write(reinterpret_cast<const char *>(s.data()),
+                   static_cast<std::streamsize>(stream_len));
       }
     }
   }
@@ -161,8 +165,8 @@ void save_complete_metadata(const std::string& filename,
   file.close();
 }
 
-CompressionResult load_complete_metadata(const std::string& filename,
-                                         PaddingInfo& padding_info) {
+CompressionResult load_complete_metadata(const std::string &filename,
+                                         PaddingInfo &padding_info) {
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Cannot open metadata file for reading: " +
@@ -173,145 +177,149 @@ CompressionResult load_complete_metadata(const std::string& filename,
 
   // Load PaddingInfo
   size_t size;
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   padding_info.original_shape.resize(size);
-  file.read(reinterpret_cast<char*>(padding_info.original_shape.data()),
+  file.read(reinterpret_cast<char *>(padding_info.original_shape.data()),
             size * sizeof(int64_t));
 
-  file.read(reinterpret_cast<char*>(&padding_info.original_length),
+  file.read(reinterpret_cast<char *>(&padding_info.original_length),
             sizeof(padding_info.original_length));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   padding_info.padded_shape.resize(size);
-  file.read(reinterpret_cast<char*>(padding_info.padded_shape.data()),
+  file.read(reinterpret_cast<char *>(padding_info.padded_shape.data()),
             size * sizeof(int64_t));
 
-  file.read(reinterpret_cast<char*>(&padding_info.H), sizeof(padding_info.H));
-  file.read(reinterpret_cast<char*>(&padding_info.W), sizeof(padding_info.W));
-  file.read(reinterpret_cast<char*>(&padding_info.was_padded),
+  file.read(reinterpret_cast<char *>(&padding_info.H), sizeof(padding_info.H));
+  file.read(reinterpret_cast<char *>(&padding_info.W), sizeof(padding_info.W));
+  file.read(reinterpret_cast<char *>(&padding_info.was_padded),
             sizeof(padding_info.was_padded));
 
   // Load CompressionMetaData
   CompressionMetaData meta;
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   meta.offsets.resize(size);
-  file.read(reinterpret_cast<char*>(meta.offsets.data()), size * sizeof(float));
+  file.read(reinterpret_cast<char *>(meta.offsets.data()),
+            size * sizeof(float));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   meta.scales.resize(size);
-  file.read(reinterpret_cast<char*>(meta.scales.data()), size * sizeof(float));
+  file.read(reinterpret_cast<char *>(meta.scales.data()), size * sizeof(float));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   meta.indexes.resize(size);
-  for (auto& idx_vec : meta.indexes) {
+  for (auto &idx_vec : meta.indexes) {
     size_t inner_size;
-    file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+    file.read(reinterpret_cast<char *>(&inner_size), sizeof(inner_size));
     idx_vec.resize(inner_size);
-    file.read(reinterpret_cast<char*>(idx_vec.data()),
+    file.read(reinterpret_cast<char *>(idx_vec.data()),
               inner_size * sizeof(int32_t));
   }
 
   int32_t nH, nW;
-  file.read(reinterpret_cast<char*>(&nH), sizeof(nH));
-  file.read(reinterpret_cast<char*>(&nW), sizeof(nW));
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&nH), sizeof(nH));
+  file.read(reinterpret_cast<char *>(&nW), sizeof(nW));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   std::vector<int32_t> padding(size);
-  file.read(reinterpret_cast<char*>(padding.data()), size * sizeof(int32_t));
+  file.read(reinterpret_cast<char *>(padding.data()), size * sizeof(int32_t));
   meta.block_info = std::make_tuple(nH, nW, padding);
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   meta.data_input_shape.resize(size);
-  file.read(reinterpret_cast<char*>(meta.data_input_shape.data()),
+  file.read(reinterpret_cast<char *>(meta.data_input_shape.data()),
             size * sizeof(int32_t));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   meta.filtered_blocks.resize(size);
-  for (auto& fb : meta.filtered_blocks) {
-    file.read(reinterpret_cast<char*>(&fb.first), sizeof(fb.first));
-    file.read(reinterpret_cast<char*>(&fb.second), sizeof(fb.second));
+  for (auto &fb : meta.filtered_blocks) {
+    file.read(reinterpret_cast<char *>(&fb.first), sizeof(fb.first));
+    file.read(reinterpret_cast<char *>(&fb.second), sizeof(fb.second));
   }
 
-  file.read(reinterpret_cast<char*>(&meta.global_scale),
+  file.read(reinterpret_cast<char *>(&meta.global_scale),
             sizeof(meta.global_scale));
-  file.read(reinterpret_cast<char*>(&meta.global_offset),
+  file.read(reinterpret_cast<char *>(&meta.global_offset),
             sizeof(meta.global_offset));
-  file.read(reinterpret_cast<char*>(&meta.pad_T), sizeof(meta.pad_T));
+  file.read(reinterpret_cast<char *>(&meta.pad_T), sizeof(meta.pad_T));
 
   comp.compressionMetaData = meta;
 
   // Load GAEMetaData
   GAEMetaData gae_meta;
 
-  file.read(reinterpret_cast<char*>(&gae_meta.GAE_correction_occur),
+  file.read(reinterpret_cast<char *>(&gae_meta.GAE_correction_occur),
             sizeof(gae_meta.GAE_correction_occur));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   gae_meta.padding_recon_info.resize(size);
-  file.read(reinterpret_cast<char*>(gae_meta.padding_recon_info.data()),
+  file.read(reinterpret_cast<char *>(gae_meta.padding_recon_info.data()),
             size * sizeof(int32_t));
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   gae_meta.pcaBasis.resize(size);
-  for (auto& basis_vec : gae_meta.pcaBasis) {
+  for (auto &basis_vec : gae_meta.pcaBasis) {
     size_t inner_size;
-    file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+    file.read(reinterpret_cast<char *>(&inner_size), sizeof(inner_size));
     basis_vec.resize(inner_size);
-    file.read(reinterpret_cast<char*>(basis_vec.data()),
+    file.read(reinterpret_cast<char *>(basis_vec.data()),
               inner_size * sizeof(float));
   }
 
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   gae_meta.uniqueVals.resize(size);
-  file.read(reinterpret_cast<char*>(gae_meta.uniqueVals.data()),
+  file.read(reinterpret_cast<char *>(gae_meta.uniqueVals.data()),
             size * sizeof(float));
 
-  file.read(reinterpret_cast<char*>(&gae_meta.quanBin),
+  file.read(reinterpret_cast<char *>(&gae_meta.quanBin),
             sizeof(gae_meta.quanBin));
-  file.read(reinterpret_cast<char*>(&gae_meta.nVec), sizeof(gae_meta.nVec));
-  file.read(reinterpret_cast<char*>(&gae_meta.prefixLength),
+  file.read(reinterpret_cast<char *>(&gae_meta.nVec), sizeof(gae_meta.nVec));
+  file.read(reinterpret_cast<char *>(&gae_meta.prefixLength),
             sizeof(gae_meta.prefixLength));
-  file.read(reinterpret_cast<char*>(&gae_meta.dataBytes),
+  file.read(reinterpret_cast<char *>(&gae_meta.dataBytes),
             sizeof(gae_meta.dataBytes));
-  file.read(reinterpret_cast<char*>(&gae_meta.coeffIntBytes),
+  file.read(reinterpret_cast<char *>(&gae_meta.coeffIntBytes),
             sizeof(gae_meta.coeffIntBytes));
 
   comp.gaeMetaData = gae_meta;
 
   // Load gae_comp_data
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   comp.gae_comp_data.resize(size);
-  file.read(reinterpret_cast<char*>(comp.gae_comp_data.data()), size);
+  file.read(reinterpret_cast<char *>(comp.gae_comp_data.data()), size);
 
   // Load use_lbrc
-  file.read(reinterpret_cast<char*>(&comp.use_lbrc), sizeof(comp.use_lbrc));
+  file.read(reinterpret_cast<char *>(&comp.use_lbrc), sizeof(comp.use_lbrc));
 
   // Load LBRCMetaData
   LBRCMetaData lbrc_meta;
-  file.read(reinterpret_cast<char*>(&lbrc_meta.lbrc_correction_occur),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.lbrc_correction_occur),
             sizeof(lbrc_meta.lbrc_correction_occur));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.x_mean), sizeof(lbrc_meta.x_mean));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.scale), sizeof(lbrc_meta.scale));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.block_size),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.x_mean),
+            sizeof(lbrc_meta.x_mean));
+  file.read(reinterpret_cast<char *>(&lbrc_meta.scale),
+            sizeof(lbrc_meta.scale));
+  file.read(reinterpret_cast<char *>(&lbrc_meta.block_size),
             sizeof(lbrc_meta.block_size));
   comp.lbrcMetaData = lbrc_meta;
 
   // Load lbrc_blocks
-  file.read(reinterpret_cast<char*>(&size), sizeof(size));
+  file.read(reinterpret_cast<char *>(&size), sizeof(size));
   comp.lbrc_blocks.resize(size);
-  for (auto& blk : comp.lbrc_blocks) {
-    file.read(reinterpret_cast<char*>(&blk.step), sizeof(blk.step));
-    file.read(reinterpret_cast<char*>(&blk.bit_count), sizeof(blk.bit_count));
+  for (auto &blk : comp.lbrc_blocks) {
+    file.read(reinterpret_cast<char *>(&blk.step), sizeof(blk.step));
+    file.read(reinterpret_cast<char *>(&blk.bit_count), sizeof(blk.bit_count));
 
     size_t num_streams;
-    file.read(reinterpret_cast<char*>(&num_streams), sizeof(num_streams));
+    file.read(reinterpret_cast<char *>(&num_streams), sizeof(num_streams));
     blk.streams.resize(num_streams);
-    for (auto& s : blk.streams) {
+    for (auto &s : blk.streams) {
       size_t stream_len;
-      file.read(reinterpret_cast<char*>(&stream_len), sizeof(stream_len));
+      file.read(reinterpret_cast<char *>(&stream_len), sizeof(stream_len));
       if (stream_len) {
         s.resize(stream_len);
-        file.read(reinterpret_cast<char*>(s.data()), static_cast<std::streamsize>(stream_len));
+        file.read(reinterpret_cast<char *>(s.data()),
+                  static_cast<std::streamsize>(stream_len));
       }
     }
   }
@@ -321,8 +329,8 @@ CompressionResult load_complete_metadata(const std::string& filename,
   return comp;
 }
 
-torch::Tensor load_raw_binary(const std::string& bin_path,
-                              const std::vector<int64_t>& shape,
+torch::Tensor load_raw_binary(const std::string &bin_path,
+                              const std::vector<int64_t> &shape,
                               bool verbose = false) {
   std::ifstream file(bin_path, std::ios::binary);
   if (!file.is_open())
@@ -330,12 +338,13 @@ torch::Tensor load_raw_binary(const std::string& bin_path,
 
   size_t num_elems = 1;
   for (auto d : shape) {
-    if (d <= 0) throw std::runtime_error("Invalid shape dimension");
+    if (d <= 0)
+      throw std::runtime_error("Invalid shape dimension");
     num_elems *= static_cast<size_t>(d);
   }
 
   std::vector<float> buf(num_elems);
-  file.read(reinterpret_cast<char*>(buf.data()),
+  file.read(reinterpret_cast<char *>(buf.data()),
             static_cast<std::streamsize>(num_elems * sizeof(float)));
   if (!file)
     throw std::runtime_error("Failed to read expected floats from " + bin_path);
@@ -353,14 +362,14 @@ torch::Tensor load_raw_binary(const std::string& bin_path,
   return t;
 }
 
-void save_tensor_to_bin(const torch::Tensor& tensor,
-                        const std::string& filename, bool verbose = false) {
+void save_tensor_to_bin(const torch::Tensor &tensor,
+                        const std::string &filename, bool verbose = false) {
   torch::Tensor cpu = tensor.to(torch::kCPU).contiguous();
   std::ofstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Error opening " + filename + " for write");
   }
-  file.write(reinterpret_cast<const char*>(cpu.data_ptr<float>()),
+  file.write(reinterpret_cast<const char *>(cpu.data_ptr<float>()),
              static_cast<std::streamsize>(cpu.numel() * sizeof(float)));
   file.close();
   if (verbose) {
@@ -368,23 +377,24 @@ void save_tensor_to_bin(const torch::Tensor& tensor,
   }
 }
 
-bool save_encoded_streams(const std::vector<std::string>& streams,
-                          const std::string& filename) {
+bool save_encoded_streams(const std::vector<std::string> &streams,
+                          const std::string &filename) {
   std::ofstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     std::cerr << "Error: Cannot open file to write: " << filename << std::endl;
     return false;
   }
-  for (const auto& s : streams) {
+  for (const auto &s : streams) {
     uint64_t len = static_cast<uint64_t>(s.size());
-    file.write(reinterpret_cast<const char*>(&len), sizeof(len));
-    if (len) file.write(s.data(), static_cast<std::streamsize>(len));
+    file.write(reinterpret_cast<const char *>(&len), sizeof(len));
+    if (len)
+      file.write(s.data(), static_cast<std::streamsize>(len));
   }
   file.close();
   return true;
 }
 
-std::vector<std::string> load_encoded_streams(const std::string& filename) {
+std::vector<std::string> load_encoded_streams(const std::string &filename) {
   std::vector<std::string> out;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
@@ -392,7 +402,7 @@ std::vector<std::string> load_encoded_streams(const std::string& filename) {
     return out;
   }
   uint64_t len;
-  while (file.read(reinterpret_cast<char*>(&len), sizeof(len))) {
+  while (file.read(reinterpret_cast<char *>(&len), sizeof(len))) {
     std::string s;
     if (len) {
       s.resize(len);
@@ -408,7 +418,7 @@ std::vector<std::string> load_encoded_streams(const std::string& filename) {
   return out;
 }
 
-void print_usage(const char* program_name) {
+void print_usage(const char *program_name) {
   std::cout << "CAESAR Compression Tool\n\n";
   std::cout << "Usage:\n";
   std::cout << "  " << program_name << " compress <input> [options]\n";
@@ -434,7 +444,7 @@ void print_usage(const char* program_name) {
   std::cout << "  --original <file>         Original file for verification\n";
 }
 
-std::vector<int64_t> parse_shape(const std::string& shape_str) {
+std::vector<int64_t> parse_shape(const std::string &shape_str) {
   std::vector<int64_t> shape;
   std::stringstream ss(shape_str);
   std::string item;
@@ -463,7 +473,7 @@ torch::Device auto_select_device() {
   return torch::Device(torch::kCPU);
 }
 
-torch::Device parse_device(const std::string& device_str) {
+torch::Device parse_device(const std::string &device_str) {
   if (device_str == "cpu") {
     return torch::Device(torch::kCPU);
   } else if (device_str.substr(0, 4) == "cuda") {
@@ -502,8 +512,8 @@ torch::Device parse_device(const std::string& device_str) {
   throw std::runtime_error("Invalid device string: " + device_str);
 }
 
-double calculate_psnr(const torch::Tensor& original,
-                      const torch::Tensor& reconstructed) {
+double calculate_psnr(const torch::Tensor &original,
+                      const torch::Tensor &reconstructed) {
   torch::Tensor orig_cpu = original.to(torch::kCPU);
   torch::Tensor recon_cpu = reconstructed.to(torch::kCPU);
 
@@ -514,20 +524,21 @@ double calculate_psnr(const torch::Tensor& original,
   torch::Tensor diff = recon_cpu - orig_cpu;
   double mse = diff.pow(2).mean().item<double>();
 
-  if (mse == 0.0) return std::numeric_limits<double>::infinity();
+  if (mse == 0.0)
+    return std::numeric_limits<double>::infinity();
 
   double psnr = 20.0 * std::log10(range) - 10.0 * std::log10(mse);
   return psnr;
 }
 
 void save_metrics_to_csv(
-    const std::string& filename, const std::string& input_file,
-    const std::vector<int64_t>& shape, double compression_time,
+    const std::string &filename, const std::string &input_file,
+    const std::vector<int64_t> &shape, double compression_time,
     double decompression_time, uint64_t uncompressed_bytes,
     uint64_t compressed_bytes, size_t metadata_bytes, double cr_with_meta,
     double cr_without_meta, double nrmse, double psnr, float error_bound,
-    int batch_size, int n_frame, const std::string& model_type,
-    const std::string& compress_device, const std::string& decompress_device) {
+    int batch_size, int n_frame, const std::string &model_type,
+    const std::string &compress_device, const std::string &decompress_device) {
   bool file_exists = std::filesystem::exists(filename);
   std::ofstream file(filename, std::ios::app);
   if (!file.is_open()) {
@@ -553,7 +564,8 @@ void save_metrics_to_csv(
   shape_str << "[";
   for (size_t i = 0; i < shape.size(); ++i) {
     shape_str << shape[i];
-    if (i < shape.size() - 1) shape_str << "x";
+    if (i < shape.size() - 1)
+      shape_str << "x";
   }
   shape_str << "]";
 
@@ -570,12 +582,12 @@ void save_metrics_to_csv(
   file.close();
 }
 
-int compress_file(const std::string& input_file, const std::string& output_file,
-                  const std::vector<int64_t>& shape, float error_bound,
-                  int batch_size, int n_frame, const std::string& model_type,
+int compress_file(const std::string &input_file, const std::string &output_file,
+                  const std::vector<int64_t> &shape, float error_bound,
+                  int batch_size, int n_frame, const std::string &model_type,
                   torch::Device compress_device, bool show_timing,
                   bool show_metadata, bool verbose, bool quiet,
-                  bool force_padding, const std::string& metrics_csv) {
+                  bool force_padding, const std::string &metrics_csv) {
   if (!quiet) {
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
@@ -652,7 +664,7 @@ int compress_file(const std::string& input_file, const std::string& output_file,
 
   try {
     save_complete_metadata(metadata_file, padding_info, comp);
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "Failed to save metadata: " << e.what() << "\n";
     return 1;
   }
@@ -668,13 +680,13 @@ int compress_file(const std::string& input_file, const std::string& output_file,
   return 0;
 }
 
-int decompress_file(const std::string& input_base,
-                    const std::string& output_file,
-                    const std::vector<int64_t>& original_shape, int batch_size,
+int decompress_file(const std::string &input_base,
+                    const std::string &output_file,
+                    const std::vector<int64_t> &original_shape, int batch_size,
                     int n_frame, torch::Device decompress_device,
                     bool show_timing, bool verbose, bool quiet, bool verify,
-                    const std::string& original_file,
-                    const std::string& metrics_csv) {
+                    const std::string &original_file,
+                    const std::string &metrics_csv) {
   if (!quiet) {
     std::cout << "=== CAESAR DECOMPRESSION ===\n";
     std::cout << "Input base: " << input_base << "\n";
@@ -704,7 +716,7 @@ int decompress_file(const std::string& input_base,
 
   try {
     comp = load_complete_metadata(metadata_file, padding_info);
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "Failed to load metadata: " << e.what() << "\n";
     return 1;
   }
@@ -744,7 +756,8 @@ int decompress_file(const std::string& input_base,
   save_tensor_to_bin(restored, output_file, verbose);
 
   if (verify && !original_file.empty()) {
-    if (!quiet) std::cout << "\n Verifying reconstruction...\n";
+    if (!quiet)
+      std::cout << "\n Verifying reconstruction...\n";
 
     torch::Tensor original =
         load_raw_binary(original_file, original_shape, false);
@@ -770,7 +783,8 @@ int decompress_file(const std::string& input_base,
 
     if (!metrics_csv.empty()) {
       uint64_t num_elements = 1;
-      for (auto d : original_shape) num_elements *= static_cast<uint64_t>(d);
+      for (auto d : original_shape)
+        num_elements *= static_cast<uint64_t>(d);
       uint64_t uncompressed_bytes = num_elements * sizeof(float);
 
       save_metrics_to_csv(metrics_csv, original_file, original_shape, 0.0,
@@ -788,7 +802,7 @@ int decompress_file(const std::string& input_base,
   return 0;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   try {
     if (argc < 2) {
       print_usage(argv[0]);
@@ -844,8 +858,7 @@ int main(int argc, char* argv[]) {
         batch_size = std::stoi(argv[++i]);
       } else if ((arg == "-f" || arg == "--n-frame") && i + 1 < argc) {
         n_frame = std::stoi(argv[++i]);
-      } 
-      else if (arg == "--compress-device" && i + 1 < argc) {
+      } else if (arg == "--compress-device" && i + 1 < argc) {
         compress_device_str = argv[++i];
       } else if (arg == "--decompress-device" && i + 1 < argc) {
         decompress_device_str = argv[++i];
@@ -913,7 +926,7 @@ int main(int argc, char* argv[]) {
 
     return 0;
 
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "ERROR: " << e.what() << "\n";
     return 1;
   }

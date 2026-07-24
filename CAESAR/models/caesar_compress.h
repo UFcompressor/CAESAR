@@ -19,10 +19,10 @@
 struct GAEMetaData {
   bool GAE_correction_occur;
   std::vector<int>
-      padding_recon_info;  // global info before GAE (GAE preparation)
+      padding_recon_info; // global info before GAE (GAE preparation)
   std::vector<std::vector<float>>
-      pcaBasis;                   // tensor is converted into vector for adios
-  std::vector<float> uniqueVals;  // tensor is converted into vector for adios
+      pcaBasis;                  // tensor is converted into vector for adios
+  std::vector<float> uniqueVals; // tensor is converted into vector for adios
   double quanBin;
   int64_t nVec;
   int64_t prefixLength;
@@ -31,17 +31,17 @@ struct GAEMetaData {
 };
 
 struct CompressionMetaData {
-  std::vector<float> offsets;  // local info - corresponding to latent
-  std::vector<float> scales;   // local info - corresponding to latent
+  std::vector<float> offsets; // local info - corresponding to latent
+  std::vector<float> scales;  // local info - corresponding to latent
   std::vector<std::vector<int32_t>>
-      indexes;  // local info - corresponding to latent
-  std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info;  // global info
-  std::vector<int32_t> data_input_shape;                          // global info
-  std::vector<std::pair<int32_t, float>> filtered_blocks;         // global info
-  float global_scale;                                             // global info
-  float global_offset;                                            // global info
-  int64_t pad_T;                                                  // global_info
-  bool all_filtered = false;  // all data is the same
+      indexes; // local info - corresponding to latent
+  std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info; // global info
+  std::vector<int32_t> data_input_shape;                         // global info
+  std::vector<std::pair<int32_t, float>> filtered_blocks;        // global info
+  float global_scale;                                            // global info
+  float global_offset;                                           // global info
+  int64_t pad_T;                                                 // global_info
+  bool all_filtered = false; // all data is the same
 };
 
 struct CompressionResult {
@@ -64,25 +64,25 @@ struct CompressionResult {
 };
 
 class Compressor {
- public:
+public:
   explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
   ~Compressor() = default;
 
-  CompressionResult compress(const DatasetConfig& config, int batch_size = 32,
+  CompressionResult compress(const DatasetConfig &config, int batch_size = 32,
                              float rel_eb = 0.1);
 
- private:
+private:
   torch::Device device_;
 
-  torch::inductor::AOTIModelPackageLoader* compressor_model_;
-  torch::inductor::AOTIModelPackageLoader* hyper_decompressor_model_;
-  torch::inductor::AOTIModelPackageLoader* decompressor_model_;
+  torch::inductor::AOTIModelPackageLoader *compressor_model_;
+  torch::inductor::AOTIModelPackageLoader *hyper_decompressor_model_;
+  torch::inductor::AOTIModelPackageLoader *decompressor_model_;
 
-  torch::Tensor reshape_batch_2d_3d(const torch::Tensor& batch_data,
+  torch::Tensor reshape_batch_2d_3d(const torch::Tensor &batch_data,
                                     int64_t batch_size);
-  torch::Tensor deblockHW(const torch::Tensor& data, int64_t nH, int64_t nW,
-                          const std::vector<int64_t>& padding);
-  torch::Tensor recons_data(const torch::Tensor& recons_data,
+  torch::Tensor deblockHW(const torch::Tensor &data, int64_t nH, int64_t nW,
+                          const std::vector<int64_t> &padding);
+  torch::Tensor recons_data(const torch::Tensor &recons_data,
                             std::vector<int32_t> shape, int64_t pad_T) const;
 
   void load_models();
