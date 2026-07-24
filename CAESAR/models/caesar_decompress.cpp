@@ -309,8 +309,12 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::string codec_alg = "Zstd";
     std::pair<int, int> patch_size = {8, 8};
     double rel_eb = 1e-3;
-    PCACompressor pca_compressor(rel_eb, quan_factor,
-                                 device_.is_cuda() ? "cuda" : "cpu", codec_alg,
+
+    std::string pca_device_str = device_.is_cuda()  ? "cuda"
+                                 : device_.is_mps() ? "mps"
+                                                    : "cpu";
+
+    PCACompressor pca_compressor(rel_eb, quan_factor, pca_device_str, codec_alg,
                                  patch_size);
 
     MetaData gae_record_metaData;

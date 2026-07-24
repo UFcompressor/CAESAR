@@ -65,5 +65,4 @@ int get_allocated_cores();
 
 std::string get_model_name();
 std::string get_model_device();
-std::string detect_runtime_device();
 torch::Device select_model_device();
