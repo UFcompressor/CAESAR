@@ -303,7 +303,7 @@ int main() {
     }
 
     // Decompress
-    torch::Device decompression_device = torch::Device(torch::kCPU);
+    torch::Device decompression_device = select_model_device();
 
     auto start_timeD = std::chrono::high_resolution_clock::now();
     Decompressor decompressor(decompression_device);
