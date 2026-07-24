@@ -182,27 +182,6 @@ std::string get_model_device() {
   return device;
 }
 
-std::string detect_runtime_device() {
-#ifdef USE_CUDA
-  if (torch::cuda::is_available()) {
-#if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
-    return "rocm";
-#else
-    return "cuda";
-#endif
-  }
-#endif
-#if __has_include(<torch/mps.h>)
-  if (torch::mps::is_available())
-    return "mps";
-#endif
-#if __has_include(<torch/xpu.h>)
-  if (torch::xpu::is_available())
-    return "xpu";
-#endif
-  return "cpu";
-}
-
 torch::Device select_model_device() {
   const std::string model_device = get_model_device();
   if (model_device == "cpu")
