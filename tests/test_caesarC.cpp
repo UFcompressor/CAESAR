@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
 
     raw = torch::Tensor();
 
-    torch::Device compression_device = torch::Device(torch::kCPU);
+    torch::Device compression_device = select_model_device();
 
     std::cout << "\n===== COMPRESSION =====\n";
     Compressor compressor(compression_device);
