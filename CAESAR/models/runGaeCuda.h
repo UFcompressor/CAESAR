@@ -6,7 +6,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <unordered_map>

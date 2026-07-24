@@ -3,7 +3,6 @@
 #include "../CAESAR/models/array_utils.h"
 #include "../CAESAR/models/caesar_compress.h"
 #include "../CAESAR/models/caesar_decompress.h"
-#include <limits>
 
 bool save_encoded_streams(const std::vector<std::string> &streams,
                           const std::string &filename) {
