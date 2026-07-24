@@ -4,7 +4,7 @@
 #include "../CAESAR/models/caesar_compress.h"
 #include "../CAESAR/models/caesar_decompress.h"
 
-std::vector<std::string> load_encoded_streams(const std::string& filename) {
+std::vector<std::string> load_encoded_streams(const std::string &filename) {
   std::vector<std::string> out;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
@@ -12,7 +12,7 @@ std::vector<std::string> load_encoded_streams(const std::string& filename) {
     return out;
   }
   uint64_t len;
-  while (file.read(reinterpret_cast<char*>(&len), sizeof(len))) {
+  while (file.read(reinterpret_cast<char *>(&len), sizeof(len))) {
     std::string s;
     if (len) {
       s.resize(len);
@@ -28,20 +28,21 @@ std::vector<std::string> load_encoded_streams(const std::string& filename) {
   return out;
 }
 
-torch::Tensor loadRawBinary(const std::string& bin_path,
-                            const std::vector<int64_t>& shape) {
+torch::Tensor loadRawBinary(const std::string &bin_path,
+                            const std::vector<int64_t> &shape) {
   std::ifstream file(bin_path, std::ios::binary);
   if (!file.is_open())
     throw std::runtime_error("Cannot open binary file: " + bin_path);
 
   size_t num_elems = 1;
   for (auto d : shape) {
-    if (d <= 0) throw std::runtime_error("Invalid shape dimension");
+    if (d <= 0)
+      throw std::runtime_error("Invalid shape dimension");
     num_elems *= static_cast<size_t>(d);
   }
 
   std::vector<float> buf(num_elems);
-  file.read(reinterpret_cast<char*>(buf.data()),
+  file.read(reinterpret_cast<char *>(buf.data()),
             static_cast<std::streamsize>(num_elems * sizeof(float)));
   if (!file)
     throw std::runtime_error("Failed to read expected floats from " + bin_path);
@@ -56,7 +57,7 @@ torch::Tensor loadRawBinary(const std::string& bin_path,
   return t;
 }
 
-PaddingInfo load_padding_info(const std::string& filename) {
+PaddingInfo load_padding_info(const std::string &filename) {
   PaddingInfo padding_info;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open())
@@ -64,75 +65,74 @@ PaddingInfo load_padding_info(const std::string& filename) {
 
   // Load original_shape
   uint64_t shape_size;
-  file.read(reinterpret_cast<char*>(&shape_size), sizeof(shape_size));
+  file.read(reinterpret_cast<char *>(&shape_size), sizeof(shape_size));
   padding_info.original_shape.resize(shape_size);
   for (uint64_t i = 0; i < shape_size; ++i) {
-    file.read(reinterpret_cast<char*>(&padding_info.original_shape[i]),
+    file.read(reinterpret_cast<char *>(&padding_info.original_shape[i]),
               sizeof(int64_t));
   }
 
   // Load padded_shape
   uint64_t padded_size;
-  file.read(reinterpret_cast<char*>(&padded_size), sizeof(padded_size));
+  file.read(reinterpret_cast<char *>(&padded_size), sizeof(padded_size));
   padding_info.padded_shape.resize(padded_size);
   for (uint64_t i = 0; i < padded_size; ++i) {
-    file.read(reinterpret_cast<char*>(&padding_info.padded_shape[i]),
+    file.read(reinterpret_cast<char *>(&padding_info.padded_shape[i]),
               sizeof(int64_t));
   }
 
   // Load padding_values
-  file.read(reinterpret_cast<char*>(&padding_info.original_length),
+  file.read(reinterpret_cast<char *>(&padding_info.original_length),
             sizeof(padding_info.original_length));
 
   // Load H, W, was_padded
-  file.read(reinterpret_cast<char*>(&padding_info.H),
-            sizeof(padding_info.H));
-  file.read(reinterpret_cast<char*>(&padding_info.W),
-            sizeof(padding_info.W));
-  file.read(reinterpret_cast<char*>(&padding_info.was_padded),
+  file.read(reinterpret_cast<char *>(&padding_info.H), sizeof(padding_info.H));
+  file.read(reinterpret_cast<char *>(&padding_info.W), sizeof(padding_info.W));
+  file.read(reinterpret_cast<char *>(&padding_info.was_padded),
             sizeof(padding_info.was_padded));
 
   file.close();
   return padding_info;
 }
 
-CompressionResult load_compression_result_metadata(const std::string& filename) {
+CompressionResult
+load_compression_result_metadata(const std::string &filename) {
   CompressionResult result;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open())
     throw std::runtime_error("Cannot open metadata file: " + filename);
 
   // Helper lambda to read vector
-  auto read_vector = [&file](auto& vec) {
+  auto read_vector = [&file](auto &vec) {
     uint64_t size;
-    file.read(reinterpret_cast<char*>(&size), sizeof(size));
+    file.read(reinterpret_cast<char *>(&size), sizeof(size));
     vec.resize(size);
     if (size > 0) {
-      file.read(reinterpret_cast<char*>(vec.data()),
+      file.read(reinterpret_cast<char *>(vec.data()),
                 static_cast<std::streamsize>(size * sizeof(vec[0])));
     }
   };
 
   // Helper lambda to read 2d vector
-  auto read_2d_vector = [&file](auto& vec_2d) {
+  auto read_2d_vector = [&file](auto &vec_2d) {
     uint64_t outer_size;
-    file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    file.read(reinterpret_cast<char *>(&outer_size), sizeof(outer_size));
     vec_2d.resize(outer_size);
     for (uint64_t i = 0; i < outer_size; ++i) {
       uint64_t inner_size;
-      file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+      file.read(reinterpret_cast<char *>(&inner_size), sizeof(inner_size));
       vec_2d[i].resize(inner_size);
       if (inner_size > 0) {
-        file.read(reinterpret_cast<char*>(vec_2d[i].data()),
-                  static_cast<std::streamsize>(inner_size *
-                                               sizeof(vec_2d[i][0])));
+        file.read(
+            reinterpret_cast<char *>(vec_2d[i].data()),
+            static_cast<std::streamsize>(inner_size * sizeof(vec_2d[i][0])));
       }
     }
   };
 
-  auto& meta = result.compressionMetaData;
-  auto& gae_meta = result.gaeMetaData;
-  auto& lbrc_meta = result.lbrcMetaData;
+  auto &meta = result.compressionMetaData;
+  auto &gae_meta = result.gaeMetaData;
+  auto &lbrc_meta = result.lbrcMetaData;
 
   // Load compressionMetaData
   read_vector(meta.offsets);
@@ -140,8 +140,8 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   read_2d_vector(meta.indexes);
 
   int32_t nH, nW;
-  file.read(reinterpret_cast<char*>(&nH), sizeof(nH));
-  file.read(reinterpret_cast<char*>(&nW), sizeof(nW));
+  file.read(reinterpret_cast<char *>(&nH), sizeof(nH));
+  file.read(reinterpret_cast<char *>(&nW), sizeof(nW));
   std::vector<int32_t> padding_vec;
   read_vector(padding_vec);
   meta.block_info = std::make_tuple(nH, nW, padding_vec);
@@ -149,26 +149,26 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   read_vector(meta.data_input_shape);
   read_vector(meta.filtered_blocks);
 
-  file.read(reinterpret_cast<char*>(&meta.global_scale),
+  file.read(reinterpret_cast<char *>(&meta.global_scale),
             sizeof(meta.global_scale));
-  file.read(reinterpret_cast<char*>(&meta.global_offset),
+  file.read(reinterpret_cast<char *>(&meta.global_offset),
             sizeof(meta.global_offset));
-  file.read(reinterpret_cast<char*>(&meta.pad_T), sizeof(meta.pad_T));
+  file.read(reinterpret_cast<char *>(&meta.pad_T), sizeof(meta.pad_T));
 
   // Load gaeMetaData
-  file.read(reinterpret_cast<char*>(&gae_meta.GAE_correction_occur),
+  file.read(reinterpret_cast<char *>(&gae_meta.GAE_correction_occur),
             sizeof(gae_meta.GAE_correction_occur));
   read_vector(gae_meta.padding_recon_info);
   read_2d_vector(gae_meta.pcaBasis);
   read_vector(gae_meta.uniqueVals);
-  file.read(reinterpret_cast<char*>(&gae_meta.quanBin),
+  file.read(reinterpret_cast<char *>(&gae_meta.quanBin),
             sizeof(gae_meta.quanBin));
-  file.read(reinterpret_cast<char*>(&gae_meta.nVec), sizeof(gae_meta.nVec));
-  file.read(reinterpret_cast<char*>(&gae_meta.prefixLength),
+  file.read(reinterpret_cast<char *>(&gae_meta.nVec), sizeof(gae_meta.nVec));
+  file.read(reinterpret_cast<char *>(&gae_meta.prefixLength),
             sizeof(gae_meta.prefixLength));
-  file.read(reinterpret_cast<char*>(&gae_meta.dataBytes),
+  file.read(reinterpret_cast<char *>(&gae_meta.dataBytes),
             sizeof(gae_meta.dataBytes));
-  file.read(reinterpret_cast<char*>(&gae_meta.coeffIntBytes),
+  file.read(reinterpret_cast<char *>(&gae_meta.coeffIntBytes),
             sizeof(gae_meta.coeffIntBytes));
 
   // Load gae_comp_data
@@ -178,37 +178,37 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   // read_2d_vector(result.latent_indexes);
 
   // Load use_lbrc
-  file.read(reinterpret_cast<char*>(&result.use_lbrc),
+  file.read(reinterpret_cast<char *>(&result.use_lbrc),
             sizeof(result.use_lbrc));
 
   // Load lbrcMetaData
-  file.read(reinterpret_cast<char*>(&lbrc_meta.lbrc_correction_occur),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.lbrc_correction_occur),
             sizeof(lbrc_meta.lbrc_correction_occur));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.x_mean),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.x_mean),
             sizeof(lbrc_meta.x_mean));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.scale),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.scale),
             sizeof(lbrc_meta.scale));
-  file.read(reinterpret_cast<char*>(&lbrc_meta.block_size),
+  file.read(reinterpret_cast<char *>(&lbrc_meta.block_size),
             sizeof(lbrc_meta.block_size));
 
   // Load lbrc_blocks
   uint64_t num_blocks;
-  file.read(reinterpret_cast<char*>(&num_blocks), sizeof(num_blocks));
+  file.read(reinterpret_cast<char *>(&num_blocks), sizeof(num_blocks));
   result.lbrc_blocks.resize(num_blocks);
   for (uint64_t b = 0; b < num_blocks; ++b) {
-    auto& blk = result.lbrc_blocks[b];
-    file.read(reinterpret_cast<char*>(&blk.step), sizeof(blk.step));
-    file.read(reinterpret_cast<char*>(&blk.bit_count), sizeof(blk.bit_count));
+    auto &blk = result.lbrc_blocks[b];
+    file.read(reinterpret_cast<char *>(&blk.step), sizeof(blk.step));
+    file.read(reinterpret_cast<char *>(&blk.bit_count), sizeof(blk.bit_count));
 
     uint64_t num_streams;
-    file.read(reinterpret_cast<char*>(&num_streams), sizeof(num_streams));
+    file.read(reinterpret_cast<char *>(&num_streams), sizeof(num_streams));
     blk.streams.resize(num_streams);
     for (uint64_t s = 0; s < num_streams; ++s) {
       uint64_t stream_len;
-      file.read(reinterpret_cast<char*>(&stream_len), sizeof(stream_len));
+      file.read(reinterpret_cast<char *>(&stream_len), sizeof(stream_len));
       if (stream_len > 0) {
         blk.streams[s].resize(stream_len);
-        file.read(reinterpret_cast<char*>(&blk.streams[s][0]),
+        file.read(reinterpret_cast<char *>(&blk.streams[s][0]),
                   static_cast<std::streamsize>(stream_len));
       }
     }
@@ -218,12 +218,12 @@ CompressionResult load_compression_result_metadata(const std::string& filename) 
   return result;
 }
 
-float load_error_bound(const std::string& filename) {
+float load_error_bound(const std::string &filename) {
   float rel_eb = 0.0f;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open())
     throw std::runtime_error("Cannot open error bound file: " + filename);
-  file.read(reinterpret_cast<char*>(&rel_eb), sizeof(rel_eb));
+  file.read(reinterpret_cast<char *>(&rel_eb), sizeof(rel_eb));
   file.close();
   return rel_eb;
 }
@@ -251,9 +251,8 @@ int main() {
     try {
       rel_eb = load_error_bound(out_dir + "error_bound.bin");
       std::cout << "Error bound: " << rel_eb << "\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Warning: " << e.what()
-                 << " - Using default 0.0001\n";
+    } catch (const std::exception &e) {
+      std::cerr << "Warning: " << e.what() << " - Using default 0.0001\n";
       rel_eb = 0.0001f;
     }
 
@@ -275,14 +274,16 @@ int main() {
       std::cerr << "Error: Failed to load encoded streams\n";
       return 1;
     }
-    std::cout  << loaded_latents.size() << " latent streams and " << loaded_hyper.size() << " hyper streams\n";
+    std::cout << loaded_latents.size() << " latent streams and "
+              << loaded_hyper.size() << " hyper streams\n";
 
     // Load metadata
     std::cout << "Loading metadata...\n";
     CompressionResult comp;
     try {
-      comp = load_compression_result_metadata(out_dir + "compression_metadata.bin");
-    } catch (const std::exception& e) {
+      comp = load_compression_result_metadata(out_dir +
+                                              "compression_metadata.bin");
+    } catch (const std::exception &e) {
       std::cerr << "Error: " << e.what() << "\n";
       return 1;
     }
@@ -296,7 +297,7 @@ int main() {
     PaddingInfo padding_info;
     try {
       padding_info = load_padding_info(out_dir + "padding_info.bin");
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
       std::cerr << "Error: " << e.what() << "\n";
       return 1;
     }
@@ -311,8 +312,9 @@ int main() {
 
     std::chrono::duration<double> secondsD =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeD -
-                                                                   start_timeD);
-    std::cout << "\nTime taken for decompression: " << secondsD.count() << " s\n";
+                                                                  start_timeD);
+    std::cout << "\nTime taken for decompression: " << secondsD.count()
+              << " s\n";
 
     if (!recon.defined() || recon.numel() == 0) {
       std::cerr << "FAIL: Reconstructed tensor is empty\n";
@@ -336,9 +338,9 @@ int main() {
     float mse = diff.pow(2).mean().item<float>();
     diff = torch::Tensor();
     float rmse = std::sqrt(mse);
-    float nrmse = rmse / (static_cast<float>(raw_max) - static_cast<float>(raw_min));
+    float nrmse =
+        rmse / (static_cast<float>(raw_max) - static_cast<float>(raw_min));
     float tolerance = std::numeric_limits<float>::epsilon();
-
 
     // Print results
     std::cout << "\n" << std::string(50, '=') << "\n";
@@ -346,8 +348,8 @@ int main() {
     std::cout << std::string(50, '=') << "\n";
     std::cout << "NRMSE:              " << nrmse << "\n";
     std::cout << "Error bound:        " << rel_eb << "\n";
-    std::cout << "NRMSE <= Error bound: " << (nrmse <= rel_eb + tolerance ? "YES" : "NO")
-              << "\n";
+    std::cout << "NRMSE <= Error bound: "
+              << (nrmse <= rel_eb + tolerance ? "YES" : "NO") << "\n";
 
     bool passed = nrmse <= rel_eb + tolerance;
     std::cout << "\n";
@@ -367,13 +369,13 @@ int main() {
     std::cout << std::string(50, '=') << "\n\n";
 
 #ifndef _WIN32
-    ModelCache& cache = ModelCache::instance();
+    ModelCache &cache = ModelCache::instance();
     cache.clear();
 #endif
 
     return passed ? 0 : 1;
 
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "ERROR: " << e.what() << "\n";
     return 1;
   }

@@ -1,27 +1,27 @@
 #include "caesar_compress.h"
 
 template <typename T>
-std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor& tensor) {
+std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor &tensor) {
   TORCH_CHECK(tensor.dim() == 2, "Input tensor must be 2-dimensional.");
 
   torch::Tensor cpu_tensor =
       tensor.is_cpu() ? tensor.contiguous() : tensor.cpu().contiguous();
   const int64_t rows = cpu_tensor.size(0);
   const int64_t cols = cpu_tensor.size(1);
-  const T* data_ptr = cpu_tensor.data_ptr<T>();
+  const T *data_ptr = cpu_tensor.data_ptr<T>();
 
   std::vector<std::vector<T>> vec_2d;
   vec_2d.reserve(rows);
 
   for (int64_t r = 0; r < rows; ++r) {
-    const T* row_start_ptr = data_ptr + (r * cols);
+    const T *row_start_ptr = data_ptr + (r * cols);
     std::vector<T> inner_vec(row_start_ptr, row_start_ptr + cols);
     vec_2d.push_back(inner_vec);
   }
   return vec_2d;
 }
 
-torch::Tensor Compressor::recons_data(const torch::Tensor& recons_data,
+torch::Tensor Compressor::recons_data(const torch::Tensor &recons_data,
                                       std::vector<int32_t> shape,
                                       int64_t pad_T) const {
   int64_t stop_t = shape[2] - pad_T;
@@ -31,7 +31,7 @@ torch::Tensor Compressor::recons_data(const torch::Tensor& recons_data,
                             torch::indexing::Slice()});
 }
 
-torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
+torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor &batch_data,
                                               int64_t batch_size) {
   auto sizes = batch_data.sizes();
   TORCH_CHECK(sizes.size() == 4, "Input tensor must be 4-dimensional.");
@@ -48,9 +48,9 @@ torch::Tensor Compressor::reshape_batch_2d_3d(const torch::Tensor& batch_data,
   return permuted_data;
 }
 
-torch::Tensor Compressor::deblockHW(const torch::Tensor& data, int64_t nH,
+torch::Tensor Compressor::deblockHW(const torch::Tensor &data, int64_t nH,
                                     int64_t nW,
-                                    const std::vector<int64_t>& padding) {
+                                    const std::vector<int64_t> &padding) {
   if (padding.size() != 4)
     throw std::invalid_argument(
         "padding must have 4 values: top, down, left, right");
@@ -87,8 +87,8 @@ torch::Tensor Compressor::deblockHW(const torch::Tensor& data, int64_t nH,
                        torch::indexing::Slice(left, left + W)});
 }
 
-std::tuple<torch::Tensor, std::vector<int>> padding(
-    const torch::Tensor& data, std::pair<int, int> block_size = {8, 8}) {
+std::tuple<torch::Tensor, std::vector<int>>
+padding(const torch::Tensor &data, std::pair<int, int> block_size = {8, 8}) {
   int h_block = block_size.first;
   int w_block = block_size.second;
 
@@ -129,8 +129,8 @@ std::tuple<torch::Tensor, std::vector<int>> padding(
   return {data_padded.view(new_shape), {top, down, left, right}};
 }
 
-torch::Tensor unpadding(const torch::Tensor& padded_data,
-                        const std::vector<int>& padding) {
+torch::Tensor unpadding(const torch::Tensor &padded_data,
+                        const std::vector<int> &padding) {
   int top = padding[0];
   int down = padding[1];
   int left = padding[2];
@@ -147,10 +147,10 @@ torch::Tensor unpadding(const torch::Tensor& padded_data,
 }
 
 template <typename T>
-std::vector<T> tensor_to_vector(const torch::Tensor& tensor) {
+std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
   torch::Tensor cpu_tensor =
       tensor.is_cpu() ? tensor.contiguous() : tensor.cpu().contiguous();
-  const T* ptr = cpu_tensor.data_ptr<T>();
+  const T *ptr = cpu_tensor.data_ptr<T>();
   return std::vector<T>(ptr, ptr + cpu_tensor.numel());
 }
 
@@ -175,7 +175,7 @@ void Compressor::load_probability_tables() {
   gs_offset_ = ModelCache::instance().get_gs_offset();
 }
 
-CompressionResult Compressor::compress(const DatasetConfig& config,
+CompressionResult Compressor::compress(const DatasetConfig &config,
                                        int batch_size, float rel_eb) {
   if (rel_eb < std::numeric_limits<float>::epsilon() * 2) {
     throw std::invalid_argument(
@@ -192,7 +192,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   result.compressionMetaData.pad_T = pad_T;
 
   {
-    const auto& data_input_shape = dataset.get_data_input().sizes();
+    const auto &data_input_shape = dataset.get_data_input().sizes();
     std::vector<int32_t> data_input_shape_i32;
     data_input_shape_i32.reserve(data_input_shape.size());
     for (int64_t dim : data_input_shape)
@@ -201,9 +201,9 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   }
 
   {
-    const auto& filtered_blocks = dataset.get_filtered_blocks();
+    const auto &filtered_blocks = dataset.get_filtered_blocks();
     result.compressionMetaData.filtered_blocks.reserve(filtered_blocks.size());
-    for (const auto& pair : filtered_blocks)
+    for (const auto &pair : filtered_blocks)
       result.compressionMetaData.filtered_blocks.emplace_back(
           static_cast<int32_t>(pair.first), pair.second);
   }
@@ -212,7 +212,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     auto block_info = dataset.get_block_info();
     int32_t nH_i32 = static_cast<int32_t>(std::get<0>(block_info));
     int32_t nW_i32 = static_cast<int32_t>(std::get<1>(block_info));
-    const std::vector<int64_t>& padding_i64 = std::get<2>(block_info);
+    const std::vector<int64_t> &padding_i64 = std::get<2>(block_info);
     std::vector<int32_t> padding_i32;
     padding_i32.reserve(padding_i64.size());
     for (int64_t v : padding_i64)
@@ -234,7 +234,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   result.compressionMetaData.scales.reserve(dataset.size());
   result.compressionMetaData.indexes.reserve(dataset.size());
 
-  const std::vector<int32_t>& shape_i32 =
+  const std::vector<int32_t> &shape_i32 =
       result.compressionMetaData.data_input_shape;
   std::vector<int64_t> input_shape(shape_i32.begin(), shape_i32.end());
   torch::Tensor recon_tensor =
@@ -265,7 +265,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     {
       std::vector<int32_t> index_vec;
       index_vec.reserve(index_tensor.numel());
-      const int64_t* index_data_ptr = index_tensor.data_ptr<int64_t>();
+      const int64_t *index_data_ptr = index_tensor.data_ptr<int64_t>();
       for (int j = 0; j < index_tensor.numel(); ++j)
         index_vec.push_back(static_cast<int32_t>(index_data_ptr[j]));
       result.compressionMetaData.indexes.push_back(std::move(index_vec));
@@ -380,7 +380,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     for (int w = 0; w < workers; ++w) {
       int64_t start = w * chunk;
       int64_t end = std::min(start + chunk, total_latent_codes);
-      if (start >= end) break;
+      if (start >= end)
+        break;
       threads.emplace_back([&, start, end]() {
         RansEncoder enc;
         for (int64_t j = start; j < end; ++j) {
@@ -401,7 +402,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
         }
       });
     }
-    for (auto& t : threads) t.join();
+    for (auto &t : threads)
+      t.join();
   } else {
     result.encoded_latents.clear();
     result.encoded_hyper_latents.clear();
@@ -430,7 +432,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
           << "Error: 'samples' or 'S' is zero, cannot calculate indexes.\n";
     } else {
       const int64_t SS = S * samples;
-      for (const auto& pair : result.compressionMetaData.filtered_blocks) {
+      for (const auto &pair : result.compressionMetaData.filtered_blocks) {
         const int32_t label = pair.first;
         const float value = pair.second;
         const int64_t v = label / SS;
@@ -469,7 +471,7 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
   //} else {
   //  result.use_lbrc = false;
   // }
-  result.use_lbrc = false;  // hard code still for safty
+  result.use_lbrc = false; // hard code still for safty
   if (result.use_lbrc) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
@@ -519,8 +521,8 @@ CompressionResult Compressor::compress(const DatasetConfig& config,
     padded_recon_tensor.sub_(global_offset).div_(global_scale);
   }
 
-  torch::Tensor& padded_original_tensor_norm = padded_original_tensor;
-  torch::Tensor& padded_recon_tensor_norm = padded_recon_tensor;
+  torch::Tensor &padded_original_tensor_norm = padded_original_tensor;
+  torch::Tensor &padded_recon_tensor_norm = padded_recon_tensor;
 
   double quan_factor = 2.0;
   std::string codec_alg = "Zstd";
