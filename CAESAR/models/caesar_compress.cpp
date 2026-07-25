@@ -89,8 +89,8 @@ torch::Tensor Compressor::deblockHW(const torch::Tensor &data, int64_t nH,
                        torch::indexing::Slice(left, left + W)});
 }
 
-std::tuple<torch::Tensor, std::vector<int>> padding(
-    const torch::Tensor &data, std::pair<int, int> block_size = {8, 8}) {
+std::tuple<torch::Tensor, std::vector<int>>
+padding(const torch::Tensor &data, std::pair<int, int> block_size = {8, 8}) {
   int h_block = block_size.first;
   int w_block = block_size.second;
 
@@ -343,9 +343,9 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       nvtxRangePushA("scatter_copy_back");
 
       // batched_indexes columns: [v, s, t_start, t_end] — already on device_
-      torch::Tensor idx_v = batched_indexes.select(1, 0);   // [N]
-      torch::Tensor idx_s = batched_indexes.select(1, 1);   // [N]
-      torch::Tensor idx_t0 = batched_indexes.select(1, 2);  // [N]
+      torch::Tensor idx_v = batched_indexes.select(1, 0);  // [N]
+      torch::Tensor idx_s = batched_indexes.select(1, 1);  // [N]
+      torch::Tensor idx_t0 = batched_indexes.select(1, 2); // [N]
 
       // block length — assumed constant across the batch (nf, e.g. 8)
       int64_t block_len =
@@ -353,13 +353,13 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       // constexpr int64_t block_len = 8;
       //  build [N, block_len] index grids entirely on device_
       torch::Tensor t_range =
-          torch::arange(block_len, batched_indexes.options());  // [block_len]
+          torch::arange(block_len, batched_indexes.options()); // [block_len]
       torch::Tensor idx_t =
-          idx_t0.unsqueeze(1) + t_range.unsqueeze(0);  // [N, block_len]
+          idx_t0.unsqueeze(1) + t_range.unsqueeze(0); // [N, block_len]
       torch::Tensor idx_v_exp =
-          idx_v.unsqueeze(1).expand({-1, block_len});  // [N, block_len]
+          idx_v.unsqueeze(1).expand({-1, block_len}); // [N, block_len]
       torch::Tensor idx_s_exp =
-          idx_s.unsqueeze(1).expand({-1, block_len});  // [N, block_len]
+          idx_s.unsqueeze(1).expand({-1, block_len}); // [N, block_len]
 
       // denorm_output: [N, 1, block_len, H, W] -> squeeze the singleton dim,
       // flatten N*block_len
@@ -424,7 +424,8 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     for (int w = 0; w < workers; ++w) {
       int64_t start = w * chunk;
       int64_t end = std::min(start + chunk, total_latent_codes);
-      if (start >= end) break;
+      if (start >= end)
+        break;
       threads.emplace_back([&, start, end]() {
         RansEncoder enc;
         for (int64_t j = start; j < end; ++j) {
@@ -445,7 +446,8 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         }
       });
     }
-    for (auto &t : threads) t.join();
+    for (auto &t : threads)
+      t.join();
   } else {
     result.encoded_latents.clear();
     result.encoded_hyper_latents.clear();
@@ -509,7 +511,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
   //} else {
   //  result.use_lbrc = false;
   //}
-  result.use_lbrc = false;  // hard code still for safty
+  result.use_lbrc = false; // hard code still for safty
   if (result.use_lbrc) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
