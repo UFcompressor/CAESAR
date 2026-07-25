@@ -1,5 +1,7 @@
 #include "caesar_compress.h"
 
+#include <nvtx3/nvToolsExt.h>
+
 template <typename T>
 std::vector<std::vector<T>> tensor_to_2d_vector(const torch::Tensor &tensor) {
   TORCH_CHECK(tensor.dim() == 2, "Input tensor must be 2-dimensional.");
@@ -184,7 +186,9 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
 
   c10::InferenceMode guard;
 
+  nvtxRangePushA("dataset_load");
   ScientificDataset dataset(config, device_);
+  nvtxRangePop();
 
   CompressionResult result;
 
@@ -247,18 +251,24 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
   int64_t total_latent_codes = 0;
   torch::Tensor cpu_latent_indexes;
 
+  nvtxRangePushA("block_loop_total");
   for (size_t i = 0; i < dataset.size(); i++) {
+    nvtxRangePushA("get_item");
     auto sample = dataset.get_item(i);
+    nvtxRangePop();
 
     torch::Tensor input_tensor = sample["input"].to(device_);
     torch::Tensor offset_tensor = sample["offset"];
     torch::Tensor scale_tensor = sample["scale"];
     torch::Tensor index_tensor = sample["index"];
-
+    nvtxRangePushA("item_extraction");
     batch_inputs.push_back(input_tensor);
+
     batch_offsets_vec.push_back(offset_tensor.item<float>());
     batch_scales_vec.push_back(scale_tensor.item<float>());
     batch_indexes.push_back(index_tensor.view({1, index_tensor.sizes()[0]}));
+    nvtxRangePop();
+
     result.compressionMetaData.offsets.push_back(offset_tensor.item<float>());
     result.compressionMetaData.scales.push_back(scale_tensor.item<float>());
 
@@ -275,6 +285,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         i == dataset.size() - 1) {
       int64_t num_input_samples = static_cast<int64_t>(batch_inputs.size());
 
+      nvtxRangePushA("batch_tensor_build");
       torch::Tensor batched_input = torch::cat(batch_inputs, 0);
       torch::Tensor batched_offsets =
           torch::tensor(batch_offsets_vec,
@@ -285,7 +296,9 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
                         torch::TensorOptions().device(device_))
               .view({-1, 1, 1, 1, 1});
       torch::Tensor batched_indexes = torch::cat(batch_indexes, 0).to(device_);
+      nvtxRangePop();
 
+      nvtxRangePushA("compressor_model_-");
       std::vector<torch::Tensor> outputs =
           compressor_model_->run({batched_input.to(torch::kFloat32)});
       torch::Tensor q_latent = outputs[0];
@@ -293,11 +306,14 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       torch::Tensor q_hyper_latent = outputs[2];
       torch::Tensor hyper_indexes = outputs[3];
       outputs.clear();
+      nvtxRangePop();
 
+      nvtxRangePushA("hyper_decompressor_model_-");
       std::vector<torch::Tensor> hyper_outputs =
           hyper_decompressor_model_->run({q_hyper_latent.to(torch::kFloat32)});
       torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
       hyper_outputs.clear();
+      nvtxRangePop();
 
       all_q_latent.push_back(q_latent);
       all_latent_indexes.push_back(latent_indexes);
@@ -312,9 +328,11 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       new_shape.insert(new_shape.end(), decoded_sizes.begin() + 1,
                        decoded_sizes.end());
 
+      nvtxRangePushA("decompressor_model_-");
       std::vector<torch::Tensor> decompressor_outputs =
           decompressor_model_->run(
               {q_latent_with_offset.reshape(new_shape).to(torch::kFloat32)});
+      nvtxRangePop();
       torch::Tensor raw_output = decompressor_outputs[0].to(torch::kFloat32);
       decompressor_outputs.clear();
       torch::Tensor norm_output =
@@ -322,14 +340,38 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       torch::Tensor denorm_output =
           norm_output * batched_scales + batched_offsets;
 
-      torch::Tensor indexes_cpu = batched_indexes.cpu();
-      auto index_accessor = indexes_cpu.accessor<int64_t, 2>();
-      for (int64_t ii = 0; ii < num_input_samples; ++ii) {
-        recon_tensor.select(0, index_accessor[ii][0])
-            .select(0, index_accessor[ii][1])
-            .slice(0, index_accessor[ii][2], index_accessor[ii][3])
-            .copy_(denorm_output.select(0, ii).squeeze(0));
-      }
+      nvtxRangePushA("scatter_copy_back");
+
+      // batched_indexes columns: [v, s, t_start, t_end] — already on device_
+      torch::Tensor idx_v = batched_indexes.select(1, 0);   // [N]
+      torch::Tensor idx_s = batched_indexes.select(1, 1);   // [N]
+      torch::Tensor idx_t0 = batched_indexes.select(1, 2);  // [N]
+
+      // block length — assumed constant across the batch (nf, e.g. 8)
+      int64_t block_len =
+          (batched_indexes[0][3] - batched_indexes[0][2]).item<int64_t>();
+      // constexpr int64_t block_len = 8;
+      //  build [N, block_len] index grids entirely on device_
+      torch::Tensor t_range =
+          torch::arange(block_len, batched_indexes.options());  // [block_len]
+      torch::Tensor idx_t =
+          idx_t0.unsqueeze(1) + t_range.unsqueeze(0);  // [N, block_len]
+      torch::Tensor idx_v_exp =
+          idx_v.unsqueeze(1).expand({-1, block_len});  // [N, block_len]
+      torch::Tensor idx_s_exp =
+          idx_s.unsqueeze(1).expand({-1, block_len});  // [N, block_len]
+
+      // denorm_output: [N, 1, block_len, H, W] -> squeeze the singleton dim,
+      // flatten N*block_len
+      torch::Tensor src = denorm_output.squeeze(1).reshape(
+          {num_input_samples * block_len, denorm_output.size(-2),
+           denorm_output.size(-1)});
+
+      recon_tensor.index_put_(
+          {idx_v_exp.reshape(-1), idx_s_exp.reshape(-1), idx_t.reshape(-1)},
+          src);
+
+      nvtxRangePop();
 
       batch_inputs.clear();
       batch_offsets_vec.clear();
@@ -337,9 +379,11 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       batch_indexes.clear();
     }
   }
+  nvtxRangePop();
 
   result.compressionMetaData.all_filtered = all_q_latent.empty();
 
+  nvtxRangePushA("rans_encoding");
   if (!all_q_latent.empty()) {
     torch::Tensor cat_q_latent = torch::cat(all_q_latent, 0);
     torch::Tensor cat_latent_indexes = torch::cat(all_latent_indexes, 0);
@@ -444,6 +488,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       }
     }
   }
+  nvtxRangePop();
 
   int64_t block_info_1 =
       static_cast<int64_t>(std::get<0>(result.compressionMetaData.block_info));
@@ -517,6 +562,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
   torch::Tensor &padded_original_tensor_norm = padded_original_tensor;
   torch::Tensor &padded_recon_tensor_norm = padded_recon_tensor;
 
+  nvtxRangePushA("gae_pca_compress");
   double quan_factor = 2.0;
   std::string codec_alg = "Zstd";
   std::pair<int, int> patch_size = {8, 8};
@@ -531,6 +577,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       padded_original_tensor_norm, padded_recon_tensor_norm);
   padded_original_tensor_norm = torch::Tensor();
 
+  nvtxRangePop();
   result.gaeMetaData.GAE_correction_occur =
       gae_compression_result.metaData.GAE_correction_occur;
 

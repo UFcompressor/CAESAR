@@ -1,6 +1,7 @@
 find_package(CUDA)
 find_package(PkgConfig)
 find_package(Torch REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
@@ -114,6 +115,7 @@ if(USE_CUDA)
     if(CUDA_FOUND)
         target_include_directories(caesar_objs PRIVATE ${CUDA_INCLUDE_DIRS})
         target_link_libraries(caesar_objs PUBLIC ${CUDA_LIBRARIES})
+        target_link_libraries(caesar_objs PUBLIC CUDA::nvToolsExt)
     endif()
 
     if(NVCOMP_FOUND)
@@ -149,6 +151,7 @@ add_executable(caesar_cli $<TARGET_OBJECTS:caesar_objs>)
 target_link_libraries(caesar_cli PRIVATE caesar_objs torch)
 
 target_link_libraries(caesar PUBLIC zstd_target torch)
+target_link_libraries(caesar PUBLIC CUDA::nvToolsExt)
 target_include_directories(caesar
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
