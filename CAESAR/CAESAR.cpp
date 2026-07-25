@@ -1,6 +1,5 @@
 #include "data_utils.h"
 #include "dataset/dataset.h"
-#include "models/array_utils.h"
 #include "models/caesar_compress.h"
 #include "models/caesar_decompress.h"
 

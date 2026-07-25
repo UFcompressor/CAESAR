@@ -12,9 +12,6 @@
 #include "model_utils.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h"
-#ifdef USE_CUDA
-#include <c10/cuda/CUDACachingAllocator.h>
-#endif
 
 struct GAEMetaData {
   bool GAE_correction_occur;
