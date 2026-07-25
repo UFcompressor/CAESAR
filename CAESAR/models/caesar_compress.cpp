@@ -459,18 +459,13 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
 
   recon_tensor = torch::Tensor();
-#ifdef USE_CUDA
-  c10::cuda::CUDACachingAllocator::emptyCache();
-#endif
 
   // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!
-  // ---------------------------------------------------------
-  // if (rel_eb < 0.07) { // i know magic  number, but bassicaly lbrc is always
-  // better than GAE
+  // if (rel_eb < 0.07) {
   //  result.use_lbrc = true;
   //} else {
   //  result.use_lbrc = false;
-  // }
+  //}
   result.use_lbrc = false; // hard code still for safty
   if (result.use_lbrc) {
     torch::Tensor original_ =
