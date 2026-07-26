@@ -516,7 +516,7 @@ with torch.no_grad():
 
     import torch._inductor.config as inductor_config
 
-    if device.type == "cuda":
+    if device == "cuda":
         inductor_config.max_autotune = True
         inductor_config.max_autotune_gemm_backends = "TRITON,CUTLASS"
 
