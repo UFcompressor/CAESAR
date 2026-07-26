@@ -515,21 +515,26 @@ with open("./exported_model/model_device.txt", "w") as f:
 
 model.eval()
 with torch.no_grad():
-    print("device: ", device)
+    print("device:", device)
     model = model.to(device)
     example_inputs = (torch.randn(8, 64, 4, 4, device=device).float(),)
     batch_dim = torch.export.Dim("batch", min=1, max=1024)
+
     exported = torch.export.export(
-        model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}
+        model,
+        example_inputs,
+        dynamic_shapes={"x": {0: batch_dim}},
     )
 
     import torch._inductor.config as inductor_config
 
-    inductor_config.max_autotune = True
-    inductor_config.max_autotune_gemm_backends = "TRITON,CUTLASS"
+    if device.type == "cuda":
+        inductor_config.max_autotune = True
+        inductor_config.max_autotune_gemm_backends = "TRITON,CUTLASS"
 
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
         package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
     )
+
     print(f"Hyper Decompress model saved to exported_model/{model_name}.pt2")
