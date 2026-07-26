@@ -387,22 +387,27 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     }
   }
 
-  torch::Tensor all_offsets_cpu =
-      torch::cat(all_batch_offsets, 0).flatten().cpu();
-  torch::Tensor all_scales_cpu =
-      torch::cat(all_batch_scales, 0).flatten().cpu();
+  result.compressionMetaData.all_filtered = all_batch_offsets.empty();
 
-  result.compressionMetaData.offsets.resize(all_offsets_cpu.numel());
-  result.compressionMetaData.scales.resize(all_scales_cpu.numel());
+  if (!all_batch_offsets.empty()) {
+    torch::Tensor all_offsets_cpu =
+        torch::cat(all_batch_offsets, 0).flatten().cpu();
+    torch::Tensor all_scales_cpu =
+        torch::cat(all_batch_scales, 0).flatten().cpu();
 
-  std::memcpy(result.compressionMetaData.offsets.data(),
-              all_offsets_cpu.data_ptr<float>(),
-              all_offsets_cpu.numel() * sizeof(float));
-  std::memcpy(result.compressionMetaData.scales.data(),
-              all_scales_cpu.data_ptr<float>(),
-              all_scales_cpu.numel() * sizeof(float));
+    result.compressionMetaData.offsets.resize(all_offsets_cpu.numel());
+    result.compressionMetaData.scales.resize(all_scales_cpu.numel());
 
-  result.compressionMetaData.all_filtered = all_q_latent.empty();
+    std::memcpy(result.compressionMetaData.offsets.data(),
+                all_offsets_cpu.data_ptr<float>(),
+                all_offsets_cpu.numel() * sizeof(float));
+    std::memcpy(result.compressionMetaData.scales.data(),
+                all_scales_cpu.data_ptr<float>(),
+                all_scales_cpu.numel() * sizeof(float));
+  } else {
+    result.compressionMetaData.offsets.clear();
+    result.compressionMetaData.scales.clear();
+  }
 
   if (!all_q_latent.empty()) {
     torch::Tensor cat_q_latent = torch::cat(all_q_latent, 0);
