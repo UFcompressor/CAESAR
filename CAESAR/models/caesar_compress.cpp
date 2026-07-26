@@ -155,8 +155,6 @@ std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
 }
 
 Compressor::Compressor(torch::Device device) : device_(device) {
-  at::globalContext().setAllowTF32CuBLAS(true);
-  at::globalContext().setAllowTF32CuDNN(true);
   load_models();
   load_probability_tables();
 }
@@ -300,6 +298,10 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         i == dataset.size() - 1) {
       int64_t num_input_samples = cur_count;
 
+      // try it out?
+      // torch::Tensor raw_batched_input = batch_input_buf.narrow(0, 0,
+      // cur_count); torch::Tensor batched_indexes = batch_index_buf.narrow(0,
+      // 0, cur_count).to(device_);
       torch::Tensor raw_batched_input =
           batch_input_buf.narrow(0, 0, cur_count).clone();
       torch::Tensor batched_indexes =
