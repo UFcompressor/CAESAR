@@ -490,6 +490,8 @@ except RuntimeError:
             "architecture."
         ) from e
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 model = model.float()
 
 quantized_cdf, cdf_length, offset = model.entropy_model.prior._update(30)
@@ -520,6 +522,12 @@ with torch.no_grad():
     exported = torch.export.export(
         model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}
     )
+
+    import torch._inductor.config as inductor_config
+
+    inductor_config.max_autotune = True
+    inductor_config.max_autotune_gemm_backends = "TRITON,CUTLASS"
+
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
         package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),

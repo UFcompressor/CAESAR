@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/Context.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
 #include <fstream>

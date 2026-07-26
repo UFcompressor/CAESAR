@@ -1,4 +1,7 @@
 #pragma once
+#include <torch/script.h>
+#include <torch/torch.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -7,8 +10,6 @@
 #include <random>
 #include <stdexcept>
 #include <string>
-#include <torch/script.h>
-#include <torch/torch.h>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,6 +29,9 @@ blockHW(const torch::Tensor &data,
 std::pair<std::vector<std::pair<int, float>>, std::vector<int>>
 data_filtering(const torch::Tensor &data, int nFrame,
                const torch::Device &device);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+apply_inst_norm_batched(torch::Tensor batched_data);
 
 std::unordered_map<int, int>
 buildReverseIdMap(int visibleLen, const std::vector<int> &filteredLabels);
@@ -65,6 +69,7 @@ public:
   torch::Tensor apply_inst_norm(torch::Tensor data, bool return_norm = false);
   std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
   apply_inst_norm_with_params(torch::Tensor data);
+  bool get_inst_norm() const { return inst_norm; }
 
 protected:
   std::string dataset_name;

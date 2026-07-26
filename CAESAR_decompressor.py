@@ -485,6 +485,8 @@ except RuntimeError:
             "architecture."
         ) from e
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 model = model.float()
 
 quantized_cdf, cdf_length, offset = model.entropy_model.prior._update(30)

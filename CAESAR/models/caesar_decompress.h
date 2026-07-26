@@ -1,11 +1,12 @@
 #pragma once
+#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+
 #include "array_utils.h"
 #include "caesar_compress.h"
 #include "model_cache.h"
 #include "model_utils.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h"
-#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
 struct CompressionResult;
 struct DecompressionResult {
@@ -31,7 +32,6 @@ private:
 
   void load_models();
   void load_probability_tables();
-  void load_text_files();
 
   torch::Tensor reshape_batch_2d_3d(const torch::Tensor &batch_data,
                                     int64_t batch_size, int64_t n_frame);
