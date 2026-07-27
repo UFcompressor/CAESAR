@@ -250,6 +250,22 @@ buildReverseIdMap(int visibleLength, const std::vector<int> &filteredLabels) {
   return reverseMap;
 }
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+apply_inst_norm_batched(torch::Tensor batched_data) {
+  std::vector<int64_t> reduce_dims;
+  for (int64_t d = 1; d < batched_data.dim(); ++d)
+    reduce_dims.push_back(d);
+
+  torch::Tensor offset = torch::mean(batched_data, reduce_dims, true);
+  torch::Tensor data_max = torch::amax(batched_data, reduce_dims, true);
+  torch::Tensor data_min = torch::amin(batched_data, reduce_dims, true);
+  torch::Tensor scale = torch::clamp_min(data_max - data_min, 1e-12);
+
+  torch::Tensor normalized = (batched_data - offset) / scale;
+
+  return std::make_tuple(normalized, offset, scale);
+}
+
 BaseDataset::BaseDataset(const DatasetConfig &config, torch::Device device)
     : rng_(std::random_device{}()), device_(device) {
   dataset_name = config.dataset_name;
@@ -396,10 +412,7 @@ BaseDataset::apply_inst_norm_with_params(torch::Tensor data) {
 
     auto minmax = torch::stack({data.min(), data.max()});
     scale = minmax[1] - minmax[0];
-
-    if (scale.item<float>() == 0) {
-      throw std::runtime_error("Scale is zero.");
-    }
+    scale = torch::clamp_min(scale, 1e-12);
 
     data = (data - offset) / scale;
     offset = offset.view({1, 1, 1});
@@ -599,23 +612,35 @@ ScientificDataset::post_processing(const torch::Tensor &data, int var_idx,
   if (is_training) {
     processed_data = apply_augments(processed_data);
     processed_data = apply_padding_or_crop(processed_data);
-  }
 
-  torch::Tensor offset, scale;
-  if (inst_norm) {
-    auto norm_result = apply_inst_norm_with_params(processed_data);
-    processed_data = std::get<0>(norm_result);
-    offset = std::get<1>(norm_result);
-    scale = std::get<2>(norm_result);
-  } else {
-    offset = var_offset.index({var_idx}).view({1, 1, 1});
-    scale = var_scale.index({var_idx}).view({1, 1, 1});
+    torch::Tensor offset, scale;
+    if (inst_norm) {
+      auto norm_result = apply_inst_norm_with_params(processed_data);
+      processed_data = std::get<0>(norm_result);
+      offset = std::get<1>(norm_result);
+      scale = std::get<2>(norm_result);
+    } else {
+      offset = var_offset.index({var_idx}).view({1, 1, 1});
+      scale = var_scale.index({var_idx}).view({1, 1, 1});
+    }
+
+    std::unordered_map<std::string, torch::Tensor> data_dict;
+    data_dict["input"] = processed_data.unsqueeze(0);
+    data_dict["offset"] = offset.unsqueeze(0);
+    data_dict["scale"] = scale.unsqueeze(0);
+    return data_dict;
   }
 
   std::unordered_map<std::string, torch::Tensor> data_dict;
   data_dict["input"] = processed_data.unsqueeze(0);
-  data_dict["offset"] = offset.unsqueeze(0);
-  data_dict["scale"] = scale.unsqueeze(0);
+
+  if (!inst_norm) {
+    torch::Tensor offset = var_offset.index({var_idx}).view({1, 1, 1});
+    torch::Tensor scale = var_scale.index({var_idx}).view({1, 1, 1});
+    data_dict["offset"] = offset.unsqueeze(0);
+    data_dict["scale"] = scale.unsqueeze(0);
+  }
+
   return data_dict;
 }
 
@@ -628,7 +653,6 @@ ScientificDataset::get_item(size_t idx) {
       idx = it->second;
     }
   }
-
   int64_t idx0 = idx / (shape[1] * t_samples);
   int64_t idx1 = (idx / t_samples) % shape[1];
   int64_t idx2 = idx % t_samples;
@@ -638,7 +662,6 @@ ScientificDataset::get_item(size_t idx) {
   torch::Tensor data =
       data_input.index({static_cast<int64_t>(idx0), static_cast<int64_t>(idx1),
                         torch::indexing::Slice(start_t, end_t)});
-
   data = data.unsqueeze(0);
 
   auto data_dict = post_processing(data, static_cast<int>(idx0), train_mode);
