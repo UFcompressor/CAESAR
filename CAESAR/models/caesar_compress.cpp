@@ -221,14 +221,13 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         std::make_tuple(nH_i32, nW_i32, padding_i32);
   }
 
-  std::vector<torch::Tensor> batch_inputs;
-  batch_inputs.reserve(batch_size);
-  std::vector<float> batch_offsets_vec;
-  batch_offsets_vec.reserve(batch_size);
-  std::vector<float> batch_scales_vec;
-  batch_scales_vec.reserve(batch_size);
-  std::vector<torch::Tensor> batch_indexes;
-  batch_indexes.reserve(batch_size);
+  bool use_inst_norm = dataset.get_inst_norm();
+
+  torch::Tensor batch_input_buf;
+  torch::Tensor batch_index_buf;
+  torch::Tensor batch_offset_buf;
+  torch::Tensor batch_scale_buf;
+  int64_t cur_count = 0;
 
   result.compressionMetaData.offsets.reserve(dataset.size());
   result.compressionMetaData.scales.reserve(dataset.size());
@@ -247,20 +246,44 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
   int64_t total_latent_codes = 0;
   torch::Tensor cpu_latent_indexes;
 
+  std::vector<torch::Tensor> all_batch_offsets;
+  std::vector<torch::Tensor> all_batch_scales;
+
   for (size_t i = 0; i < dataset.size(); i++) {
     auto sample = dataset.get_item(i);
 
     torch::Tensor input_tensor = sample["input"].to(device_);
-    torch::Tensor offset_tensor = sample["offset"];
-    torch::Tensor scale_tensor = sample["scale"];
     torch::Tensor index_tensor = sample["index"];
 
-    batch_inputs.push_back(input_tensor);
-    batch_offsets_vec.push_back(offset_tensor.item<float>());
-    batch_scales_vec.push_back(scale_tensor.item<float>());
-    batch_indexes.push_back(index_tensor.view({1, index_tensor.sizes()[0]}));
-    result.compressionMetaData.offsets.push_back(offset_tensor.item<float>());
-    result.compressionMetaData.scales.push_back(scale_tensor.item<float>());
+    if (!batch_input_buf.defined()) {
+      auto item_sizes = input_tensor.sizes(); // [1, 1, nf, H, W]
+      std::vector<int64_t> in_shape(item_sizes.begin() + 1, item_sizes.end());
+      in_shape.insert(in_shape.begin(), static_cast<int64_t>(batch_size));
+      batch_input_buf = torch::empty(in_shape, input_tensor.options());
+
+      batch_index_buf =
+          torch::empty({static_cast<int64_t>(batch_size), index_tensor.numel()},
+                       index_tensor.options());
+
+      if (!use_inst_norm) {
+        torch::Tensor offset_sample = sample["offset"];
+        torch::Tensor scale_sample = sample["scale"];
+        auto off_sizes = offset_sample.sizes(); // [1, 1, 1, 1]
+        std::vector<int64_t> off_shape(off_sizes.begin() + 1, off_sizes.end());
+        off_shape.insert(off_shape.begin(), static_cast<int64_t>(batch_size));
+        batch_offset_buf = torch::empty(off_shape, offset_sample.options());
+        batch_scale_buf = torch::empty(off_shape, scale_sample.options());
+      }
+    }
+
+    batch_input_buf.select(0, cur_count).copy_(input_tensor.select(0, 0));
+    batch_index_buf.select(0, cur_count).copy_(index_tensor);
+    if (!use_inst_norm) {
+      batch_offset_buf.select(0, cur_count)
+          .copy_(sample["offset"].select(0, 0));
+      batch_scale_buf.select(0, cur_count).copy_(sample["scale"].select(0, 0));
+    }
+    ++cur_count;
 
     {
       std::vector<int32_t> index_vec;
@@ -271,20 +294,35 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       result.compressionMetaData.indexes.push_back(std::move(index_vec));
     }
 
-    if (batch_inputs.size() == static_cast<size_t>(batch_size) ||
+    if (cur_count == static_cast<int64_t>(batch_size) ||
         i == dataset.size() - 1) {
-      int64_t num_input_samples = static_cast<int64_t>(batch_inputs.size());
+      int64_t num_input_samples = cur_count;
 
-      torch::Tensor batched_input = torch::cat(batch_inputs, 0);
-      torch::Tensor batched_offsets =
-          torch::tensor(batch_offsets_vec,
-                        torch::TensorOptions().device(device_))
-              .view({-1, 1, 1, 1, 1});
-      torch::Tensor batched_scales =
-          torch::tensor(batch_scales_vec,
-                        torch::TensorOptions().device(device_))
-              .view({-1, 1, 1, 1, 1});
-      torch::Tensor batched_indexes = torch::cat(batch_indexes, 0).to(device_);
+      // try it out?
+      // torch::Tensor raw_batched_input = batch_input_buf.narrow(0, 0,
+      // cur_count); torch::Tensor batched_indexes = batch_index_buf.narrow(0,
+      // 0, cur_count).to(device_);
+      torch::Tensor raw_batched_input =
+          batch_input_buf.narrow(0, 0, cur_count).clone();
+      torch::Tensor batched_indexes =
+          batch_index_buf.narrow(0, 0, cur_count).clone().to(device_);
+
+      torch::Tensor batched_input, batched_offsets, batched_scales;
+      if (use_inst_norm) {
+        std::tie(batched_input, batched_offsets, batched_scales) =
+            apply_inst_norm_batched(raw_batched_input);
+      } else {
+        batched_input = raw_batched_input;
+        batched_offsets = batch_offset_buf.narrow(0, 0, cur_count)
+                              .clone()
+                              .view({-1, 1, 1, 1, 1});
+        batched_scales = batch_scale_buf.narrow(0, 0, cur_count)
+                             .clone()
+                             .view({-1, 1, 1, 1, 1});
+      }
+
+      all_batch_offsets.push_back(batched_offsets);
+      all_batch_scales.push_back(batched_scales);
 
       std::vector<torch::Tensor> outputs =
           compressor_model_->run({batched_input.to(torch::kFloat32)});
@@ -322,23 +360,54 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
       torch::Tensor denorm_output =
           norm_output * batched_scales + batched_offsets;
 
-      torch::Tensor indexes_cpu = batched_indexes.cpu();
-      auto index_accessor = indexes_cpu.accessor<int64_t, 2>();
-      for (int64_t ii = 0; ii < num_input_samples; ++ii) {
-        recon_tensor.select(0, index_accessor[ii][0])
-            .select(0, index_accessor[ii][1])
-            .slice(0, index_accessor[ii][2], index_accessor[ii][3])
-            .copy_(denorm_output.select(0, ii).squeeze(0));
-      }
+      torch::Tensor idx_v = batched_indexes.select(1, 0);  // [N]
+      torch::Tensor idx_s = batched_indexes.select(1, 1);  // [N]
+      torch::Tensor idx_t0 = batched_indexes.select(1, 2); // [N]
 
-      batch_inputs.clear();
-      batch_offsets_vec.clear();
-      batch_scales_vec.clear();
-      batch_indexes.clear();
+      constexpr int64_t block_len = 8;
+      // = n_frame from DatasetConfig, fixed for this dataset same as nf
+      torch::Tensor t_range =
+          torch::arange(block_len, batched_indexes.options()); // [block_len]
+      torch::Tensor idx_t =
+          idx_t0.unsqueeze(1) + t_range.unsqueeze(0); // [N, block_len]
+      torch::Tensor idx_v_exp =
+          idx_v.unsqueeze(1).expand({-1, block_len}); // [N, block_len]
+      torch::Tensor idx_s_exp =
+          idx_s.unsqueeze(1).expand({-1, block_len}); // [N, block_len]
+
+      torch::Tensor src = denorm_output.squeeze(1).reshape(
+          {num_input_samples * block_len, denorm_output.size(-2),
+           denorm_output.size(-1)});
+
+      recon_tensor.index_put_(
+          {idx_v_exp.reshape(-1), idx_s_exp.reshape(-1), idx_t.reshape(-1)},
+          src);
+
+      cur_count = 0;
     }
   }
 
-  result.compressionMetaData.all_filtered = all_q_latent.empty();
+  result.compressionMetaData.all_filtered = all_batch_offsets.empty();
+
+  if (!all_batch_offsets.empty()) {
+    torch::Tensor all_offsets_cpu =
+        torch::cat(all_batch_offsets, 0).flatten().cpu();
+    torch::Tensor all_scales_cpu =
+        torch::cat(all_batch_scales, 0).flatten().cpu();
+
+    result.compressionMetaData.offsets.resize(all_offsets_cpu.numel());
+    result.compressionMetaData.scales.resize(all_scales_cpu.numel());
+
+    std::memcpy(result.compressionMetaData.offsets.data(),
+                all_offsets_cpu.data_ptr<float>(),
+                all_offsets_cpu.numel() * sizeof(float));
+    std::memcpy(result.compressionMetaData.scales.data(),
+                all_scales_cpu.data_ptr<float>(),
+                all_scales_cpu.numel() * sizeof(float));
+  } else {
+    result.compressionMetaData.offsets.clear();
+    result.compressionMetaData.scales.clear();
+  }
 
   if (!all_q_latent.empty()) {
     torch::Tensor cat_q_latent = torch::cat(all_q_latent, 0);
