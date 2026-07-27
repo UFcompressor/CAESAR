@@ -347,7 +347,7 @@ GAECompressionResult PCACompressor::compress(torch::Tensor originalData,
   if (reconErrorMax > error_ ||
       error_ <
           10.0 * static_cast<double>(std::numeric_limits<float>::epsilon())) {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && !defined(USE_ROCM)
     int device;
     cudaGetDevice(&device);
     cudaDeviceProp prop;
