@@ -64,9 +64,10 @@ set(CAESAR_SRC
     models/runGaeCuda.cpp
     models/gpu_lossess.cpp
     models/lbrc.cpp
-    data_utils.cpp
+    models/nglr.cpp
+    data_utils.cpp 
 )
-
+# to do remove data_utils this is for handling un supports model DIMS not needs just say model cannot handle it 
 add_library(caesar_objs OBJECT ${CAESAR_SRC})
 target_precompile_headers(caesar_objs PRIVATE <torch/torch.h>)
 set_target_properties(caesar_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -96,6 +97,11 @@ if(NVCOMP_FOUND)
 endif()
 
 # todo: fix this to read in the file and set it to just some model name
+# it needs to read the unqiue number then after that we say built for model name
+# this can be done at run time compile time for the code think of it like compiling a file 
+# this file will have information on the dimenctions it supports and who it is unqiue
+# example name: caesar_v  unqiue_identifer: 0X1F48AQ9%*_D DIMS: 3-5 
+
 target_compile_definitions(caesar_objs PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 
