@@ -1,5 +1,7 @@
 #include "data_utils.h"
 
+// to do remove this all  and make it just pad to 5d inside of loading in the
+// data
 std::pair<torch::Tensor, PaddingInfo>
 to_5d_and_pad(torch::Tensor &arr, int64_t H, int64_t W, bool force_padding) {
   std::vector<int64_t> original_shape;

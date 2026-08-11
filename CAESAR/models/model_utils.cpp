@@ -176,6 +176,8 @@ std::string get_model_name() {
   return name;
 }
 
+// make this at compiled so it runs at compile time isntead of from disk from
+// the meta data of the model or maybe just add it all with the name
 std::string get_model_device() {
   static const std::string device =
       read_model_text_file("model_device.txt", "cpu");

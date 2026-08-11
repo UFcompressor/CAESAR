@@ -17,7 +17,6 @@
 
 namespace nglr {
 
-// Values written by the training/export step in model_dir/nglr_meta.txt.
 struct NGLRMeta {
   double x_mean = 0.0;
   double scale = 1.0;
@@ -63,8 +62,6 @@ struct NGLREncodeStats {
   uint64_t delta_zero_count = 0;
 };
 
-// The correction payload is fully in memory.  No correction file is opened,
-// written, read, renamed, or otherwise created by these functions.
 NGLREncodeStats nglr_encode(const torch::Tensor &original,
                             const torch::Tensor &recons, const NGLRModel &model,
                             const NGLRMeta &meta,
