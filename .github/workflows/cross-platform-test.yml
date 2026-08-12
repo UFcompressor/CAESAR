@@ -310,16 +310,10 @@ jobs:
           conda install -n compress_env -y -c conda-forge cmake zstd
 
       - name: Download pretrained models
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Force -Path pretrained | Out-Null
-          $url = "https://huggingface.co/E53klasky/UFL_CAESAR_MODELS/resolve/main/caesar_v.pt"
-          $out = "pretrained/caesar_v.pt"
-          Write-Host "Downloading caesar_v.pt from Hugging Face..."
-          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          $size = (Get-Item $out).Length
-          Write-Host "caesar_v.pt size: $size bytes"
-          if ($size -lt 1MB) { Write-Error "Model file too small - likely an error page"; exit 1 }
-          Write-Host "Download successful."
+          chmod +x download_models.sh
+          ./download_models.sh
 
       - name: Verify torch install
         run: |
