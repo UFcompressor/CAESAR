@@ -55,10 +55,13 @@ class CAESAR:
         else:
             self._load_caesar_d_compressor()
 
+    def strip_orig_mod_prefix(self, state_dict):
+        return {k.replace("_orig_mod.", "", 1): v for k, v in state_dict.items()}
+
     def _load_caesar_v_compressor(self):
         from .models import compress_modules3d_mid_SR as compress_modules
 
-        print("Loading CAESAE-V")
+        print("Loading CAESAR-V")
         model = compress_modules.CompressorMix(
             dim=16,
             dim_mults=[1, 2, 3, 4],
@@ -70,11 +73,25 @@ class CAESAR:
             sr_dim=16,
         )
 
-        state_dict = self.remove_module_prefix(
-            torch.load(self.pretrained_path, map_location=self.device)
-        )
-        model.load_state_dict(state_dict)
-        self.compressor_v = model.to(self.device).eval()
+        raw_state_dict = torch.load(self.pretrained_path, map_location=self.device)
+        state_dict = self.remove_module_prefix(raw_state_dict)
+
+        try:
+            model.load_state_dict(state_dict)
+            print("Loaded state dict without needing _orig_mod. stripping.")
+        except RuntimeError:
+            try:
+                state_dict = self.strip_orig_mod_prefix(state_dict)
+                model.load_state_dict(state_dict)
+                print("Loaded state dict after stripping _orig_mod. prefix.")
+            except RuntimeError as e:
+                raise RuntimeError(
+                    "Failed to load state_dict even after stripping 'module.' and "
+                    "'_orig_mod.' prefixes. The checkpoint may not match this model "
+                    "architecture."
+                ) from e
+
+        self.compressor_v = model.to(self.device).float().eval()
 
     def _load_caesar_d_compressor(self):
         print("Loading CAESAE-D")
@@ -119,32 +136,200 @@ class CAESAR:
 
         self.diffusion_model = diffusion.to(self.device).eval()
 
-    def forward(self, dataloader):
+    def compress(self, dataloader, eb=1e-3):
 
-        # dataset_org = dataloader.dataset
-        # self.transform_shape = dataset_org.deblocking_hw
+        dataset_org = dataloader.dataset
+        self.transform_shape = dataset_org.deblocking_hw
 
-        compressed_latent, latent_bytes = self.compress_caesar_v(dataloader)
+        shape = dataset_org.data_input.shape
+        if self.use_diffusion:
+            compressed_latent, latent_bytes = self.compress_caesar_d(dataloader)
+            recons_data = self.decompress_caesar_d(
+                compressed_latent, shape, dataset_org.filtered_blocks
+            )
+            recons_data = self.transform_shape(recons_data)
 
-        # original_data = dataset_org.original_data()
+        else:
+            compressed_latent, latent_bytes = self.compress_caesar_v(dataloader)
+
+            recons_data = self.decompress_caesar_v(
+                compressed_latent, shape, dataset_org.filtered_blocks
+            )
+            recons_data = self.transform_shape(recons_data)
+
+        original_data = dataset_org.original_data()
         # print("original_data.shape after compress", original_data.shape, recons_data.shape)
-        # original_data, org_padding = self.padding(original_data)
-        # recons_data, rec_padding= self.padding(recons_data)
+        original_data, org_padding = self.padding(original_data)
+        recons_data, rec_padding = self.padding(recons_data)
 
-        # meta_data, compressed_gae = self.postprocessing_encoding(original_data, recons_data, eb)
-        return compressed_latent
+        meta_data, compressed_gae = self.postprocessing_encoding(
+            original_data, recons_data, eb
+        )
+        return {
+            "latent": compressed_latent,
+            "postprocess": compressed_gae,
+            "meta_data": meta_data,
+            "shape": shape,
+            "padding": rec_padding,
+            "filtered_blocks": dataset_org.filtered_blocks,
+        }, latent_bytes + meta_data["data_bytes"]
 
-    def compress_caesar_v(self, dataloader):
+    def decompress(self, compressed):
+
+        shape = compressed["shape"]
+        filtered_blocks = compressed["filtered_blocks"]
+        if self.use_diffusion:
+            recons_data = self.decompress_caesar_d(
+                compressed["latent"], compressed["shape"], filtered_blocks
+            )
+            recons_data = self.transform_shape(recons_data)
+        else:
+            recons_data = self.decompress_caesar_v(
+                compressed["latent"], compressed["shape"], filtered_blocks
+            )
+            recons_data = self.transform_shape(recons_data)
+
+        recons_data, rec_padding = self.padding(recons_data)
+
+        recons_data = self.postprocessing_decoding(
+            recons_data, compressed["meta_data"], compressed["postprocess"], rec_padding
+        )
+        return recons_data
+
+    def compress_caesar_d(self, dataloader):
 
         total_bits = 0
+
         all_compressed_latent = []
 
         with torch.no_grad():
             for data in dataloader:
-                outputs = self.compressor_v.compress(data[0].to(self.device))
+
+                keyframe = data["input"][:, :, self.cond_idx].cuda()
+                outputs = self.keyframe_model.compress(keyframe)
                 total_bits += torch.sum(outputs["bpf_real"])
 
-                compressed_latent = outputs["compressed"]
+                compressed_latent = {
+                    "compressed": outputs["compressed"],
+                    "scale": data["scale"],
+                    "offset": data["offset"],
+                    "index": data["index"],
+                }
+
+                all_compressed_latent.append(compressed_latent)
+        return all_compressed_latent, total_bits / 8
+
+    def decompress_caesar_d(self, all_compressed, shape, filtered_blocks):
+
+        torch.manual_seed(2025)
+        torch.cuda.manual_seed_all(2025)
+
+        recons_data = torch.zeros(shape)
+        with torch.no_grad():
+            for compressed in all_compressed:
+
+                latent_data = self.keyframe_model.decompress(
+                    *compressed["compressed"], device=self.device
+                )
+                B, C, KT, H, W = latent_data.shape
+
+                input_latent = torch.zeros(
+                    [B, C, self.n_frame, H, W], device=self.device
+                )
+                input_latent[:, :, self.cond_idx] = latent_data
+                input_latent, offset_latent, scale_latent = normalize_latent(
+                    input_latent
+                )
+
+                result = self.diffusion_model.sample(
+                    input_latent, self.interpo_rate, batch_size=input_latent.shape[0]
+                )
+                input_latent[:, :, self.pred_idx] = result
+                input_latent = input_latent * scale_latent + offset_latent
+
+                input_latent = (
+                    input_latent[:, :, :].permute(0, 2, 1, 3, 4).reshape(-1, 64, 16, 16)
+                )
+
+                rct_data = self.keyframe_model.decode(input_latent).detach()
+                rct_data = (
+                    rct_data.reshape([B, -1, 16, *rct_data.shape[-2:]])
+                    * compressed["scale"].cuda()
+                    + compressed["offset"].cuda()
+                )
+                rct_data = rct_data.cpu()
+
+                for i in range(B):
+                    idx0, idx1, start_t, end_t = compressed["index"]
+                    recons_data[idx0[i], idx1[i], start_t[i] : end_t[i]] = rct_data[i]
+
+        if filtered_blocks:
+            V, S, T, H, W = shape
+            n_frame = 16
+            samples = T // n_frame
+            for label, value in filtered_blocks:
+                v = label // (S * samples)
+                remain = label % (S * samples)
+                s = remain // samples
+                blk_idx = remain % samples
+                start = blk_idx * n_frame
+                end = (blk_idx + 1) * n_frame
+                recons_data[v, s, start:end, :, :] = value
+
+        return recons_data
+
+    def decompress_caesar_v(self, all_compressed, shape, filtered_blocks):
+
+        torch.manual_seed(2025)
+        torch.cuda.manual_seed_all(2025)
+
+        recons_data = torch.zeros(shape)
+        with torch.no_grad():
+            for compressed in all_compressed:
+
+                rct_data = self.compressor_v.decompress(*compressed["compressed"])
+                rct_data = (
+                    rct_data * compressed["scale"].cuda() + compressed["offset"].cuda()
+                )
+                rct_data = rct_data.cpu()
+
+                for i in range(rct_data.shape[0]):
+                    idx0, idx1, start_t, end_t = compressed["index"]
+                    recons_data[idx0[i], idx1[i], start_t[i] : end_t[i]] = rct_data[i]
+
+        if filtered_blocks:
+            V, S, T, H, W = shape
+            n_frame = 8
+            samples = T // n_frame
+            for label, value in filtered_blocks:
+                v = label // (S * samples)
+                remain = label % (S * samples)
+                s = remain // samples
+                blk_idx = remain % samples
+                start = blk_idx * n_frame
+                end = (blk_idx + 1) * n_frame
+                recons_data[v, s, start:end, :, :] = value
+
+        return recons_data
+
+    def compress_caesar_v(self, dataloader):
+
+        total_bits = 0
+
+        all_compressed_latent = []
+
+        with torch.no_grad():
+            for data in dataloader:
+                outputs = self.compressor_v.compress(data["input"].cuda())
+                total_bits += torch.sum(outputs["bpf_real"])
+
+                compressed_latent = {
+                    "compressed": outputs["compressed"],
+                    "scale": data["scale"],
+                    "offset": data["offset"],
+                    "index": data["index"],
+                }
+
                 all_compressed_latent.append(compressed_latent)
 
         return all_compressed_latent, total_bits / 8
@@ -171,3 +356,44 @@ class CAESAR:
         *leading_dims, H, W = padded_data.shape
         unpadded_data = padded_data[..., top : H - down, left : W - right]
         return unpadded_data
+
+    def postprocessing_encoding(self, original_data, recons_data, nrmse):
+
+        x_min, x_max, offset = (
+            original_data.min(),
+            original_data.max(),
+            original_data.mean(),
+        )
+        scale = x_max - x_min
+
+        original_data = (original_data - offset) / scale
+        recons_data = (recons_data - offset) / scale
+        # self.device
+        self.compressor = PCACompressor(
+            nrmse, 2, codec_algorithm="Zstd", device=self.device
+        )
+
+        meta_data, compressed_data, _ = self.compressor.compress(
+            original_data, recons_data
+        )
+
+        meta_data["scale"] = scale
+        meta_data["offset"] = offset
+
+        return meta_data, compressed_data
+
+    def postprocessing_decoding(self, recons_data, meta_data, compressed_data, padding):
+
+        recons_data = (recons_data - meta_data["offset"]) / meta_data["scale"]
+
+        # self.compressor = PCACompressor(0, 2, codec_algorithm = "Zstd", device = self.device)
+
+        if meta_data["data_bytes"] > 0:
+            recons_data_gae = self.compressor.decompress(
+                recons_data, meta_data, compressed_data, to_np=False
+            )
+        else:
+            recons_data_gae = recons_data
+
+        recons_data_gae = self.unpadding(recons_data_gae, padding)
+        return recons_data_gae * meta_data["scale"] + meta_data["offset"]
