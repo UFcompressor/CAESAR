@@ -404,10 +404,11 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
                                std::to_string(c) + " (buffer " +
                                std::to_string(chunks[c].buf_idx) + ")");
     if (h_actual_output_sizes[c] != chunks[c].decomp_size) {
-      std::cout << "[LBRC diagnostic] nvCOMP output-size mismatch: chunk=" << c
-                << " block=" << chunks[c].buf_idx
-                << " expected=" << chunks[c].decomp_size
-                << " actual=" << h_actual_output_sizes[c] << "\n";
+      throw std::runtime_error(
+          "nvCOMP Zstd decompressed size mismatch on chunk " +
+          std::to_string(c) + " (buffer " + std::to_string(chunks[c].buf_idx) +
+          "): expected " + std::to_string(chunks[c].decomp_size) + ", got " +
+          std::to_string(h_actual_output_sizes[c]));
     }
   }
 
