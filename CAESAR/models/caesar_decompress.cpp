@@ -125,6 +125,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   input_shape.clear();
   input_shape.shrink_to_fit();
 
+  // this is for saving latents for portablity
   //   std::vector<torch::Tensor> row_tensors;
   //   row_tensors.reserve(comp_result.latent_indexes.size());
   //   for (const auto& row : comp_result.latent_indexes) {
@@ -265,7 +266,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
   recon_tensor = torch::Tensor();
 
-  //  ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!
+  //  ---- LBRC path --------------------------------
   //  ---------------------------------------------------------
   if (comp_result.use_lbrc) {
     torch::Tensor recon_ =
