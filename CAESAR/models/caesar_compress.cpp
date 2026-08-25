@@ -526,7 +526,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
 
   recon_tensor = torch::Tensor();
 
-  result.use_lbrc = true;
+  result.use_lbrc = false; // hard code still for safty
   if (result.use_lbrc) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
