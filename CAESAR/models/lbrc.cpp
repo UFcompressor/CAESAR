@@ -760,6 +760,24 @@ static void compress_gpu(const torch::Tensor &original,
                       .to(torch::kUInt8);
     auto packed = pack_bits(bits01);
     auto planes = compress_planes(packed, zstd_level, workers);
+
+#if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+    // Diagnostic branch only: immediately round-trip every packed plane
+    // through nvCOMP and compare on the GPU before the streams are moved into
+    // LBRC metadata.
+    auto verified =
+        decompress_planes(planes, N8 / 8, packed.options(), workers);
+    auto mismatch_per_block =
+        (packed != verified).reshape({Nb, -1}).sum(1).to(torch::kCPU);
+    const int64_t mismatched_bytes = mismatch_per_block.sum().item<int64_t>();
+    const int64_t mismatched_blocks =
+        (mismatch_per_block > 0).sum().item<int64_t>();
+    std::cout << "[LBRC diagnostic] nvCOMP plane bit=" << bit
+              << " mismatched_bytes=" << mismatched_bytes
+              << " mismatched_blocks=" << mismatched_blocks << "/" << Nb
+              << "\n";
+#endif
+
     for (int64_t i = 0; i < Nb; ++i)
       if (bit < bit_count[i])
         blocks[i].streams.push_back(std::move(planes[i]));
