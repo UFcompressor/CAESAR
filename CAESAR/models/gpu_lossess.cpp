@@ -366,15 +366,24 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   CHECK_CUDA(cudaStreamSynchronize(stream));
 
   std::vector<nvcompStatus_t> h_statuses(totalChunks);
+  std::vector<size_t> h_actual_output_sizes(totalChunks);
   CHECK_CUDA(cudaMemcpy(h_statuses.data(), d_statuses,
                         totalChunks * sizeof(nvcompStatus_t),
                         cudaMemcpyDeviceToHost));
+  CHECK_CUDA(cudaMemcpy(h_actual_output_sizes.data(), d_output_sizes,
+                        totalChunks * sizeof(size_t), cudaMemcpyDeviceToHost));
 
   for (size_t c = 0; c < totalChunks; c++) {
     if (h_statuses[c] != nvcompSuccess)
       throw std::runtime_error("nvcomp Zstd decompress failed on chunk " +
                                std::to_string(c) + " (buffer " +
                                std::to_string(chunks[c].buf_idx) + ")");
+    if (h_actual_output_sizes[c] != chunks[c].decomp_size) {
+      std::cout << "[LBRC diagnostic] nvCOMP output-size mismatch: chunk=" << c
+                << " block=" << chunks[c].buf_idx
+                << " expected=" << chunks[c].decomp_size
+                << " actual=" << h_actual_output_sizes[c] << "\n";
+    }
   }
 
   for (size_t i = 0; i < N; i++) {

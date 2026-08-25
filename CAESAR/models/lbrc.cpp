@@ -776,6 +776,22 @@ static void compress_gpu(const torch::Tensor &original,
               << " mismatched_bytes=" << mismatched_bytes
               << " mismatched_blocks=" << mismatched_blocks << "/" << Nb
               << "\n";
+    if (mismatched_blocks > 0) {
+      auto mismatch_counts = mismatch_per_block.accessor<int64_t, 1>();
+      for (int64_t i = 0; i < Nb; ++i) {
+        if (mismatch_counts[i] == 0)
+          continue;
+        auto positions =
+            (packed[i] != verified[i]).nonzero().reshape({-1}).to(torch::kCPU);
+        auto positions_acc = positions.accessor<int64_t, 1>();
+        std::cout << "[LBRC diagnostic] nvCOMP mismatch: bit=" << bit
+                  << " block=" << i << " compressed_bytes=" << planes[i].size()
+                  << " mismatch_count=" << mismatch_counts[i]
+                  << " first_byte=" << positions_acc[0]
+                  << " last_byte=" << positions_acc[positions.numel() - 1]
+                  << "\n";
+      }
+    }
 #endif
 
     for (int64_t i = 0; i < Nb; ++i)
