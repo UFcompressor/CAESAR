@@ -491,6 +491,41 @@ static torch::Tensor unpack_bits(const torch::Tensor &packed, int64_t N) {
   return bits.reshape(sizes);
 }
 
+static void print_tensor_fingerprint(const char *label,
+                                     const torch::Tensor &tensor) {
+  auto flat = tensor.reshape({-1});
+  const int64_t n = flat.numel();
+  const int64_t i0 = 0;
+  const int64_t i1 = n / 7;
+  const int64_t i2 = n / 3;
+  const int64_t i3 = n / 2;
+  const int64_t i4 = n - 1;
+  auto sample_idx = torch::tensor({i0, i1, i2, i3, i4},
+                                  torch::TensorOptions().dtype(torch::kInt64))
+                        .to(flat.device());
+  auto samples = flat.index_select(0, sample_idx).to(torch::kCPU);
+
+  std::cout << "[LBRC diagnostic] " << label << ": numel=" << n
+            << " sum=" << flat.sum().item<float>()
+            << " min=" << flat.min().item<float>()
+            << " max=" << flat.max().item<float>() << " samples=" << samples
+            << "\n";
+}
+
+static void print_q_fingerprint(const char *label, const torch::Tensor &q) {
+  auto flat = q.reshape({-1});
+  const int64_t n = flat.numel();
+  auto sample_idx = torch::tensor({int64_t{0}, n / 7, n / 3, n / 2, n - 1},
+                                  torch::TensorOptions().dtype(torch::kInt64))
+                        .to(flat.device());
+  auto samples = flat.index_select(0, sample_idx).to(torch::kCPU);
+  std::cout << "[LBRC diagnostic] " << label << ": numel=" << q.numel()
+            << " sum=" << q.sum().item<int64_t>()
+            << " min=" << q.min().item<int32_t>()
+            << " max=" << q.max().item<int32_t>() << " samples=" << samples
+            << "\n";
+}
+
 // Batched binary-search quantization across all Nblocks at once.
 static std::pair<torch::Tensor, torch::Tensor>
 quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
@@ -542,6 +577,17 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
   q = torch::where(zero_correction.view({Nb, 1, 1, 1}), torch::zeros_like(q),
                    q);
   q = torch::where(valid.to(torch::kBool), q, torch::zeros_like(q));
+
+  auto final_sse = sse_at(step4);
+  auto block_nrmse = torch::sqrt(final_sse / valid_count);
+  const double global_nrmse = std::sqrt(final_sse.sum().item<double>() /
+                                        valid_count.sum().item<double>());
+  std::cout << "[LBRC diagnostic] quantizer: target=" << target_nrmse
+            << " global_nrmse=" << global_nrmse
+            << " max_block_nrmse=" << block_nrmse.max().item<float>()
+            << " zero_blocks=" << zero_correction.sum().item<int64_t>() << "/"
+            << Nb << "\n";
+  print_q_fingerprint("q before encoding", q);
 
   return {step, q};
 }
@@ -644,6 +690,8 @@ static void compress_gpu(const torch::Tensor &original,
   auto orig_c = original.contiguous();
   auto rec_c = recons.contiguous();
 
+  print_tensor_fingerprint("compression base reconstruction", rec_c);
+
   auto stats = torch::stack({orig_c.mean(), orig_c.amax(), orig_c.amin()})
                    .to(torch::kCPU);
   const float x_mean = stats[0].item<float>();
@@ -740,6 +788,7 @@ static torch::Tensor decompress_gpu(const torch::Tensor &recons,
 
   const Shape5 S = shape_of(recons);
   auto rec_c = recons.contiguous();
+  print_tensor_fingerprint("decompression base reconstruction", rec_c);
   auto x0n = (rec_c - meta.x_mean) / meta.scale;
   auto x0n_blk = to_blocks(x0n, meta.block_size);
 
@@ -776,6 +825,7 @@ static torch::Tensor decompress_gpu(const torch::Tensor &recons,
   auto zz = zz_flat.narrow(1, 0, N).view({Nb, bt, bh, bw});
   auto d = zigzag_decode(zz);
   auto q = inv_lorenzo_3d(d);
+  print_q_fingerprint("q after decoding", q);
 
   std::vector<double> steps(Nb);
   for (int64_t i = 0; i < Nb; ++i)
