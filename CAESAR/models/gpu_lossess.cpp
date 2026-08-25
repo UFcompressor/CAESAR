@@ -110,8 +110,10 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   std::vector<void *> h_output_ptrs(totalChunks);
   std::vector<size_t> h_input_sizes(totalChunks);
 
-  cudaStream_t stream;
-  CHECK_CUDA(cudaStreamCreate(&stream));
+  // Run nvCOMP on PyTorch's current stream. The input tensors are produced
+  // asynchronously on this stream, so queueing nvCOMP here preserves the
+  // producer-consumer dependency without a device-wide synchronization.
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream().stream();
 
   // Point directly into GPU tensor memory
   for (size_t c = 0; c < totalChunks; c++) {
@@ -214,8 +216,6 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   cudaFree(d_input_sizes);
   cudaFree(d_output_sizes);
   cudaFree(d_statuses);
-  cudaStreamDestroy(stream);
-
   return results;
 }
 
@@ -324,8 +324,9 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   std::vector<void *> h_input_ptrs(totalChunks), h_output_ptrs(totalChunks);
   std::vector<size_t> h_input_sizes(totalChunks), h_output_sizes(totalChunks);
 
-  cudaStream_t stream;
-  CHECK_CUDA(cudaStreamCreate(&stream));
+  // Keep nvCOMP ordered with the surrounding PyTorch CUDA work and never
+  // destroy a stream owned by PyTorch.
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream().stream();
 
   for (size_t c = 0; c < totalChunks; c++) {
     uint8_t *comp_slot = (uint8_t *)d_comp_pool + c * maxCompChunk;
@@ -404,8 +405,6 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   cudaFree(d_input_sizes);
   cudaFree(d_output_sizes);
   cudaFree(d_statuses);
-  cudaStreamDestroy(stream);
-
   return results;
 }
 
