@@ -34,8 +34,10 @@
 
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
 
-// We chunk all inputs down to this size before submitting as one big batch.
-static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 16ULL * 1024 * 1024; // 16 MB
+// nvCOMP permits chunks up to 16 MiB, but its Zstd API recommends 64 KiB for
+// best performance. The smaller chunks also avoid reproducible corruption in
+// nvCOMP 5.0.0.6 for several near-incompressible 1 MiB LBRC bit planes.
+static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 64ULL * 1024; // 64 KiB
 
 static size_t align_up(size_t value, size_t alignment) {
   return alignment == 0 ? value
