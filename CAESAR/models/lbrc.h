@@ -30,7 +30,8 @@ namespace caesar::lbrc {
 
 void compress(const torch::Tensor &original, const torch::Tensor &recons,
               double target_nrmse, LBRCMetaData &meta,
-              std::vector<LBRCBlock> &blocks, int workers = 0);
+              std::vector<LBRCBlock> &blocks, int workers = 0,
+              int64_t valid_t = -1);
 
 torch::Tensor decompress(const torch::Tensor &recons, const LBRCMetaData &meta,
                          const std::vector<LBRCBlock> &blocks, int workers = 0);
