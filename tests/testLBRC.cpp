@@ -179,8 +179,9 @@ static void test_bitplane_roundtrip() {
 // 4. Full compress / decompress round-trip via the public API
 // ===========================================================================
 static void test_api_roundtrip() {
-  // small synthetic 5-D tensor: B=1, C=1, T=16, H=32, W=32
-  const int64_t B = 1, C = 1, T = 16, H = 32, W = 32;
+  // Regression shape: none of (T,H,W) evenly divides the former hard-coded
+  // LBRC block size (60,120,120), and W is intentionally very small.
+  const int64_t B = 1, C = 1, T = 88, H = 96, W = 2;
   const int64_t N = B * C * T * H * W;
 
   std::mt19937 rng(0xDEAD);
@@ -201,12 +202,12 @@ static void test_api_roundtrip() {
   // compress
   LBRCMetaData meta;
   std::vector<LBRCBlock> blocks;
-  meta.block_size = {8, 16, 16};
 
   const double target = 1e-4;
   caesar::lbrc::compress(orig, recon, target, meta, blocks);
 
   assert(meta.lbrc_correction_occur);
+  assert((meta.block_size == std::array<int64_t, 3>{T, H, W}));
   assert(!blocks.empty());
 
   // decompress

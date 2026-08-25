@@ -22,14 +22,16 @@ struct LBRCMetaData {
   bool lbrc_correction_occur = false;
   float x_mean = 0.f;
   float scale = 0.f;
-  std::array<int64_t, 3> block_size = {60, 120, 120}; // bt, bh, bw
+  // Filled from the input tensor's (T,H,W) dimensions during compression.
+  std::array<int64_t, 3> block_size{}; // bt, bh, bw
 };
 
 namespace caesar::lbrc {
 
 void compress(const torch::Tensor &original, const torch::Tensor &recons,
               double target_nrmse, LBRCMetaData &meta,
-              std::vector<LBRCBlock> &blocks, int workers = 0);
+              std::vector<LBRCBlock> &blocks, int workers = 0,
+              int64_t valid_t = -1);
 
 torch::Tensor decompress(const torch::Tensor &recons, const LBRCMetaData &meta,
                          const std::vector<LBRCBlock> &blocks, int workers = 0);
