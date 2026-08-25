@@ -298,10 +298,6 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         i == dataset.size() - 1) {
       int64_t num_input_samples = cur_count;
 
-      // try it out?
-      // torch::Tensor raw_batched_input = batch_input_buf.narrow(0, 0,
-      // cur_count); torch::Tensor batched_indexes = batch_index_buf.narrow(0,
-      // 0, cur_count).to(device_);
       torch::Tensor raw_batched_input =
           batch_input_buf.narrow(0, 0, cur_count).clone();
       torch::Tensor batched_indexes =
@@ -478,6 +474,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     result.encoded_hyper_latents.clear();
   }
 
+  // this is for saving latents for portablity
   //   int64_t total = cpu_latent_indexes.size(0);
   //   cpu_latent_indexes = cpu_latent_indexes.to(torch::kUInt8);
   //     result.latent_indexes.resize(total);
@@ -529,13 +526,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
 
   recon_tensor = torch::Tensor();
 
-  // ---- LBRC path hard coded for now !!!!!!!!!!!!!!!!!!!!
-  // if (rel_eb < 0.07) {
-  //  result.use_lbrc = true;
-  //} else {
-  //  result.use_lbrc = false;
-  //}
-  result.use_lbrc = false; // hard code still for safty
+  result.use_lbrc = true; // hard code still for safty
   if (result.use_lbrc) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
@@ -545,7 +536,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     dataset.clear();
     caesar::lbrc::compress(original_, recon_, static_cast<double>(rel_eb),
                            result.lbrcMetaData, result.lbrc_blocks,
-                           get_allocated_cores());
+                           get_allocated_cores(), original_.size(2) - pad_T);
 
     return result;
   }

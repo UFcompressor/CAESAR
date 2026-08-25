@@ -185,14 +185,14 @@ struct QuantResult {
 };
 
 static QuantResult quantize_block(const float *x, const float *x0n,
-                                  const float *r, int64_t N,
+                                  const float *r, int64_t N, int64_t valid_N,
                                   double target_nrmse, int qiter, float mean,
                                   float scale) {
   const double target_sse =
-      target_nrmse * target_nrmse * static_cast<double>(N);
+      target_nrmse * target_nrmse * static_cast<double>(valid_N);
 
   double sse0 = 0.0;
-  for (int64_t i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < valid_N; ++i) {
     float y = x0n[i] * scale + mean;
     float e = (x[i] - y) / scale;
     sse0 += static_cast<double>(e) * static_cast<double>(e);
@@ -203,24 +203,24 @@ static QuantResult quantize_block(const float *x, const float *x0n,
 
   double low = 0.0;
   double high = std::max(target_nrmse * std::sqrt(12.0), 1e-12);
-  while (block_sse(x, x0n, r, N, high, mean, scale) <= target_sse) {
+  while (block_sse(x, x0n, r, valid_N, high, mean, scale) <= target_sse) {
     low = high;
     high *= 2.0;
   }
   for (int i = 0; i < qiter; ++i) {
     double mid = 0.5 * (low + high);
-    if (block_sse(x, x0n, r, N, mid, mean, scale) <= target_sse)
+    if (block_sse(x, x0n, r, valid_N, mid, mean, scale) <= target_sse)
       low = mid;
     else
       high = mid;
   }
 
   double step = std::max(low, 1e-12);
-  double sse = block_sse(x, x0n, r, N, step, mean, scale);
+  double sse = block_sse(x, x0n, r, valid_N, step, mean, scale);
 
   std::vector<int32_t> q(N);
   const float st = static_cast<float>(step);
-  for (int64_t i = 0; i < N; ++i)
+  for (int64_t i = 0; i < valid_N; ++i)
     q[i] = static_cast<int32_t>(std::nearbyint(r[i] / st));
 
   return {step, std::move(q), sse};
@@ -231,11 +231,14 @@ static LBRCBlock encode_block(const float *x_ptr, const float *x0n_ptr,
                               int64_t c, int64_t t0, int64_t t1, int64_t h0,
                               int64_t h1, int64_t w0, int64_t w1,
                               double target_nrmse, int zstd_level, int qiter,
-                              float mean, float scale) {
+                              float mean, float scale, int64_t valid_t) {
   const int64_t T = t1 - t0;
   const int64_t H = h1 - h0;
   const int64_t W = w1 - w0;
   const int64_t N = T * H * W;
+  const int64_t valid_block_t =
+      std::max<int64_t>(0, std::min(t1, valid_t) - t0);
+  const int64_t valid_N = valid_block_t * H * W;
 
   std::vector<float> xb(N), x0b(N), rb(N);
   int64_t p = 0;
@@ -248,8 +251,8 @@ static LBRCBlock encode_block(const float *x_ptr, const float *x0n_ptr,
         rb[p] = r_ptr[id];
       }
 
-  auto qr = quantize_block(xb.data(), x0b.data(), rb.data(), N, target_nrmse,
-                           qiter, mean, scale);
+  auto qr = quantize_block(xb.data(), x0b.data(), rb.data(), N, valid_N,
+                           target_nrmse, qiter, mean, scale);
 
   auto d = lorenzo_3d(qr.q, T, H, W);
   std::vector<uint32_t> zz(d.size());
@@ -279,7 +282,7 @@ static LBRCBlock encode_block(const float *x_ptr, const float *x0n_ptr,
 static void compress_cpu(const torch::Tensor &original,
                          const torch::Tensor &recons, double target_nrmse,
                          LBRCMetaData &meta, std::vector<LBRCBlock> &blocks,
-                         int workers) {
+                         int workers, int64_t valid_t) {
   TORCH_CHECK(original.dtype() == torch::kFloat32 &&
                   recons.dtype() == torch::kFloat32,
               "LBRC compress: tensors must be float32");
@@ -289,6 +292,10 @@ static void compress_cpu(const torch::Tensor &original,
               "LBRC compress: expected 5-D tensor (B,C,T,H,W)");
 
   const Shape5 S = shape_of(original);
+  if (valid_t < 0)
+    valid_t = S.T;
+  TORCH_CHECK(valid_t > 0 && valid_t <= S.T,
+              "LBRC compress: valid_t must be in [1,T]");
   meta.block_size = {S.T, S.H, S.W};
 
   torch::Tensor orig_c = original.contiguous();
@@ -314,7 +321,7 @@ static void compress_cpu(const torch::Tensor &original,
   if (workers <= 0)
     workers = get_allocated_cores();
 
-  int zstd_level = 21;
+  int zstd_level = 3;
   int quantity_iter = 16;
   blocks.resize(slices.size());
 
@@ -322,7 +329,7 @@ static void compress_cpu(const torch::Tensor &original,
     const auto &sl = slices[i];
     blocks[i] = encode_block(x_ptr, x0n.data(), r.data(), S, sl.b, sl.c, sl.t0,
                              sl.t1, sl.h0, sl.h1, sl.w0, sl.w1, target_nrmse,
-                             zstd_level, quantity_iter, x_mean, scale);
+                             zstd_level, quantity_iter, x_mean, scale, valid_t);
   });
 
   meta.x_mean = x_mean;
@@ -487,11 +494,11 @@ static torch::Tensor unpack_bits(const torch::Tensor &packed, int64_t N) {
 // Batched binary-search quantization across all Nblocks at once.
 static std::pair<torch::Tensor, torch::Tensor>
 quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
-                 const torch::Tensor &r, double target_nrmse, int qiter,
-                 float mean, float scale) {
+                 const torch::Tensor &r, const torch::Tensor &valid,
+                 double target_nrmse, int qiter, float mean, float scale) {
   int64_t Nb = x.size(0);
-  int64_t N = x.size(1) * x.size(2) * x.size(3);
-  double target_sse = target_nrmse * target_nrmse * static_cast<double>(N);
+  auto valid_count = valid.sum({1, 2, 3});
+  auto target_sse = valid_count * (target_nrmse * target_nrmse);
 
   // One lambda covers both sse0 (step so large q rounds to 0 everywhere,
   // i.e. the uncorrected base-recon error) and every bisection probe.
@@ -499,7 +506,7 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
     auto q = torch::round(r / step4);
     auto y = (x0n + q * step4) * scale + mean;
     auto e = (x - y) / scale;
-    return (e * e).sum({1, 2, 3});
+    return (e * e * valid).sum({1, 2, 3});
   };
 
   auto huge = torch::full({Nb, 1, 1, 1}, 1e30, x.options());
@@ -534,6 +541,7 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
   auto q = torch::round(r / step4).to(torch::kInt32);
   q = torch::where(zero_correction.view({Nb, 1, 1, 1}), torch::zeros_like(q),
                    q);
+  q = torch::where(valid.to(torch::kBool), q, torch::zeros_like(q));
 
   return {step, q};
 }
@@ -618,7 +626,7 @@ decompress_planes(const std::vector<std::vector<uint8_t>> &compressed,
 static void compress_gpu(const torch::Tensor &original,
                          const torch::Tensor &recons, double target_nrmse,
                          LBRCMetaData &meta, std::vector<LBRCBlock> &blocks,
-                         int workers) {
+                         int workers, int64_t valid_t) {
   TORCH_CHECK(original.dtype() == torch::kFloat32 &&
                   recons.dtype() == torch::kFloat32,
               "LBRC compress (gpu): tensors must be float32");
@@ -628,6 +636,10 @@ static void compress_gpu(const torch::Tensor &original,
               "LBRC compress (gpu): expected 5-D tensor (B,C,T,H,W)");
 
   const Shape5 S = shape_of(original);
+  if (valid_t < 0)
+    valid_t = S.T;
+  TORCH_CHECK(valid_t > 0 && valid_t <= S.T,
+              "LBRC compress (gpu): valid_t must be in [1,T]");
   meta.block_size = {S.T, S.H, S.W};
   auto orig_c = original.contiguous();
   auto rec_c = recons.contiguous();
@@ -644,10 +656,16 @@ static void compress_gpu(const torch::Tensor &original,
   auto x_blk = to_blocks(orig_c, meta.block_size);
   auto x0n_blk = to_blocks(x0n, meta.block_size);
   auto r_blk = to_blocks(r, meta.block_size);
+  auto valid =
+      (torch::arange(S.T, orig_c.options().dtype(torch::kInt64)) < valid_t)
+          .view({1, 1, S.T, 1, 1})
+          .expand_as(orig_c)
+          .to(orig_c.dtype());
+  auto valid_blk = to_blocks(valid, meta.block_size);
 
   int qiter = 16;
-  auto [step, q] = quantize_batched(x_blk, x0n_blk, r_blk, target_nrmse, qiter,
-                                    x_mean, scale);
+  auto [step, q] = quantize_batched(x_blk, x0n_blk, r_blk, valid_blk,
+                                    target_nrmse, qiter, x_mean, scale);
 
   auto d = lorenzo_3d(q);
   auto zz = zigzag_encode(d);                   // int64, >=0
@@ -775,12 +793,14 @@ static torch::Tensor decompress_gpu(const torch::Tensor &recons,
 
 void compress(const torch::Tensor &original, const torch::Tensor &recons,
               double target_nrmse, LBRCMetaData &meta,
-              std::vector<LBRCBlock> &blocks, int workers) {
+              std::vector<LBRCBlock> &blocks, int workers, int64_t valid_t) {
   // only suport nvida/amd
   if (torch::cuda::is_available()) {
-    gpu::compress_gpu(original, recons, target_nrmse, meta, blocks, workers);
+    gpu::compress_gpu(original, recons, target_nrmse, meta, blocks, workers,
+                      valid_t);
   } else {
-    compress_cpu(original, recons, target_nrmse, meta, blocks, workers);
+    compress_cpu(original, recons, target_nrmse, meta, blocks, workers,
+                 valid_t);
   }
 }
 
