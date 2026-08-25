@@ -1,4 +1,6 @@
 #include "lbrc.h"
+
+#include <cstdlib>
 /*
  * The LBRC algorithm implemented here is based on:
  * Zhu, L., Ranka, S., and Rangarajan, A.
@@ -596,6 +598,19 @@ static std::vector<std::vector<uint8_t>> compress_planes(
     const torch::Tensor &planes /*[Nblocks, packed_bytes] uint8, CUDA*/,
     int zstd_level, int workers) {
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+  const char *cpu_zstd = std::getenv("CAESAR_LBRC_CPU_ZSTD");
+  if (cpu_zstd != nullptr && std::string(cpu_zstd) == "1") {
+    auto planes_cpu = planes.to(torch::kCPU).contiguous();
+    int64_t Nb = planes_cpu.size(0), bytes = planes_cpu.size(1);
+    const uint8_t *base = planes_cpu.data_ptr<uint8_t>();
+    std::vector<std::vector<uint8_t>> out(Nb);
+    parallel_for(Nb, workers, [&](int64_t i) {
+      std::vector<uint8_t> raw(base + i * bytes, base + (i + 1) * bytes);
+      out[i] = zstd_compress(raw, zstd_level);
+    });
+    return out;
+  }
+
   (void)zstd_level;
   (void)workers;
   // Row of a contiguous [Nb, bytes] tensor is already contiguous -- this is
@@ -632,6 +647,21 @@ decompress_planes(const std::vector<std::vector<uint8_t>> &compressed,
                   int64_t packed_bytes, const torch::TensorOptions &gpu_opts,
                   int workers) {
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
+  const char *cpu_zstd = std::getenv("CAESAR_LBRC_CPU_ZSTD");
+  if (cpu_zstd != nullptr && std::string(cpu_zstd) == "1") {
+    int64_t Nb = static_cast<int64_t>(compressed.size());
+    torch::Tensor out_cpu = torch::zeros({Nb, packed_bytes}, torch::kUInt8);
+    uint8_t *base = out_cpu.data_ptr<uint8_t>();
+    parallel_for(Nb, workers, [&](int64_t i) {
+      if (compressed[i].empty())
+        return;
+      auto bytes =
+          zstd_decompress(compressed[i], static_cast<size_t>(packed_bytes));
+      std::memcpy(base + i * packed_bytes, bytes.data(), packed_bytes);
+    });
+    return out_cpu.to(gpu_opts.device());
+  }
+
   (void)workers;
   int64_t Nb = static_cast<int64_t>(compressed.size());
   std::vector<const uint8_t *> comp_ptrs(Nb);
