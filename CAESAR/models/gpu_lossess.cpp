@@ -334,13 +334,15 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   void *d_input_ptrs = nullptr;
   void *d_output_ptrs = nullptr;
   void *d_input_sizes = nullptr;
-  void *d_output_sizes = nullptr;
+  void *d_output_capacities = nullptr;
+  void *d_actual_output_sizes = nullptr;
   void *d_statuses = nullptr;
 
   CHECK_CUDA(cudaMalloc(&d_input_ptrs, totalChunks * sizeof(void *)));
   CHECK_CUDA(cudaMalloc(&d_output_ptrs, totalChunks * sizeof(void *)));
   CHECK_CUDA(cudaMalloc(&d_input_sizes, totalChunks * sizeof(size_t)));
-  CHECK_CUDA(cudaMalloc(&d_output_sizes, totalChunks * sizeof(size_t)));
+  CHECK_CUDA(cudaMalloc(&d_output_capacities, totalChunks * sizeof(size_t)));
+  CHECK_CUDA(cudaMalloc(&d_actual_output_sizes, totalChunks * sizeof(size_t)));
   CHECK_CUDA(cudaMalloc(&d_statuses, totalChunks * sizeof(nvcompStatus_t)));
 
   std::vector<void *> h_input_ptrs(totalChunks), h_output_ptrs(totalChunks);
@@ -373,14 +375,13 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   CHECK_CUDA(cudaMemcpyAsync(d_input_sizes, h_input_sizes.data(),
                              totalChunks * sizeof(size_t),
                              cudaMemcpyHostToDevice, stream));
-  CHECK_CUDA(cudaMemcpyAsync(d_output_sizes, h_output_sizes.data(),
+  CHECK_CUDA(cudaMemcpyAsync(d_output_capacities, h_output_sizes.data(),
                              totalChunks * sizeof(size_t),
                              cudaMemcpyHostToDevice, stream));
 
   CHECK_NVCOMP(nvcompBatchedZstdDecompressAsync(
       (const void *const *)d_input_ptrs, (const size_t *)d_input_sizes,
-      (const size_t *)d_output_sizes, // buffer sizes (max)
-      (size_t *)d_output_sizes,       // actual sizes written back
+      (const size_t *)d_output_capacities, (size_t *)d_actual_output_sizes,
       totalChunks, d_temp, totalTempBytes, (void *const *)d_output_ptrs,
       decomp_opts, (nvcompStatus_t *)d_statuses, stream));
 
@@ -392,7 +393,7 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   CHECK_CUDA(cudaMemcpy(h_statuses.data(), d_statuses,
                         totalChunks * sizeof(nvcompStatus_t),
                         cudaMemcpyDeviceToHost));
-  CHECK_CUDA(cudaMemcpy(h_actual_output_sizes.data(), d_output_sizes,
+  CHECK_CUDA(cudaMemcpy(h_actual_output_sizes.data(), d_actual_output_sizes,
                         totalChunks * sizeof(size_t), cudaMemcpyDeviceToHost));
 
   for (size_t c = 0; c < totalChunks; c++) {
@@ -434,7 +435,8 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   cudaFree(d_input_ptrs);
   cudaFree(d_output_ptrs);
   cudaFree(d_input_sizes);
-  cudaFree(d_output_sizes);
+  cudaFree(d_output_capacities);
+  cudaFree(d_actual_output_sizes);
   cudaFree(d_statuses);
   return results;
 }
