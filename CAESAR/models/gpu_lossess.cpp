@@ -107,7 +107,8 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
       totalChunks, maxInputChunk, comp_opts, &totalTempBytes,
       totalUncompressed));
 
-  // remove size and input pool and its allocation
+  // The input payload stays in the PyTorch tensors; only output, workspace,
+  // and batch metadata require explicit CUDA allocations.
   void *d_output_pool = nullptr;
   void *d_temp = nullptr;
   void *d_input_ptrs = nullptr;
@@ -436,7 +437,7 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
       totalChunks, d_temp, totalTempBytes, (void *const *)d_output_ptrs,
       decomp_opts, (nvcompStatus_t *)d_statuses, stream));
 
-  // see if this can be removed
+  // Statuses, actual sizes, and output bytes are read on the host below.
   CHECK_CUDA(cudaStreamSynchronize(stream));
 
   std::vector<nvcompStatus_t> h_statuses(totalChunks);

@@ -712,7 +712,6 @@ static void compress_gpu(const torch::Tensor &original,
                       .to(torch::kUInt8);
     auto packed = pack_bits(bits01);
     auto planes = compress_planes(packed, zstd_level, workers);
-
     for (int64_t i = 0; i < Nb; ++i)
       if (bit < bit_count[i])
         blocks[i].streams.push_back(std::move(planes[i]));
