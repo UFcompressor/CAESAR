@@ -6,6 +6,7 @@
 #include <hip/hip_runtime.h>
 #else
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #ifdef ENABLE_NVCOMP
