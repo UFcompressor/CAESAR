@@ -1,5 +1,7 @@
 #include "gpu_lossess.h"
 
+#include <limits>
+
 #ifdef USE_CUDA
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
 #define CHECK_CUDA(cmd)                                                        \
@@ -38,6 +40,9 @@
 // best performance. The smaller chunks also avoid reproducible corruption in
 // nvCOMP 5.0.0.6 for several near-incompressible 1 MiB LBRC bit planes.
 static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 64ULL * 1024; // 64 KiB
+static constexpr uint64_t NVCOMP_FRAME_MAGIC = 0x3154535A434E564EULL;
+static constexpr uint32_t NVCOMP_FRAME_VERSION = 1;
+static constexpr size_t NVCOMP_FRAME_FIXED_BYTES = 32;
 
 static size_t align_up(size_t value, size_t alignment) {
   return alignment == 0 ? value
@@ -179,7 +184,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
                                std::to_string(chunks[c].buf_idx) + ")");
   }
 
-  // Assemble per-buffer results (same framing as original)
+  // Assemble each multi-chunk buffer with an explicit, versioned frame.
   for (size_t i = 0; i < N; i++) {
     if (inputs[i].numel() == 0)
       continue;
@@ -196,7 +201,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
                             (uint8_t *)d_output_pool + first * outputStride,
                             h_output_sizes[first], cudaMemcpyDeviceToHost));
     } else {
-      size_t headerSize = 8 + count * 8 + count * 8;
+      size_t headerSize = NVCOMP_FRAME_FIXED_BYTES + count * 8 + count * 8;
       size_t totalCompressed = 0;
       for (size_t c = first; c < first + count; c++)
         totalCompressed += h_output_sizes[c];
@@ -205,9 +210,21 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
           {(int64_t)(headerSize + totalCompressed)}, torch::kUInt8);
       uint8_t *p = results[i].compressed.data_ptr<uint8_t>();
 
-      uint64_t nc = count;
-      memcpy(p, &nc, 8);
-      p += 8;
+      const uint64_t magic = NVCOMP_FRAME_MAGIC;
+      const uint32_t version = NVCOMP_FRAME_VERSION;
+      const uint32_t reserved = 0;
+      const uint64_t nc = count;
+      const uint64_t totalUncompressed = results[i].rawBytes;
+      memcpy(p, &magic, sizeof(magic));
+      p += sizeof(magic);
+      memcpy(p, &version, sizeof(version));
+      p += sizeof(version);
+      memcpy(p, &reserved, sizeof(reserved));
+      p += sizeof(reserved);
+      memcpy(p, &nc, sizeof(nc));
+      p += sizeof(nc);
+      memcpy(p, &totalUncompressed, sizeof(totalUncompressed));
+      p += sizeof(totalUncompressed);
       for (size_t c = first; c < first + count; c++) {
         uint64_t us = chunks[c].chunk_size;
         memcpy(p, &us, 8);
@@ -258,57 +275,72 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
     chunk_start_idx[i] = chunks.size();
     if (comp_sizes[i] == 0 || decomp_sizes[i] == 0)
       continue;
-    if (comp_sizes[i] < sizeof(uint64_t))
-      throw std::runtime_error("nvCOMP Zstd stream is too small");
-
     const uint8_t *p = comp_ptrs[i];
 
-    // Read first 8 bytes as potential num_chunks
-    uint64_t potential_nc = 0;
-    memcpy(&potential_nc, p, 8);
+    uint64_t magic = 0;
+    if (comp_sizes[i] >= sizeof(magic))
+      memcpy(&magic, p, sizeof(magic));
 
-    size_t headerSize = 8 + potential_nc * 8 + potential_nc * 8;
-    bool is_multi =
-        (potential_nc > 1 && potential_nc < 1000 && headerSize < comp_sizes[i]);
+    if (magic == NVCOMP_FRAME_MAGIC) {
+      if (comp_sizes[i] < NVCOMP_FRAME_FIXED_BYTES)
+        throw std::runtime_error("truncated nvCOMP multi-chunk frame");
 
-    if (is_multi) {
-      const uint8_t *hp = p + 8;
-      std::vector<size_t> unc_sizes(potential_nc), cmp_sizes(potential_nc);
+      const uint8_t *hp = p + sizeof(magic);
+      uint32_t version = 0, reserved = 0;
+      uint64_t num_chunks = 0, stored_total_unc = 0;
+      memcpy(&version, hp, sizeof(version));
+      hp += sizeof(version);
+      memcpy(&reserved, hp, sizeof(reserved));
+      hp += sizeof(reserved);
+      memcpy(&num_chunks, hp, sizeof(num_chunks));
+      hp += sizeof(num_chunks);
+      memcpy(&stored_total_unc, hp, sizeof(stored_total_unc));
+      hp += sizeof(stored_total_unc);
+
+      if (version != NVCOMP_FRAME_VERSION || reserved != 0 || num_chunks < 2 ||
+          num_chunks > 1000000)
+        throw std::runtime_error("invalid nvCOMP multi-chunk frame header");
+      if (num_chunks >
+          (std::numeric_limits<size_t>::max() - NVCOMP_FRAME_FIXED_BYTES) / 16)
+        throw std::runtime_error("nvCOMP multi-chunk header size overflow");
+
+      const size_t headerSize =
+          NVCOMP_FRAME_FIXED_BYTES + static_cast<size_t>(num_chunks) * 16;
+      if (headerSize > comp_sizes[i] || stored_total_unc != decomp_sizes[i])
+        throw std::runtime_error("invalid nvCOMP multi-chunk frame size");
+
+      std::vector<size_t> unc_sizes(num_chunks), cmp_sizes(num_chunks);
       size_t total_unc = 0;
       size_t total_cmp = 0;
-      for (size_t c = 0; c < potential_nc; c++) {
-        memcpy(&unc_sizes[c], hp, 8);
-        hp += 8;
+      for (size_t c = 0; c < num_chunks; ++c) {
+        uint64_t value = 0;
+        memcpy(&value, hp, sizeof(value));
+        hp += sizeof(value);
+        if (value == 0 || value > NVCOMP_ZSTD_MAX_CHUNK ||
+            value > std::numeric_limits<size_t>::max() - total_unc)
+          throw std::runtime_error("invalid nvCOMP uncompressed chunk size");
+        unc_sizes[c] = static_cast<size_t>(value);
         total_unc += unc_sizes[c];
       }
-      for (size_t c = 0; c < potential_nc; c++) {
-        memcpy(&cmp_sizes[c], hp, 8);
-        hp += 8;
+      for (size_t c = 0; c < num_chunks; ++c) {
+        uint64_t value = 0;
+        memcpy(&value, hp, sizeof(value));
+        hp += sizeof(value);
+        if (value == 0 || value > comp_sizes[i] - headerSize - total_cmp)
+          throw std::runtime_error("invalid nvCOMP compressed chunk size");
+        cmp_sizes[c] = static_cast<size_t>(value);
         total_cmp += cmp_sizes[c];
       }
+      if (total_unc != decomp_sizes[i] ||
+          headerSize + total_cmp != comp_sizes[i])
+        throw std::runtime_error("inconsistent nvCOMP multi-chunk totals");
 
-      const bool sizes_match = total_unc == decomp_sizes[i];
-      const bool stream_size_matches =
-          total_cmp <= comp_sizes[i] - headerSize &&
-          headerSize + total_cmp == comp_sizes[i];
-      if (sizes_match && stream_size_matches) {
-        // Valid multi-chunk
-        const uint8_t *data_ptr = p + headerSize;
-        for (size_t c = 0; c < potential_nc; c++) {
-          chunks.push_back({i, data_ptr, cmp_sizes[c], unc_sizes[c]});
-          data_ptr += cmp_sizes[c];
-        }
-        continue;
+      const uint8_t *data_ptr = p + headerSize;
+      for (size_t c = 0; c < num_chunks; ++c) {
+        chunks.push_back({i, data_ptr, cmp_sizes[c], unc_sizes[c]});
+        data_ptr += cmp_sizes[c];
       }
-
-      throw std::runtime_error(
-          "invalid nvCOMP multi-chunk frame for buffer " + std::to_string(i) +
-          ": chunks=" + std::to_string(potential_nc) +
-          ", stored_uncompressed=" + std::to_string(total_unc) +
-          ", expected_uncompressed=" + std::to_string(decomp_sizes[i]) +
-          ", stored_compressed=" + std::to_string(total_cmp) +
-          ", stream_bytes=" + std::to_string(comp_sizes[i]) +
-          ", header_bytes=" + std::to_string(headerSize));
+      continue;
     }
 
     // Single chunk — entire compressed buffer is one chunk
