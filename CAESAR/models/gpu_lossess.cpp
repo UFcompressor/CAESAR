@@ -258,6 +258,8 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
     chunk_start_idx[i] = chunks.size();
     if (comp_sizes[i] == 0 || decomp_sizes[i] == 0)
       continue;
+    if (comp_sizes[i] < sizeof(uint64_t))
+      throw std::runtime_error("nvCOMP Zstd stream is too small");
 
     const uint8_t *p = comp_ptrs[i];
 
@@ -273,6 +275,7 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
       const uint8_t *hp = p + 8;
       std::vector<size_t> unc_sizes(potential_nc), cmp_sizes(potential_nc);
       size_t total_unc = 0;
+      size_t total_cmp = 0;
       for (size_t c = 0; c < potential_nc; c++) {
         memcpy(&unc_sizes[c], hp, 8);
         hp += 8;
@@ -281,9 +284,14 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
       for (size_t c = 0; c < potential_nc; c++) {
         memcpy(&cmp_sizes[c], hp, 8);
         hp += 8;
+        total_cmp += cmp_sizes[c];
       }
 
-      if (total_unc == decomp_sizes[i]) {
+      const bool sizes_match = total_unc == decomp_sizes[i];
+      const bool stream_size_matches =
+          total_cmp <= comp_sizes[i] - headerSize &&
+          headerSize + total_cmp == comp_sizes[i];
+      if (sizes_match && stream_size_matches) {
         // Valid multi-chunk
         const uint8_t *data_ptr = p + headerSize;
         for (size_t c = 0; c < potential_nc; c++) {
@@ -292,6 +300,15 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
         }
         continue;
       }
+
+      throw std::runtime_error(
+          "invalid nvCOMP multi-chunk frame for buffer " + std::to_string(i) +
+          ": chunks=" + std::to_string(potential_nc) +
+          ", stored_uncompressed=" + std::to_string(total_unc) +
+          ", expected_uncompressed=" + std::to_string(decomp_sizes[i]) +
+          ", stored_compressed=" + std::to_string(total_cmp) +
+          ", stream_bytes=" + std::to_string(comp_sizes[i]) +
+          ", header_bytes=" + std::to_string(headerSize));
     }
 
     // Single chunk — entire compressed buffer is one chunk
