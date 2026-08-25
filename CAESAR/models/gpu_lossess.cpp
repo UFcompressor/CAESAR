@@ -37,6 +37,11 @@
 // We chunk all inputs down to this size before submitting as one big batch.
 static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 16ULL * 1024 * 1024; // 16 MB
 
+static size_t align_up(size_t value, size_t alignment) {
+  return alignment == 0 ? value
+                        : ((value + alignment - 1) / alignment) * alignment;
+}
+
 // Skips all host-to-device uploads for input data — tensors are used directly,
 // so this function pipelines seamlessly after GPU-side operations like
 // bitsToBytes.
@@ -74,6 +79,9 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
 
   nvcompBatchedZstdCompressOpts_t comp_opts =
       nvcompBatchedZstdCompressDefaultOpts;
+  nvcompAlignmentRequirements_t comp_alignment{};
+  CHECK_NVCOMP(nvcompBatchedZstdCompressGetRequiredAlignments(comp_opts,
+                                                              &comp_alignment));
 
   size_t maxInputChunk = 0;
   size_t totalUncompressed = 0;
@@ -85,6 +93,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   size_t maxOutPerChunk = 0;
   CHECK_NVCOMP(nvcompBatchedZstdCompressGetMaxOutputChunkSize(
       maxInputChunk, comp_opts, &maxOutPerChunk));
+  const size_t outputStride = align_up(maxOutPerChunk, comp_alignment.output);
 
   size_t totalTempBytes = 0;
   CHECK_NVCOMP(nvcompBatchedZstdCompressGetTempSizeAsync(
@@ -100,7 +109,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   void *d_output_sizes = nullptr;
   void *d_statuses = nullptr;
 
-  CHECK_CUDA(cudaMalloc(&d_output_pool, totalChunks * maxOutPerChunk));
+  CHECK_CUDA(cudaMalloc(&d_output_pool, totalChunks * outputStride));
   if (totalTempBytes > 0)
     CHECK_CUDA(cudaMalloc(&d_temp, totalTempBytes));
   CHECK_CUDA(cudaMalloc(&d_input_ptrs, totalChunks * sizeof(void *)));
@@ -120,8 +129,12 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
 
   // Point directly into GPU tensor memory
   for (size_t c = 0; c < totalChunks; c++) {
+    TORCH_CHECK(reinterpret_cast<uintptr_t>(chunks[c].src_ptr) %
+                        comp_alignment.input ==
+                    0,
+                "nvCOMP Zstd input pointer is not correctly aligned");
     h_input_ptrs[c] = (void *)chunks[c].src_ptr;
-    h_output_ptrs[c] = (uint8_t *)d_output_pool + c * maxOutPerChunk;
+    h_output_ptrs[c] = (uint8_t *)d_output_pool + c * outputStride;
     h_input_sizes[c] = chunks[c].chunk_size;
   }
 
@@ -178,7 +191,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
       results[i].compressed =
           torch::empty({(int64_t)h_output_sizes[first]}, torch::kUInt8);
       CHECK_CUDA(cudaMemcpy(results[i].compressed.data_ptr<uint8_t>(),
-                            (uint8_t *)d_output_pool + first * maxOutPerChunk,
+                            (uint8_t *)d_output_pool + first * outputStride,
                             h_output_sizes[first], cudaMemcpyDeviceToHost));
     } else {
       size_t headerSize = 8 + count * 8 + count * 8;
@@ -204,7 +217,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
         p += 8;
       }
       for (size_t c = first; c < first + count; c++) {
-        CHECK_CUDA(cudaMemcpy(p, (uint8_t *)d_output_pool + c * maxOutPerChunk,
+        CHECK_CUDA(cudaMemcpy(p, (uint8_t *)d_output_pool + c * outputStride,
                               h_output_sizes[c], cudaMemcpyDeviceToHost));
         p += h_output_sizes[c];
       }
@@ -298,6 +311,12 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
 
   nvcompBatchedZstdDecompressOpts_t decomp_opts =
       nvcompBatchedZstdDecompressDefaultOpts;
+  nvcompAlignmentRequirements_t decomp_alignment{};
+  CHECK_NVCOMP(nvcompBatchedZstdDecompressGetRequiredAlignments(
+      decomp_opts, &decomp_alignment));
+
+  const size_t compStride = align_up(maxCompChunk, decomp_alignment.input);
+  const size_t decompStride = align_up(maxDecompChunk, decomp_alignment.output);
 
   size_t totalTempBytes = 0;
   CHECK_NVCOMP(nvcompBatchedZstdDecompressGetTempSizeAsync(
@@ -307,8 +326,8 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   void *d_decomp_pool = nullptr;
   void *d_temp = nullptr;
 
-  CHECK_CUDA(cudaMalloc(&d_comp_pool, totalChunks * maxCompChunk));
-  CHECK_CUDA(cudaMalloc(&d_decomp_pool, totalChunks * maxDecompChunk));
+  CHECK_CUDA(cudaMalloc(&d_comp_pool, totalChunks * compStride));
+  CHECK_CUDA(cudaMalloc(&d_decomp_pool, totalChunks * decompStride));
   if (totalTempBytes > 0)
     CHECK_CUDA(cudaMalloc(&d_temp, totalTempBytes));
 
@@ -332,8 +351,8 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream().stream();
 
   for (size_t c = 0; c < totalChunks; c++) {
-    uint8_t *comp_slot = (uint8_t *)d_comp_pool + c * maxCompChunk;
-    uint8_t *decomp_slot = (uint8_t *)d_decomp_pool + c * maxDecompChunk;
+    uint8_t *comp_slot = (uint8_t *)d_comp_pool + c * compStride;
+    uint8_t *decomp_slot = (uint8_t *)d_decomp_pool + c * decompStride;
 
     h_input_ptrs[c] = comp_slot;
     h_output_ptrs[c] = decomp_slot;
@@ -402,7 +421,7 @@ nvcomp_batch_decompress(const std::vector<const uint8_t *> &comp_ptrs,
       count++;
 
     for (size_t c = first; c < first + count; c++) {
-      CHECK_CUDA(cudaMemcpy(out, (uint8_t *)d_decomp_pool + c * maxDecompChunk,
+      CHECK_CUDA(cudaMemcpy(out, (uint8_t *)d_decomp_pool + c * decompStride,
                             chunks[c].decomp_size, cudaMemcpyDeviceToHost));
       out += chunks[c].decomp_size;
     }
