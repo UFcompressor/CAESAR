@@ -289,6 +289,7 @@ static void compress_cpu(const torch::Tensor &original,
               "LBRC compress: expected 5-D tensor (B,C,T,H,W)");
 
   const Shape5 S = shape_of(original);
+  meta.block_size = {S.T, S.H, S.W};
 
   torch::Tensor orig_c = original.contiguous();
   torch::Tensor rec_c = recons.contiguous();
@@ -627,6 +628,7 @@ static void compress_gpu(const torch::Tensor &original,
               "LBRC compress (gpu): expected 5-D tensor (B,C,T,H,W)");
 
   const Shape5 S = shape_of(original);
+  meta.block_size = {S.T, S.H, S.W};
   auto orig_c = original.contiguous();
   auto rec_c = recons.contiguous();
 
