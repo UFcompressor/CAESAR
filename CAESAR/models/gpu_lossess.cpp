@@ -75,17 +75,20 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   nvcompBatchedZstdCompressOpts_t comp_opts =
       nvcompBatchedZstdCompressDefaultOpts;
 
+  size_t maxInputChunk = 0;
+  size_t totalUncompressed = 0;
+  for (const auto &c : chunks) {
+    maxInputChunk = std::max(maxInputChunk, c.chunk_size);
+    totalUncompressed += c.chunk_size;
+  }
+
   size_t maxOutPerChunk = 0;
   CHECK_NVCOMP(nvcompBatchedZstdCompressGetMaxOutputChunkSize(
-      NVCOMP_ZSTD_MAX_CHUNK, comp_opts, &maxOutPerChunk));
+      maxInputChunk, comp_opts, &maxOutPerChunk));
 
   size_t totalTempBytes = 0;
-  size_t totalUncompressed = 0;
-  for (auto &c : chunks)
-    totalUncompressed += c.chunk_size;
-
   CHECK_NVCOMP(nvcompBatchedZstdCompressGetTempSizeAsync(
-      totalChunks, NVCOMP_ZSTD_MAX_CHUNK, comp_opts, &totalTempBytes,
+      totalChunks, maxInputChunk, comp_opts, &totalTempBytes,
       totalUncompressed));
 
   // remove size and input pool and its allocation
@@ -136,7 +139,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   // Compress entire batch — single call, fully async
   CHECK_NVCOMP(nvcompBatchedZstdCompressAsync(
       (const void *const *)d_input_ptrs, (const size_t *)d_input_sizes,
-      NVCOMP_ZSTD_MAX_CHUNK, totalChunks, d_temp, totalTempBytes,
+      maxInputChunk, totalChunks, d_temp, totalTempBytes,
       (void *const *)d_output_ptrs, (size_t *)d_output_sizes, comp_opts,
       (nvcompStatus_t *)d_statuses, stream));
 
