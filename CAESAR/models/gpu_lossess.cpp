@@ -52,8 +52,10 @@ static size_t align_up(size_t value, size_t alignment) {
 // Skips all host-to-device uploads for input data — tensors are used directly,
 // so this function pipelines seamlessly after GPU-side operations like
 // bitsToBytes.
-std::vector<NvcompBatchCompressResult>
-nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
+static std::vector<NvcompBatchCompressResult>
+nvcomp_batch_compress_impl(const std::vector<torch::Tensor> &inputs,
+                           std::vector<uint8_t> *output,
+                           std::vector<size_t> *encodedSizes) {
   const size_t N = inputs.size();
   std::vector<NvcompBatchCompressResult> results(N);
 
@@ -185,7 +187,7 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
                                std::to_string(chunks[c].buf_idx) + ")");
   }
 
-  // Assemble each multi-chunk buffer with an explicit, versioned frame.
+  std::vector<size_t> bufferSizes(N, 0);
   for (size_t i = 0; i < N; i++) {
     if (inputs[i].numel() == 0)
       continue;
@@ -196,21 +198,54 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
       count++;
 
     if (count == 1) {
+      bufferSizes[i] = h_output_sizes[first];
+    } else {
+      bufferSizes[i] = NVCOMP_FRAME_FIXED_BYTES + count * 16;
+      for (size_t c = first; c < first + count; c++)
+        bufferSizes[i] += h_output_sizes[c];
+    }
+  }
+
+  if (encodedSizes)
+    *encodedSizes = bufferSizes;
+
+  uint8_t *directOutput = nullptr;
+  if (output) {
+    size_t totalBytes = N * sizeof(uint64_t);
+    for (size_t size : bufferSizes)
+      totalBytes += size;
+    output->resize(totalBytes);
+    directOutput = output->data();
+    for (size_t size : bufferSizes) {
+      const uint64_t storedSize = size;
+      memcpy(directOutput, &storedSize, sizeof(storedSize));
+      directOutput += sizeof(storedSize);
+    }
+  }
+
+  // Write each compressed buffer, including framing when it has multiple
+  // nvCOMP chunks.
+  for (size_t i = 0; i < N; i++) {
+    if (inputs[i].numel() == 0)
+      continue;
+
+    size_t first = chunk_start_idx[i];
+    size_t count = 0;
+    for (size_t c = first; c < totalChunks && chunks[c].buf_idx == i; c++)
+      count++;
+
+    uint8_t *p = directOutput;
+    if (!output) {
       results[i].compressed =
-          torch::empty({(int64_t)h_output_sizes[first]}, torch::kUInt8);
-      CHECK_CUDA(cudaMemcpy(results[i].compressed.data_ptr<uint8_t>(),
+          torch::empty({static_cast<int64_t>(bufferSizes[i])}, torch::kUInt8);
+      p = results[i].compressed.data_ptr<uint8_t>();
+    }
+
+    if (count == 1) {
+      CHECK_CUDA(cudaMemcpy(p,
                             (uint8_t *)d_output_pool + first * outputStride,
                             h_output_sizes[first], cudaMemcpyDeviceToHost));
     } else {
-      size_t headerSize = NVCOMP_FRAME_FIXED_BYTES + count * 8 + count * 8;
-      size_t totalCompressed = 0;
-      for (size_t c = first; c < first + count; c++)
-        totalCompressed += h_output_sizes[c];
-
-      results[i].compressed = torch::empty(
-          {(int64_t)(headerSize + totalCompressed)}, torch::kUInt8);
-      uint8_t *p = results[i].compressed.data_ptr<uint8_t>();
-
       const uint64_t magic = NVCOMP_FRAME_MAGIC;
       const uint32_t version = NVCOMP_FRAME_VERSION;
       const uint32_t reserved = 0;
@@ -242,6 +277,9 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
         p += h_output_sizes[c];
       }
     }
+
+    if (output)
+      directOutput += bufferSizes[i];
   }
 
   cudaFree(d_output_pool);
@@ -253,6 +291,19 @@ nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
   cudaFree(d_output_sizes);
   cudaFree(d_statuses);
   return results;
+}
+
+std::vector<NvcompBatchCompressResult>
+nvcomp_batch_compress(const std::vector<torch::Tensor> &inputs) {
+  return nvcomp_batch_compress_impl(inputs, nullptr, nullptr);
+}
+
+std::vector<size_t>
+nvcomp_batch_compress_to_buffer(const std::vector<torch::Tensor> &inputs,
+                                std::vector<uint8_t> &output) {
+  std::vector<size_t> encodedSizes;
+  nvcomp_batch_compress_impl(inputs, &output, &encodedSizes);
+  return encodedSizes;
 }
 
 // Batched GPU decompress — handles both single-chunk and multi-chunk framing

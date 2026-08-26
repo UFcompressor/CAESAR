@@ -628,7 +628,8 @@ PCACompressor::compressLossless(const MetaData &metaData,
         processMaskBytes.contiguous(), prefixMaskBytes.contiguous(),
         maskLengthBytes.contiguous(), coeffIntBytes.contiguous()};
 
-    auto batchResults = nvcomp_batch_compress(inputs);
+    compressedSizes =
+        nvcomp_batch_compress_to_buffer(inputs, compressedData->data);
 
     // Release input tensors now that compression is done.
     processMaskBytes = torch::Tensor();
@@ -636,15 +637,6 @@ PCACompressor::compressLossless(const MetaData &metaData,
     maskLengthBytes = torch::Tensor();
     coeffIntBytes = torch::Tensor();
 
-    processMaskCompressed = std::move(batchResults[0].compressed);
-    prefixMaskCompressed = std::move(batchResults[1].compressed);
-    maskLengthCompressed = std::move(batchResults[2].compressed);
-    coeffIntCompressed = std::move(batchResults[3].compressed);
-
-    compressedSizes = {(size_t)processMaskCompressed.numel(),
-                       (size_t)prefixMaskCompressed.numel(),
-                       (size_t)maskLengthCompressed.numel(),
-                       (size_t)coeffIntCompressed.numel()};
   }
 #endif
 
@@ -741,35 +733,28 @@ PCACompressor::compressLossless(const MetaData &metaData,
                        maskLengthCompSize, coeffIntCompSize};
   }
 
-  size_t comp_process_mask_bytes = (size_t)processMaskCompressed.numel();
-  size_t comp_prefix_mask_bytes = (size_t)prefixMaskCompressed.numel();
-  size_t comp_mask_length_bytes = (size_t)maskLengthCompressed.numel();
-  size_t comp_coeff_int_bytes = (size_t)coeffIntCompressed.numel();
+  if (!use_nvcomp) {
+    const size_t totalCompressedBytes =
+        processMaskCompressed.numel() + prefixMaskCompressed.numel() +
+        maskLengthCompressed.numel() + coeffIntCompressed.numel();
 
-  auto CR = [](size_t rawb, size_t compb) -> double {
-    return compb ? (double)rawb / (double)compb : 0.0;
-  };
+    compressedData->data.clear();
+    compressedData->data.reserve(4 * sizeof(size_t) + totalCompressedBytes);
 
-  const size_t totalCompressedBytes =
-      comp_process_mask_bytes + comp_prefix_mask_bytes +
-      comp_mask_length_bytes + comp_coeff_int_bytes;
+    for (size_t sz : compressedSizes) {
+      for (int i = 0; i < 8; ++i)
+        compressedData->data.push_back((sz >> (i * 8)) & 0xFF);
+    }
 
-  compressedData->data.clear();
-  compressedData->data.reserve(4 * sizeof(size_t) + totalCompressedBytes);
-
-  for (size_t sz : compressedSizes) {
-    for (int i = 0; i < 8; ++i)
-      compressedData->data.push_back((sz >> (i * 8)) & 0xFF);
+    auto append_tensor = [&](const torch::Tensor &t) {
+      const uint8_t *p = t.data_ptr<uint8_t>();
+      compressedData->data.insert(compressedData->data.end(), p, p + t.numel());
+    };
+    append_tensor(processMaskCompressed);
+    append_tensor(prefixMaskCompressed);
+    append_tensor(maskLengthCompressed);
+    append_tensor(coeffIntCompressed);
   }
-
-  auto append_tensor = [&](const torch::Tensor &t) {
-    const uint8_t *p = t.data_ptr<uint8_t>();
-    compressedData->data.insert(compressedData->data.end(), p, p + t.numel());
-  };
-  append_tensor(processMaskCompressed);
-  append_tensor(prefixMaskCompressed);
-  append_tensor(maskLengthCompressed);
-  append_tensor(coeffIntCompressed);
 
   compressedData->coeffIntBytes = raw_coeff_int_bytes;
   totalBytes = compressedData->data.size();
