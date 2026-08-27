@@ -1,6 +1,10 @@
 #include "gpu_lossess.h"
+#include "model_utils.h"
 
+#include <algorithm>
+#include <cstring>
 #include <limits>
+#include <thread>
 
 #ifdef USE_CUDA
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
@@ -43,6 +47,57 @@ static constexpr size_t NVCOMP_ZSTD_MAX_CHUNK = 64ULL * 1024; // 64 KiB
 static constexpr uint64_t NVCOMP_FRAME_MAGIC = 0x3154535A434E564EULL;
 static constexpr uint32_t NVCOMP_FRAME_VERSION = 1;
 static constexpr size_t NVCOMP_FRAME_FIXED_BYTES = 32;
+
+static void parallel_touch_buffer(uint8_t *data, size_t size) {
+  if (data == nullptr || size == 0)
+    return;
+
+  const int allocatedCores = std::max(1, get_allocated_cores());
+  const unsigned int hardwareThreads = std::thread::hardware_concurrency();
+  const unsigned int threadCount =
+      hardwareThreads == 0 ? static_cast<unsigned int>(allocatedCores)
+                           : std::min(static_cast<unsigned int>(allocatedCores),
+                                      hardwareThreads);
+
+  constexpr size_t minParallelBytes = 64ULL * 1024 * 1024;
+  if (size < minParallelBytes || threadCount == 1) {
+    std::memset(data, 0, size);
+    return;
+  }
+
+  const size_t bytesPerThread = (size + threadCount - 1) / threadCount;
+  std::vector<std::thread> workers;
+  workers.reserve(threadCount);
+  for (unsigned int thread = 0; thread < threadCount; ++thread) {
+    const size_t begin = static_cast<size_t>(thread) * bytesPerThread;
+    if (begin >= size)
+      break;
+    const size_t end = std::min(size, begin + bytesPerThread);
+    workers.emplace_back(
+        [data, begin, end] { std::memset(data + begin, 0, end - begin); });
+  }
+  for (auto &worker : workers)
+    worker.join();
+}
+
+static void resize_for_direct_write(std::vector<uint8_t> &output, size_t size) {
+#if defined(__GLIBCXX__)
+  // std::vector::resize value-initializes bytes serially. On libstdc++, grow
+  // the reserved byte storage without that redundant pass, then first-touch
+  // large allocations in parallel before CUDA writes into them.
+  output.clear();
+  output.reserve(size);
+  struct VectorAccess : std::vector<uint8_t> {
+    using std::vector<uint8_t>::_M_impl;
+  };
+  auto &access = reinterpret_cast<VectorAccess &>(output);
+  access._M_impl._M_finish = access._M_impl._M_start + size;
+  parallel_touch_buffer(output.data(), output.size());
+#else
+  // Other standard libraries retain the portable behavior.
+  output.resize(size);
+#endif
+}
 
 static size_t align_up(size_t value, size_t alignment) {
   return alignment == 0 ? value
@@ -214,7 +269,7 @@ nvcomp_batch_compress_impl(const std::vector<torch::Tensor> &inputs,
     size_t totalBytes = N * sizeof(uint64_t);
     for (size_t size : bufferSizes)
       totalBytes += size;
-    output->resize(totalBytes);
+    resize_for_direct_write(*output, totalBytes);
     directOutput = output->data();
     for (size_t size : bufferSizes) {
       const uint64_t storedSize = size;
