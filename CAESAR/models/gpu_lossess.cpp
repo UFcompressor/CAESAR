@@ -242,8 +242,7 @@ nvcomp_batch_compress_impl(const std::vector<torch::Tensor> &inputs,
     }
 
     if (count == 1) {
-      CHECK_CUDA(cudaMemcpy(p,
-                            (uint8_t *)d_output_pool + first * outputStride,
+      CHECK_CUDA(cudaMemcpy(p, (uint8_t *)d_output_pool + first * outputStride,
                             h_output_sizes[first], cudaMemcpyDeviceToHost));
     } else {
       const uint64_t magic = NVCOMP_FRAME_MAGIC;
