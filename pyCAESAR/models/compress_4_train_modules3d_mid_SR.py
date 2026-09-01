@@ -15,6 +15,7 @@ from .BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch
 import torch.nn.init as init
 
+
 def load_yaml(file_path):
     with open(file_path, "r") as file:
         data = yaml.safe_load(file)
