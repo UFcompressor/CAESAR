@@ -13,7 +13,7 @@ _A C++ / LibTorch foundation model for efficient compression of scientific data_
 ![C++](https://img.shields.io/badge/C++-17-E8500A)
 ![LibTorch](https://img.shields.io/badge/LibTorch-2.8%2B-1B4FA8)
 ![zstd](https://img.shields.io/badge/zstd-1.5%2B-E8500A)
-![GPU](https://img.shields.io/badge/GPU-NVIDIA%20CUDA%20%7C%20Apple%20Silicon-1B4FA8)
+![GPU](https://img.shield.io/badge/GPU-NVIDIA%20CUDA%20%7C%20AMD%20ROCm%20%7C%20Apple%20Silicon-1B4FA8)
 [![License](https://img.shields.io/badge/license-Apache--2.0-1B4FA8)](https://github.com/UFcomrpessor/CAESAR/tree/master#Apache-2.0-1-ov-file)
 
 </div>
