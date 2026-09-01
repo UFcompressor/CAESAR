@@ -1,0 +1,39 @@
+example_train:
+  data_path: /path/to/train.npz
+  train_subset:
+    variable_idx: [0]
+    section_range: [0, 1]
+    frame_range: [0, 128]
+  test_subset:
+    variable_idx: [0]
+    section_range: [0, 1]
+    frame_range: [0, 128]
+
+example_test:
+  data_path: /path/to/test.npz
+  train_subset:
+    variable_idx: [0]
+    section_range: [0, 1]
+    frame_range: [0, 128]
+  test_subset:
+    variable_idx: [0]
+    section_range: [0, 1]
+    frame_range: [0, 128]
+
+train_config:
+  augment_type: {}
+  inst_norm: true
+  n_frame: 16
+  n_overlap: 15
+  norm_type: mean_range
+  train: true
+  train_size: 256
+
+test_config:
+  augment_type: {}
+  inst_norm: true
+  n_frame: 16
+  n_overlap: 0
+  norm_type: mean_range
+  test_size: [256, 256]
+  train: false

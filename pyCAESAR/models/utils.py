@@ -2,6 +2,77 @@ import torch
 from inspect import isfunction
 from torch.autograd import Function
 import numpy as np
+import os
+import json
+import yaml
+
+
+def build_dataset(dataset_args, syn_length=False):
+    """Build scientific datasets from the mappings produced by ``convert_args``."""
+    # Imported lazily because this module is also used by the model components.
+    from pyCAESAR.dataset import ScientificDataset
+
+    datasets = [ScientificDataset(dataset_args[name]) for name in dataset_args]
+    if syn_length:
+        max_length = np.max([len(dataset) for dataset in datasets])
+        for dataset in datasets:
+            dataset.visble_length = max_length
+    return datasets
+
+
+def convert_args(args, train=True):
+    """Read the original CAESAR dataset configuration format."""
+    with open(args.config, "r", encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file)
+
+    dataset_names = (args.train_set if train else args.test_set).split(",")
+    converted = {}
+    for dataset_name in dataset_names:
+        dataset_name = dataset_name.strip()
+        dataset_config = config[dataset_name]
+        options = {"name": dataset_name, "data_path": dataset_config["data_path"]}
+        options.update(dataset_config["train_subset" if train else "test_subset"])
+        options.update(config["train_config" if train else "test_config"])
+        converted[dataset_name] = options
+    return converted
+
+
+def save_json(json_pth, data, mode="update"):
+    if os.path.exists(json_pth):
+        with open(json_pth, "r") as json_file:
+            existing_data = json.load(json_file)
+        if mode == "update":
+            existing_data.update(data)
+            data = existing_data
+        elif mode == "cat":
+            for key in data:
+                if key in existing_data:
+                    existing_data[key] += data[key]
+                else:
+                    existing_data[key] = data[key]
+            data = existing_data
+    with open(json_pth, "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+import torch
+
+
+def relative_rmse_error_ornl(original, reconstructed, device=None):
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    original = torch.as_tensor(original, dtype=torch.float64, device=device)
+    reconstructed = torch.as_tensor(reconstructed, dtype=torch.float64, device=device)
+
+    rmse = torch.sqrt(torch.mean((original - reconstructed) ** 2))
+    data_range = torch.max(original) - torch.min(original)
+
+    relative_rmse = torch.where(
+        data_range != 0, rmse / data_range, torch.tensor(0.0, device=device)
+    )
+    return relative_rmse
 
 
 def exists(x):

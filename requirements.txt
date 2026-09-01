@@ -6,6 +6,7 @@ numpy<2
 
 tqdm==4.67.1
 einops==0.8.1
+PyYAML>=6.0
 
 cupy-cuda11x==13.4.1
 
@@ -13,6 +14,5 @@ bsconv==0.4.0
 einops-exts==0.0.4
 rotary-embedding-torch==0.8.6
 compressai==1.2.6
-
 
 

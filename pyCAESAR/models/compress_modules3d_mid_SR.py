@@ -8,6 +8,10 @@ import torch
 import torch.nn.init as init
 from .RangeEncoding import RangeCoder
 
+"""
+This is the for AOTI compiled version of the network not training
+"""
+
 
 def load_yaml(file_path):
     with open(file_path, "r") as file:

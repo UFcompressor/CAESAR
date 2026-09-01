@@ -51,6 +51,10 @@ pip install --upgrade pip wheel setuptools
 
 ### 3. Install Platform Dependencies
 
+The Linux, macOS, and Windows instructions below all install
+`PyYAML>=6.0` from `requirements.txt`. PyYAML provides the Python `yaml` module
+used by the CAESAR model and training configuration code.
+
 <details>
 <summary>Linux (Ubuntu/Debian)</summary>
 
@@ -270,6 +274,7 @@ export CAESAR_MODEL_DIR=/path/to/your/models
 | CMake                      | 3.10            |
 | Zstandard (zstd)           | 1.5 (required)  |
 | Python                     | 3.10            |
+| PyYAML                     | 6.0             |
 
 GPU-specific dependencies (CUDA, nvCOMP, MPS-compatible torch builds) are covered in the respective [GPU Support](#gpu-support-nvidia) sections above.
 
