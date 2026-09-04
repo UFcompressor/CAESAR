@@ -155,6 +155,7 @@ std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
 }
 
 Compressor::Compressor(torch::Device device) : device_(device) {
+  at::globalContext().setDeterministicAlgorithms(true, false);
   load_models();
   load_probability_tables();
 }
