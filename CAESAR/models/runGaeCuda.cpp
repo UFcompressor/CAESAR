@@ -135,11 +135,14 @@ torch::Tensor indexMaskReverse(const torch::Tensor &prefixMask,
       torch::arange(numCols, torch::dtype(torch::kLong).device(device));
   auto maskLength_d = maskLength.to(prefixMask.device());
   auto mask = arange.unsqueeze(0).le(maskLength_d.unsqueeze(1));
+  arange = torch::Tensor();
 
   auto arr2d = torch::zeros({maskLength_d.size(0), numCols},
                             torch::dtype(torch::kBool).device(device));
+  maskLength_d = torch::Tensor();
 
-  arr2d.index_put_({mask}, prefixMask.to(torch::kBool).reshape({-1}));
+  arr2d.masked_scatter_(mask, prefixMask.to(torch::kBool));
+  mask = torch::Tensor();
   return arr2d;
 }
 
@@ -550,8 +553,15 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor &reconsData,
 
   MainData mainData = decompressLossless(metaData, compressedData);
 
+#ifdef USE_CUDA
+  cleanupGPUMemory();
+#endif
+
   torch::Tensor indexMask = indexMaskReverse(
       mainData.prefixMask, mainData.maskLength, metaData.pcaBasis.size(0));
+#ifdef USE_CUDA
+  cleanupGPUMemory();
+#endif
   indexMask = indexMask.to(device_);
 
   torch::Tensor indexIndices = mainData.coeffInt.to(torch::kLong);
@@ -564,6 +574,7 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor &reconsData,
     coeffInt = coeffInt.to(device_);
   }
   coeffInt = coeffInt.index({indexIndices}).to(torch::kFloat32).to(device_);
+  indexIndices = torch::Tensor();
 
   torch::Tensor coeff = torch::zeros(
       indexMask.sizes(),
@@ -583,12 +594,17 @@ torch::Tensor PCACompressor::decompress(const torch::Tensor &reconsData,
     pcaBasisDevice = pcaBasisDevice.to(device_);
   }
   torch::Tensor pcaReconstruction = torch::matmul(coeff, pcaBasisDevice);
+  pcaBasisDevice = torch::Tensor();
   coeff = torch::Tensor();
 
   reconsDevice.index_put_({mainData.processMask},
                           reconsDevice.index({mainData.processMask}) +
                               pcaReconstruction);
   pcaReconstruction = torch::Tensor();
+
+#ifdef USE_CUDA
+  cleanupGPUMemory();
+#endif
 
   int64_t n_processed = torch::sum(mainData.processMask).item<int64_t>();
   int64_t n_total = mainData.processMask.size(0);
