@@ -37,6 +37,7 @@ torch::Tensor build_indexes_tensor(const std::vector<int32_t> &size) {
 }
 
 Decompressor::Decompressor(torch::Device device) : device_(device) {
+  at::globalContext().setDeterministicAlgorithms(true, false);
   load_models();
   load_probability_tables();
 }
