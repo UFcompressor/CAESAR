@@ -112,6 +112,7 @@ class Compressor(nn.Module):
     def encode(self, input):
 
         self.t_dim = input.shape[2]
+        encoder_shapes = []
 
         for i, (resnet, down) in enumerate(self.enc):  # [b, 1, t, 256, 256]
             if i == 0:
@@ -122,21 +123,34 @@ class Compressor(nn.Module):
                 input = input.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
 
             input = resnet(input)
+            encoder_shapes.append(tuple(input.shape[2:]))
             input = down(input)
 
         input = input.permute(0, 2, 1, 3, 4)
         input = input.reshape(-1, *input.shape[2:])
 
         latent = input
+        hyper_shapes = []
         for i, (conv, act) in enumerate(self.hyper_enc):
             input = conv(input)
             input = act(input)
+            if i < len(self.hyper_enc) - 1:
+                hyper_shapes.append(tuple(input.shape[-2:]))
 
         hyper_latent = input
         q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
         input = q_hyper_latent
+        hyper_targets = list(reversed(hyper_shapes))
         for i, (deconv, act) in enumerate(self.hyper_dec):
-            input = deconv(input)
+            if i < len(hyper_targets):
+                output_size = (
+                    input.shape[0],
+                    deconv.out_channels,
+                    *hyper_targets[i],
+                )
+                input = deconv(input, output_size=output_size)
+            else:
+                input = deconv(input)
             input = act(input)
 
         mean, scale = input.chunk(2, 1)
@@ -147,15 +161,17 @@ class Compressor(nn.Module):
             "hyper_latent": hyper_latent,
             "latent_distribution": latent_distribution,
         }
-        return q_latent, q_hyper_latent, state4bpp, mean
+        return q_latent, q_hyper_latent, state4bpp, mean, encoder_shapes
 
-    def decode(self, input):  # [n*t, c, h,w ] [8, 256, 16, 16]
+    def decode(self, input, encoder_shapes, batch_size):
         # output = []
+
+        decoder_targets = list(reversed(encoder_shapes))
 
         for i, (resnet, up) in enumerate(self.dec):
 
             if i == 0:
-                input = input.reshape(-1, self.t_dim // 4, *input.shape[1:])
+                input = input.reshape(batch_size, -1, *input.shape[1:])
                 input = input.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
 
             if i == 2:
@@ -163,7 +179,10 @@ class Compressor(nn.Module):
                 input = input.reshape(-1, *input.shape[2:])  # [b*t, 1, 256, 256]
 
             input = resnet(input)
-            input = up(input)
+            if isinstance(up, Upsample):
+                input = up(input, target_shape=decoder_targets[i])
+            else:
+                input = up(input)
 
         return input
 
@@ -200,7 +219,10 @@ class Compressor(nn.Module):
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
             start_time = time.time()
 
-        q_latent, q_hyper_latent, state4bpp, mean = self.encode(input)
+        batch_size = input.shape[0]
+        q_latent, q_hyper_latent, state4bpp, mean, encoder_shapes = self.encode(
+            input
+        )
 
         if return_time:
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
@@ -212,7 +234,7 @@ class Compressor(nn.Module):
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
             start_time = time.time()
 
-        output = self.decode(q_latent)
+        output = self.decode(q_latent, encoder_shapes, batch_size)
 
         if return_time:
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
@@ -379,6 +401,7 @@ class CompressorMix(nn.Module):
 
     def forward(self, inputs, return_time=False):
         B = inputs.shape[0]
+        target_shape = tuple(inputs.shape[-3:])
 
         results = self.entropy_model(inputs, return_time)
         outputs = results["output"]
@@ -396,6 +419,23 @@ class CompressorMix(nn.Module):
 
         # Reshape if needed
         outputs = reshape_batch_2d_3d(outputs, B)
+        produced_shape = tuple(outputs.shape[-3:])
+        if any(
+            produced < target
+            for produced, target in zip(produced_shape, target_shape)
+        ):
+            raise RuntimeError(
+                "SR output is smaller than the requested reconstruction: "
+                f"produced {produced_shape}, requested {target_shape}"
+            )
+        outputs = outputs[
+            ..., : target_shape[0], : target_shape[1], : target_shape[2]
+        ]
+        if outputs.shape != inputs.shape:
+            raise RuntimeError(
+                f"Reconstruction shape {tuple(outputs.shape)} does not match "
+                f"input shape {tuple(inputs.shape)}"
+            )
         results["output"] = outputs
 
         return results

@@ -44,13 +44,17 @@ class Upsample(nn.Module):
             dim_out = dim_in
 
         self.conv = (
-            nn.ConvTranspose3d(dim_in, dim_out, 4, 2, 1)
+            nn.ConvTranspose3d(dim_in, dim_out, 3, 2, 1)
             if d3
-            else nn.ConvTranspose2d(dim_in, dim_out, 4, 2, 1)
+            else nn.ConvTranspose2d(dim_in, dim_out, 3, 2, 1)
         )
 
-    def forward(self, x):
-        return self.conv(x)
+    def forward(self, x, target_shape=None):
+        if target_shape is None:
+            return self.conv(x)
+
+        output_size = (x.shape[0], self.conv.out_channels, *target_shape)
+        return self.conv(x, output_size=output_size)
 
 
 class Downsample(nn.Module):

@@ -194,7 +194,11 @@ class BaseDataset(Dataset):
         self.n_overlap = args.get("n_overlap", 0)
         self.downsampling = args.get("downsampling", 1)
 
-        self.random_crop = T.RandomCrop(size=(self.train_size, self.train_size))
+        self.random_crop = (
+            T.RandomCrop(size=(self.train_size, self.train_size))
+            if self.train_size is not None
+            else None
+        )
 
         if "downsample" in self.augment_type:
             self.max_downsample = self.augment_type["downsample"]
@@ -216,6 +220,12 @@ class BaseDataset(Dataset):
         return data
 
     def apply_padding_or_crop(self, data):
+        # A null train_size keeps the dataset's native spatial dimensions.  The
+        # shape-aware CAESAR decoder and final SR crop can reconstruct them
+        # without preprocessing the input to a square size.
+        if self.train_size is None:
+            return data
+
         cur_size = data.shape[-1]
         if self.train_size > cur_size:
             pad_size = self.train_size - cur_size
