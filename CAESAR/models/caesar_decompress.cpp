@@ -343,6 +343,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor recons_gae =
         pca_compressor.decompress(padded_recon_tensor_norm, gae_record_metaData,
                                   gae_record_compressedData);
+    padded_recon_tensor_norm = torch::Tensor();
     padded_recon_tensor = torch::Tensor();
 
     torch::Tensor recons_gae_unpadded =
