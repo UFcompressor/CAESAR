@@ -1,16 +1,19 @@
+"""Training-only CAESAR compressor model.
+
+NOTE: Training and AOTI inference compilation are intentionally kept separate.
+This file contains the original trainable network. Do not use or modify
+``compress_modules3d_mid_SR.py`` for training; that file belongs to the
+three-part AOTI inference/compilation path.
+"""
+
 import torch.nn as nn
-from .network_components import ResnetBlock, FlexiblePrior, Downsample, Upsample
+from .network_components_4_train import ResnetBlock, FlexiblePrior, Downsample, Upsample
 from .utils import quantize, NormalDistribution
 import time
 import yaml
 from .BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch
 import torch.nn.init as init
-from .RangeEncoding import RangeCoder
-
-"""
-This is the for AOTI compiled version of the network not training
-"""
 
 
 def load_yaml(file_path):
@@ -23,6 +26,19 @@ def super_resolution_model(
     img_size=64, in_chans=32, out_chans=1, sr_dim="HAT", pretrain=False, sr_type="BCRN"
 ):
 
+    if sr_type == "HAT":
+        yaml_file = load_yaml("./configs/HAT-S_SRx4.yml")
+        network_g = yaml_file["network_g"]
+        network_g["img_size"] = img_size
+        network_g["in_chans"] = in_chans
+        network_g["out_chans"] = out_chans
+        sr_model = HAT(**network_g)
+        loaded_params, not_loaded_params = sr_model.load_part_model(
+            "./pretrain/HAT-S_SRx4.pth"
+        )
+        print("Loading HAT model")
+        return sr_model, loaded_params, not_loaded_params
+
     if sr_type == "BCRN":
         sr_model = BluePrintConvNeXt_SR(in_chans, 1, 4, sr_dim)
         if pretrain:
@@ -31,6 +47,7 @@ def super_resolution_model(
             )
         else:
             loaded_params, not_loaded_params = [], sr_model.parameters()
+        print("Loading BCRN model")
 
         return sr_model, loaded_params, not_loaded_params
 
@@ -81,9 +98,7 @@ class Compressor(nn.Module):
         self.reversed_hyper_in_out = list(
             zip(self.reversed_hyper_dims[:-1], self.reversed_hyper_dims[1:])
         )
-        self.prior = FlexiblePrior(self.hyper_dims[-1], convert_module=True)
-
-        self.range_coder = None
+        self.prior = FlexiblePrior(self.hyper_dims[-1])
 
     def get_extra_loss(self):
         return self.prior.get_extraloss()
@@ -94,151 +109,63 @@ class Compressor(nn.Module):
         self.hyper_enc = nn.ModuleList([])
         self.hyper_dec = nn.ModuleList([])
 
-    def encode(self, x):
+    def encode(self, input):
 
-        self.t_dim = x.shape[2]
+        self.t_dim = input.shape[2]
 
         for i, (resnet, down) in enumerate(self.enc):  # [b, 1, t, 256, 256]
             if i == 0:
-                x = x.permute(0, 2, 1, 3, 4)
-                x = x.reshape(-1, *x.shape[2:])  # [b*t, 1, 256, 256]
+                input = input.permute(0, 2, 1, 3, 4)
+                input = input.reshape(-1, *input.shape[2:])  # [b*t, 1, 256, 256]
             if i == 2:
-                x = x.reshape(-1, self.t_dim, *x.shape[1:])
-                x = x.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
+                input = input.reshape(-1, self.t_dim, *input.shape[1:])
+                input = input.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
 
-            x = resnet(x)
-            x = down(x)
+            input = resnet(input)
+            input = down(input)
 
-        x = x.permute(0, 2, 1, 3, 4)
-        x = x.reshape(-1, *x.shape[2:])
+        input = input.permute(0, 2, 1, 3, 4)
+        input = input.reshape(-1, *input.shape[2:])
 
-        latent = x
-        return latent
-
-    def hyper_encode(self, x):
-
+        latent = input
         for i, (conv, act) in enumerate(self.hyper_enc):
-            x = conv(x)
-            x = act(x)
+            input = conv(input)
+            input = act(input)
 
-        hyper_latent = x
-        return hyper_latent
-
-    def hyper_decode(self, x):
-
+        hyper_latent = input
+        q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
+        input = q_hyper_latent
         for i, (deconv, act) in enumerate(self.hyper_dec):
-            x = deconv(x)
-            x = act(x)
+            input = deconv(input)
+            input = act(input)
 
-        mean, scale = x.chunk(2, 1)
+        mean, scale = input.chunk(2, 1)
+        latent_distribution = NormalDistribution(mean, scale.clamp(min=0.1))
+        q_latent = quantize(latent, "dequantize", latent_distribution.mean)
+        state4bpp = {
+            "latent": latent,
+            "hyper_latent": hyper_latent,
+            "latent_distribution": latent_distribution,
+        }
+        return q_latent, q_hyper_latent, state4bpp, mean
 
-        return mean, scale
-
-    def decode(self, x):  # [n*t, c, h,w ] [8, 256, 16, 16]
+    def decode(self, input):  # [n*t, c, h,w ] [8, 256, 16, 16]
         # output = []
 
         for i, (resnet, up) in enumerate(self.dec):
 
             if i == 0:
-                x = x.reshape(-1, self.t_dim // 4, *x.shape[1:])
-                x = x.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
+                input = input.reshape(-1, self.t_dim // 4, *input.shape[1:])
+                input = input.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
 
             if i == 2:
-                x = x.permute(0, 2, 1, 3, 4)
-                x = x.reshape(-1, *x.shape[2:])  # [b*t, 1, 256, 256]
+                input = input.permute(0, 2, 1, 3, 4)
+                input = input.reshape(-1, *input.shape[2:])  # [b*t, 1, 256, 256]
 
-            x = resnet(x)
-            x = up(x)
+            input = resnet(input)
+            input = up(input)
 
-        return x
-
-    def compress(self, x, return_latent=False, real=False, return_time=False):
-        if self.range_coder is None:
-            _quantized_cdf, _cdf_length, _offset = self.prior._update(30)
-            self.range_coder = RangeCoder(
-                _quantized_cdf=_quantized_cdf,
-                _cdf_length=_cdf_length,
-                _offset=_offset,
-                medians=self.prior.medians.detach(),
-            )
-
-        B, C, T, H, W = x.shape
-        original_shape = x.shape
-
-        if return_time:
-            torch.cuda.synchronize()  # Wait for all GPU ops to finish
-            start_time = time.time()
-
-        latent = self.encode(x)
-        hyper_latent = self.hyper_encode(latent)
-        q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
-        mean, scale = self.hyper_decode(q_hyper_latent)
-
-        if return_time:
-            torch.cuda.synchronize()  # Wait for all GPU ops to finish
-            elapsed_time = time.time() - start_time
-
-        latent_string = self.range_coder.compress(latent, mean, scale)
-        hyper_latent_string = self.range_coder.compress_hyperlatent(hyper_latent)
-
-        bpf_real = torch.Tensor(
-            [
-                (len(lc) + len(hc)) * 8
-                for lc, hc in zip(latent_string, hyper_latent_string)
-            ]
-        )
-
-        compressed_data = (
-            latent_string,
-            hyper_latent_string,
-            original_shape,
-            hyper_latent.shape,
-        )
-
-        state4bpp = {
-            "latent": latent,
-            "hyper_latent": hyper_latent,
-            "mean": mean,
-            "scale": scale,
-        }
-
-        bpf_theory, bpp = self.bpp(original_shape, state4bpp)
-
-        result = {}
-
-        result["bpf_entropy"] = bpf_theory
-        result["compressed"] = compressed_data
-        result["bpf_real"] = bpf_real
-
-        if return_latent:
-            q_latent = quantize(latent, "dequantize", mean)
-            result["q_latent"] = q_latent
-
-        if return_time:
-            result["elapsed_time"] = elapsed_time
-
-        return result
-
-    def decompress(
-        self,
-        latent_string,
-        hyper_latent_string,
-        original_shape,
-        hyper_shape,
-        device="cuda",
-    ):
-        B, _, T, _, _ = original_shape
-        q_hyper_latent = self.range_coder.decompress_hyperlatent(
-            hyper_latent_string, hyper_shape
-        )
-        mean, scale = self.hyper_decode(q_hyper_latent.to(device))
-
-        q_latent = self.range_coder.decompress(
-            latent_string, mean.detach().cpu(), scale.detach().cpu()
-        )
-        q_latent = q_latent.to(device)
-
-        return self.decode(q_latent)
+        return input
 
     def bpp(self, shape, state4bpp):
         B, H, W = shape[0], shape[-2], shape[-1]
@@ -246,30 +173,26 @@ class Compressor(nn.Module):
 
         latent = state4bpp["latent"]
         hyper_latent = state4bpp["hyper_latent"]
-        latent_distribution = NormalDistribution(
-            state4bpp["mean"], state4bpp["scale"].clamp(min=0.1)
-        )
-
+        latent_distribution = state4bpp["latent_distribution"]
         if self.training:
             q_hyper_latent = quantize(hyper_latent, "noise")
             q_latent = quantize(latent, "noise")
         else:
             q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
             q_latent = quantize(latent, "dequantize", latent_distribution.mean)
-
         hyper_rate = -self.prior.likelihood(q_hyper_latent).log2()
         cond_rate = -latent_distribution.likelihood(q_latent).log2()
 
-        bpb = hyper_rate.reshape(B, -1).sum(dim=-1) + cond_rate.reshape(B, -1).sum(
-            dim=-1
-        )  # bit per block
+        frame_bit = hyper_rate.reshape(B, -1).sum(dim=-1) + cond_rate.reshape(
+            B, -1
+        ).sum(dim=-1)
         bpp = (
             hyper_rate.reshape(B, -1).sum(dim=-1) + cond_rate.reshape(B, -1).sum(dim=-1)
         ) / n_pixels
 
-        return bpb, bpp
+        return frame_bit, bpp
 
-    def forward(self, x, return_time=False):
+    def forward(self, input, return_time=False):
 
         result = {}
 
@@ -277,25 +200,13 @@ class Compressor(nn.Module):
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
             start_time = time.time()
 
-        # q_latent, q_hyper_latent, state4bpp, mean = self.encode(x)
-
-        latent = self.encode(x)
-        hyper_latent = self.hyper_encode(latent)
-        q_hyper_latent = quantize(hyper_latent, "dequantize", self.prior.medians)
-        mean, scale = self.hyper_decode(q_hyper_latent)
-        q_latent = quantize(latent, "dequantize", mean.detach())
+        q_latent, q_hyper_latent, state4bpp, mean = self.encode(input)
 
         if return_time:
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
             result["encoding_time"] = time.time() - start_time
 
-        state4bpp = {
-            "latent": latent,
-            "hyper_latent": hyper_latent,
-            "mean": mean,
-            "scale": scale,
-        }
-        frame_bit, bpp = self.bpp(x.shape, state4bpp)
+        frame_bit, bpp = self.bpp(input.shape, state4bpp)
 
         if return_time:
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
@@ -416,6 +327,18 @@ class ResnetCompressor(Compressor):
             )
 
 
+#         for module in self.modules():
+#             if isinstance(module, (nn.Conv2d, nn.Conv3d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
+#                 init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+#                 if module.bias is not None:
+#                     init.zeros_(module.bias)
+
+#             elif isinstance(module, nn.Linear):
+#                 init.xavier_uniform_(module.weight)
+#                 if module.bias is not None:
+#                     init.zeros_(module.bias)
+
+
 class CompressorMix(nn.Module):
     def __init__(
         self,
@@ -454,10 +377,10 @@ class CompressorMix(nn.Module):
             )
         )
 
-    def forward(self, x, return_time=False):
-        B = x.shape[0]
+    def forward(self, inputs, return_time=False):
+        B = inputs.shape[0]
 
-        results = self.entropy_model(x, return_time)
+        results = self.entropy_model(inputs, return_time)
         outputs = results["output"]
 
         # Apply super-resolution model
@@ -476,30 +399,3 @@ class CompressorMix(nn.Module):
         results["output"] = outputs
 
         return results
-
-    def compress(self, x, return_latent=False, real=False):
-        return self.entropy_model.compress(x, return_latent, real)
-
-    def decompress(
-        self,
-        latent_string,
-        hyper_latent_string,
-        original_shape,
-        hyper_shape,
-        device="cuda",
-    ):
-        B = original_shape[0]
-
-        outputs = self.entropy_model.decompress(
-            latent_string, hyper_latent_string, original_shape, hyper_shape, device
-        )
-        outputs = self.sr_model(outputs)
-
-        outputs = reshape_batch_2d_3d(outputs, B)
-        return outputs
-
-    def decode(self, x, batch_size):
-        x = self.entropy_model.decode(x)
-        x = self.sr_model(x)
-        x = reshape_batch_2d_3d(x, batch_size)
-        return x
