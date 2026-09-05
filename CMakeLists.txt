@@ -37,6 +37,14 @@ else()
     message(STATUS "Skipping test files (BUILD_TESTS=OFF)")
 endif()
 
+option(BUILD_EXAMPLES "Build CAESAR example files" OFF)
+if(BUILD_EXAMPLES)
+    message(STATUS "Building example files...")
+    add_subdirectory(examples)
+else()
+    message(STATUS "Skipping example files (BUILD_EXAMPLES=OFF)")
+endif()
+
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/CAESAR/
         DESTINATION include/caesar
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
