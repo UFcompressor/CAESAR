@@ -220,9 +220,7 @@ class Compressor(nn.Module):
             start_time = time.time()
 
         batch_size = input.shape[0]
-        q_latent, q_hyper_latent, state4bpp, mean, encoder_shapes = self.encode(
-            input
-        )
+        q_latent, q_hyper_latent, state4bpp, mean, encoder_shapes = self.encode(input)
 
         if return_time:
             torch.cuda.synchronize()  # Wait for all GPU ops to finish
@@ -421,16 +419,13 @@ class CompressorMix(nn.Module):
         outputs = reshape_batch_2d_3d(outputs, B)
         produced_shape = tuple(outputs.shape[-3:])
         if any(
-            produced < target
-            for produced, target in zip(produced_shape, target_shape)
+            produced < target for produced, target in zip(produced_shape, target_shape)
         ):
             raise RuntimeError(
                 "SR output is smaller than the requested reconstruction: "
                 f"produced {produced_shape}, requested {target_shape}"
             )
-        outputs = outputs[
-            ..., : target_shape[0], : target_shape[1], : target_shape[2]
-        ]
+        outputs = outputs[..., : target_shape[0], : target_shape[1], : target_shape[2]]
         if outputs.shape != inputs.shape:
             raise RuntimeError(
                 f"Reconstruction shape {tuple(outputs.shape)} does not match "
