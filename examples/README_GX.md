@@ -67,3 +67,63 @@ and ADIOS reads must be verified on the cluster; they were not run locally.
 
 Implementation references: [ADIOS2 Python API](https://adios2.readthedocs.io/en/master/api_python/api_python.html)
 and [PyTorch DDP](https://docs.pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html).
+
+## Standalone evaluation on unseen data
+
+Run from the repository root in the same Python environment. Only one GPU is
+needed; do not use torchrun. Replace the checkpoint and unseen experiment paths:
+
+```bash
+python3 -m pyCAESAR.eval_gx \
+    --checkpoint snapshots/YOUR_RUN/model_best.pt \
+    --data /lustre/blue2/ranka/shared-eklasky/GX/data/YOUR_UNSEEN_EXPERIMENT \
+    --batch-size 8 \
+    --output unseen-metrics.json
+```
+
+An experiment directory evaluates all its restart BP files. To evaluate one
+file, pass its full `.bp` path instead (BP directories are supported). You may
+also pass multiple files after `--data`, including NPZ files. This command reads
+exactly the supplied inputs; it does not apply the training alternating split.
+Keep the unseen experiment separate from both training and validation data.
+
+The evaluator loads weights strictly, switches to evaluation mode, and disables
+gradients. Model dimensions are read from the checkpoint's sibling `split.json`
+when available, otherwise they default to 16; explicit `--model-dim` and
+`--sr-dim` options override them. It uses the same volume normalization and
+reconstruction as training validation. It does not update or save model weights.
+
+- `nrmse`: global RMSE divided by the global range, matching training validation.
+- `mean_volume_nrmse`: arithmetic mean of each volume's RMSE divided by its own range.
+- `worst_volume_nrmse`: largest such per-volume score.
+- Constant volumes have undefined per-volume range normalization and are excluded
+  from those two scores, with their count reported. They remain in global metrics.
+- `compression_ratio`: original float32 bits divided by estimated entropy bits.
+  This is not measured encoded-file CR and excludes headers and normalization metadata.
+
+This evaluator has not been run locally; verify it on your cluster checkpoint.
+
+## What C++ deployment would require
+
+These are follow-up changes, not implemented by the Python evaluation command:
+
+1. Make the three Python export scripts load the GX checkpoint instead of their
+   hard-coded `pretrained/caesar_v.pt`. Preserve the training model's shape-aware
+   decoding, final output crop, and BCRN pooling behavior in deployment.
+2. Export the compressor for `(batch, 1, 96, 83, 42)` and derive the corresponding
+   hyper-decoder and decoder input shapes. Current export examples use
+   `(batch, 1, 8, 256, 256)` with only the batch dimension dynamic.
+3. Replace hard-coded latent/hyperlatent sizes in
+   `CAESAR/models/caesar_decompress.cpp` (including `64x16x16`, `64x4x4`, and
+   the temporal grouping of 2) with the GX shapes or serialized shape metadata.
+   Align any matching compressor assumptions as well.
+4. Match the full-volume preprocessing in C++: 256 independent volumes, per-volume
+   mean/range normalization, constant-volume handling, and restoration to the
+   original layout. Bypass spatial blocking that would change the model input.
+   To read BP directly, add an ADIOS2 reader and the GX axis permutation; callers
+   that already supply correctly arranged tensors can perform this step externally.
+5. Regenerate all three AOTI packages and entropy CDF tables from the same GX
+   checkpoint, then validate Python/C++ reconstruction parity and a real encoded
+   round trip. Measure actual CR from the resulting bytes, including metadata.
+
+DDP and the two-GPU training setup are not required for C++ inference.
