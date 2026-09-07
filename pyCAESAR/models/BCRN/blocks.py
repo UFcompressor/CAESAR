@@ -166,7 +166,10 @@ class ESA(nn.Module):
     def forward(self, x):
         c1_ = self.conv1(x)
         c1 = self.conv2(c1_)
-        v_max = F.max_pool2d(c1, kernel_size=7, stride=3)
+        # Native GX volumes produce a 10x5 feature map here. Limit each
+        # pooling dimension independently so narrow maps remain valid.
+        pool_size = (min(7, c1.size(-2)), min(7, c1.size(-1)))
+        v_max = F.max_pool2d(c1, kernel_size=pool_size, stride=3)
         v_range = self.relu(self.conv_max(v_max))
         c3 = self.relu(self.conv3(v_range))
         c3 = self.conv3_(c3)
