@@ -356,8 +356,13 @@ class ScientificDataset(BaseDataset):
             else slice(section_range[0], section_range[1])
         )
 
-        with np.load(data_path) as npzfile:
-            data = npzfile["data"][variable_idx, section_range, frame_range]
+        from pyCAESAR.data_io import read_array, scientific_layout
+
+        data = scientific_layout(read_array(data_path))
+        variable_idx = slice(None) if variable_idx is None else variable_idx
+        if isinstance(variable_idx, int):
+            variable_idx = [variable_idx]
+        data = data[variable_idx, section_range, frame_range]
 
         if self.resolution is not None:
             data = center_crop(data, self.resolution)

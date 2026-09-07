@@ -1,0 +1,3 @@
+# Install alongside requirements.txt in the GPU training environment.
+# Serial ADIOS2 Python reader; MPI-enabled ADIOS2 is not required.
+adios2>=2.10,<3
