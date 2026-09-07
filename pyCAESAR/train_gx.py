@@ -1,4 +1,4 @@
-"""GX training from scratch: serial rank-zero input, CPU scatter, GPU DDP."""
+"""GX training from scratch: serial input, GPU preprocessing and NCCL scatter."""
 
 import argparse
 from datetime import timedelta
@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
-from pyCAESAR.data_io import read_array, scientific_layout
+from pyCAESAR.data_io import GX_SHAPE, read_array
 
 DATA_ROOT = Path('/lustre/blue2/ranka/shared-eklasky/GX/data')
 
@@ -45,8 +45,8 @@ def experiment_split(first, second):
     return train, test
 
 
-def scatter_file(path, group, seed=None):
-    """Read one file on rank zero; distribute volume shards through Gloo.
+def scatter_file(path, group, device, seed=None):
+    """Read on CPU, then prepare and scatter GPU volumes through NCCL.
 
     Two ranks divide the 256 GX volumes exactly. Other sample counts are padded
     for equal training steps; evaluation excludes padding using the valid count.
@@ -55,19 +55,30 @@ def scatter_file(path, group, seed=None):
     message, chunks = [None], None
     if rank == 0:
         try:
-            array = scientific_layout(read_array(path))
-            volumes = np.ascontiguousarray(array.reshape(-1, *array.shape[-3:]), dtype=np.float32)
-            if not len(volumes) or not np.isfinite(volumes).all():
+            array = read_array(path)
+            if array.ndim == 7 and array.shape != GX_SHAPE:
+                raise ValueError(f'Expected GX shape {GX_SHAPE}, got {array.shape}')
+            if array.ndim not in (5, 7):
+                raise ValueError(f'Expected a 5D scientific array or 7D GX G, got {array.shape}')
+            # Transfer once per file. Cast, permutation, shuffle and validation
+            # operate on GPU; CPU memory is only needed for the serial reader.
+            data = torch.from_numpy(np.ascontiguousarray(array)).to(device=device, dtype=torch.float32)
+            del array
+            if data.ndim == 7:
+                data = data.permute(0, 1, 2, 6, 3, 4, 5).reshape(256, 96, 83, 42)
+            else:
+                data = data.reshape(-1, *data.shape[-3:])
+            if not len(data) or not torch.isfinite(data).all().item():
                 raise ValueError('Input is empty or contains NaN/Inf')
-            data = torch.from_numpy(volumes)
             count = len(data)
             if seed is not None:
-                order = torch.randperm(count, generator=torch.Generator().manual_seed(seed))
+                order = torch.randperm(count, device=device,
+                                       generator=torch.Generator(device=device).manual_seed(seed))
                 data = data[order]
             per_rank = math.ceil(count / world)
             padding = per_rank * world - count
             if padding:
-                data = torch.cat((data, data[torch.arange(padding) % count]))
+                data = torch.cat((data, data[torch.arange(padding, device=device) % count]))
             chunks = list(data.split(per_rank))
             message[0] = {'shape': list(chunks[0].shape), 'count': count}
         except Exception as exc:
@@ -76,8 +87,8 @@ def scatter_file(path, group, seed=None):
     metadata = message[0]
     if 'error' in metadata:
         raise RuntimeError(metadata['error'])
-    shard = torch.empty(metadata['shape'], dtype=torch.float32)
-    dist.scatter(shard, scatter_list=chunks, src=0, group=group)
+    shard = torch.empty(metadata['shape'], dtype=torch.float32, device=device)
+    dist.scatter(shard, scatter_list=chunks, src=0)
     valid = max(0, min(len(shard), metadata['count'] - rank * len(shard)))
     return shard, valid
 
@@ -99,7 +110,7 @@ def evaluate(model, paths, group, device, batch_size, smoke_test=False):
     minimum = torch.tensor(float('inf'), device=device)
     maximum = torch.tensor(float('-inf'), device=device)
     for path in paths:
-        shard, valid = scatter_file(path, group)
+        shard, valid = scatter_file(path, group, device)
         if smoke_test:
             valid = min(valid, 2 * batch_size)
         for start in range(0, valid, batch_size):
@@ -111,6 +122,7 @@ def evaluate(model, paths, group, device, batch_size, smoke_test=False):
             totals[2] += result['frame_bit'].double().sum()
             minimum = torch.minimum(minimum, raw.min())
             maximum = torch.maximum(maximum, raw.max())
+        del shard
     dist.all_reduce(totals)
     dist.all_reduce(minimum, op=dist.ReduceOp.MIN)
     dist.all_reduce(maximum, op=dist.ReduceOp.MAX)
@@ -129,7 +141,7 @@ def arguments():
                         default=DATA_ROOT / 'exp-n125-fp1.0-1.0-tp1.0-5.0')
     parser.add_argument('--save-path', type=Path, default=Path('snapshots/gx-scratch'))
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch-size', type=int, default=1, help='Full 3D volumes per GPU')
+    parser.add_argument('--batch-size', type=int, default=8, help='Full 3D volumes per GPU')
     parser.add_argument('--lr', type=float, default=0.0004)
     parser.add_argument('--model-dim', type=int, default=16)
     parser.add_argument('--sr-dim', type=int, default=16)
@@ -211,7 +223,7 @@ def run(args, device):
         beta = args.init_beta if epoch < args.epochs * args.beta_start else args.end_beta
         totals = torch.zeros(3, dtype=torch.float64, device=device)
         for file_index, path in enumerate(paths):
-            shard, _ = scatter_file(path, group, seed=args.seed + epoch * len(paths) + file_index)
+            shard, _ = scatter_file(path, group, device, seed=args.seed + epoch * len(paths) + file_index)
             if args.smoke_test:
                 shard = shard[:2 * args.batch_size]
             for start in range(0, len(shard), args.batch_size):
@@ -226,6 +238,7 @@ def run(args, device):
                 totals[0] += mse.detach() * len(inputs)
                 totals[1] += rate.detach() * len(inputs)
                 totals[2] += len(inputs)
+            del shard
             if rank == 0:
                 print(f'Epoch {epoch + 1}/{args.epochs}: train file {file_index + 1}/{len(paths)}', flush=True)
         dist.all_reduce(totals)
@@ -242,7 +255,7 @@ def run(args, device):
                 best = metrics['rmse']
                 torch.save(base_model.state_dict(), args.save_path / 'model_best.pt')
             print(json.dumps(metrics), flush=True)
-        dist.barrier()
+        dist.barrier(device_ids=[device.index])
 
 
 if __name__ == '__main__':

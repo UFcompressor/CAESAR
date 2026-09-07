@@ -24,9 +24,10 @@ For the full run:
 bash train.sh 2>&1 | tee gx-train.log
 ```
 
-Defaults: 100 epochs, one full `(96, 83, 42)` volume per GPU per batch, two GPU
+Defaults: 100 epochs, eight full `(96, 83, 42)` volumes per GPU per batch, two GPU
 processes, freshly initialized weights. No checkpoint is loaded. Override epochs
-or per-GPU batch size with `--epochs 20 --batch-size 2`.
+or per-GPU batch size with `--epochs 20 --batch-size 4`. The default global batch
+size is 16; if the smoke test runs out of GPU memory, retry with `--batch-size 4`.
 
 The configured root is `/lustre/blue2/ranka/shared-eklasky/GX/data`:
 
@@ -44,9 +45,13 @@ permuted before reshaping into 256 independent volumes. The final real/imaginary
 axis becomes part of the variable index. Each volume is normalized by its own
 mean and range; constant volumes are supported. No spatial cropping is applied.
 
-One file at a time is scattered on CPU with Gloo, giving each GPU process 128
-volumes. File and volume order shuffle each epoch. DDP synchronizes gradients
-with NCCL. Each full epoch includes every selected training volume; evaluation
+Rank zero reads one file on CPU and transfers it once to its GPU. Casting,
+axis permutation, finite-value checks, and volume shuffling run on GPU. NCCL
+scatters 128 volumes to each GPU, where the shard stays for all of its batches.
+Gloo carries only small metadata and input-error messages. File order shuffles
+on CPU each epoch. DDP synchronizes gradients with NCCL. A float32 GX file is
+about 327 MiB; each GPU retains about 163 MiB of input, with additional temporary
+preprocessing memory on rank zero. Each full epoch includes every selected training volume; evaluation
 includes every held-out volume and reduces metrics across ranks.
 
 Each launch creates `snapshots/gx-scratch-<timestamp>/` containing:
