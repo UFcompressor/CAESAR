@@ -87,42 +87,9 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor offsets_tensor = torch::tensor(meta.offsets, opts);
   torch::Tensor scales_tensor = torch::tensor(meta.scales, opts);
 
-  torch::Tensor indexes_tensor;
-  if (!meta.all_filtered && !meta.indexes.empty()) {
-    std::vector<int32_t> flat_indexes;
-    flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
-    for (const auto &v : meta.indexes)
-      flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
-
-    torch::TensorOptions idx_opts_cpu =
-        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-    indexes_tensor = torch::from_blob(flat_indexes.data(),
-                                      {(long)meta.indexes.size(),
-                                       (long)meta.indexes[0].size()},
-                                      idx_opts_cpu)
-                         .clone()
-                         .to(device_);
-
-    flat_indexes.clear();
-    flat_indexes.shrink_to_fit();
-  } else {
-    indexes_tensor = torch::zeros(
-        {0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
-  }
-
-  if (indexes_tensor.numel() > 0) {
-    int64_t rows_to_print = std::min((int64_t)3, indexes_tensor.size(0));
-    int64_t cols = indexes_tensor.size(1);
-
-    for (int64_t i = 0; i < rows_to_print; ++i) {
-      auto row = indexes_tensor[i];
-      auto row_cpu = row.to(torch::kCPU);
-      auto acc = row_cpu.accessor<int32_t, 1>();
-    }
-  }
   std::vector<int64_t> input_shape(meta.data_input_shape.begin(),
                                    meta.data_input_shape.end());
-  torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
+  torch::Tensor recon_tensor = torch::zeros(input_shape, opts);
   input_shape.clear();
   input_shape.shrink_to_fit();
 
@@ -171,7 +138,10 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run(
         {decoded_hyper_latents.to(torch::kFloat32).to(device_)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
-    torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
+    // The CPU entropy decoder needs every index in this batch. Transfer once,
+    // rather than synchronizing a device-to-host copy for each latent sample.
+    torch::Tensor latent_indexes_recon =
+        hyper_outputs[1].to(torch::kInt32).to(torch::kCPU).contiguous();
 
     torch::Tensor decoded_latents_before_offset =
         torch::zeros({(long)cur_latents, 64, 16, 16}).to(torch::kInt32);
@@ -213,15 +183,13 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor denorm_output =
         norm_output * batched_scales + batched_offsets;
 
-    torch::Tensor indexes_cpu =
-        indexes_tensor.narrow(0, (long)sample_start, (long)cur_samples)
-            .to(torch::kCPU);
+    // Use host placement metadata directly; the reconstructed data stays on device.
     for (int64_t i = 0; i < (int64_t)cur_samples; ++i) {
-      torch::Tensor index_row = indexes_cpu.select(0, i);
-      int64_t idx0 = index_row[0].item<int64_t>();
-      int64_t idx1 = index_row[1].item<int64_t>();
-      int64_t start_t = index_row[2].item<int64_t>();
-      int64_t end_t = index_row[3].item<int64_t>();
+      const auto &index_row = meta.indexes.at(sample_start + i);
+      int64_t idx0 = index_row.at(0);
+      int64_t idx1 = index_row.at(1);
+      int64_t start_t = index_row.at(2);
+      int64_t end_t = index_row.at(3);
 
       torch::Tensor source_slice_3d = denorm_output.select(0, i).squeeze(0);
       torch::Tensor dest_slice =
@@ -235,7 +203,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
   offsets_tensor = torch::Tensor();
   scales_tensor = torch::Tensor();
-  indexes_tensor = torch::Tensor();
   if (!meta.filtered_blocks.empty()) {
     const int64_t S = static_cast<int64_t>(meta.data_input_shape[1]);
     const int64_t T = static_cast<int64_t>(meta.data_input_shape[2]);
