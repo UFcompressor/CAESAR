@@ -1,4 +1,32 @@
 #include "caesar_decompress.h"
+#include <ATen/Parallel.h>
+#include <algorithm>
+#include <c10/core/thread_pool.h>
+#include <future>
+
+namespace {
+// Join every task before returning or propagating an error, so output buffers
+// remain alive until all workers have finished writing their disjoint rows.
+template <class F>
+void decode_parallel(c10::ThreadPool &pool, int64_t count, const F &decode) {
+  const int64_t chunk = (count + pool.size() - 1) / pool.size();
+  std::vector<std::future<void>> results;
+  try {
+    for (int64_t begin = 0; begin < count; begin += chunk) {
+      auto task = std::make_shared<std::packaged_task<void()>>(
+          [&, begin] { decode(begin, std::min(begin + chunk, count)); });
+      results.push_back(task->get_future());
+      pool.run([task] { (*task)(); });
+    }
+  } catch (...) {
+    pool.waitWorkComplete();
+    throw;
+  }
+  pool.waitWorkComplete();
+  for (auto &result : results)
+    result.get();
+}
+} // namespace
 
 torch::Tensor deblockHW(const torch::Tensor &data, int64_t nH, int64_t nW,
                         const std::vector<int64_t> &padding);
@@ -78,8 +106,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   result.num_samples = 0;
   result.num_batches = 0;
 
-  RansDecoder range_decoder;
-
   auto &meta = comp_result.compressionMetaData;
 
   torch::TensorOptions opts =
@@ -87,42 +113,9 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   torch::Tensor offsets_tensor = torch::tensor(meta.offsets, opts);
   torch::Tensor scales_tensor = torch::tensor(meta.scales, opts);
 
-  torch::Tensor indexes_tensor;
-  if (!meta.all_filtered && !meta.indexes.empty()) {
-    std::vector<int32_t> flat_indexes;
-    flat_indexes.reserve(meta.indexes.size() * meta.indexes[0].size());
-    for (const auto &v : meta.indexes)
-      flat_indexes.insert(flat_indexes.end(), v.begin(), v.end());
-
-    torch::TensorOptions idx_opts_cpu =
-        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-    indexes_tensor = torch::from_blob(flat_indexes.data(),
-                                      {(long)meta.indexes.size(),
-                                       (long)meta.indexes[0].size()},
-                                      idx_opts_cpu)
-                         .clone()
-                         .to(device_);
-
-    flat_indexes.clear();
-    flat_indexes.shrink_to_fit();
-  } else {
-    indexes_tensor = torch::zeros(
-        {0, 4}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
-  }
-
-  if (indexes_tensor.numel() > 0) {
-    int64_t rows_to_print = std::min((int64_t)3, indexes_tensor.size(0));
-    int64_t cols = indexes_tensor.size(1);
-
-    for (int64_t i = 0; i < rows_to_print; ++i) {
-      auto row = indexes_tensor[i];
-      auto row_cpu = row.to(torch::kCPU);
-      auto acc = row_cpu.accessor<int32_t, 1>();
-    }
-  }
   std::vector<int64_t> input_shape(meta.data_input_shape.begin(),
                                    meta.data_input_shape.end());
-  torch::Tensor recon_tensor = torch::zeros(input_shape).to(device_);
+  torch::Tensor recon_tensor = torch::zeros(input_shape, opts);
   input_shape.clear();
   input_shape.shrink_to_fit();
 
@@ -139,6 +132,17 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   //   row_tensors.clear();
   //   row_tensors.shrink_to_fit();
 
+  // All hyper streams use the same channel indexes. Build them once.
+  const std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(
+      build_indexes_tensor({1, 64, 4, 4}).contiguous().reshape(-1));
+  const auto cpu_float_opts =
+      torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+
+  // Reuse a bounded pool across batches. This also works in builds without
+  // OpenMP, where the header-only at::parallel_for would execute serially.
+  const int workers = std::max(1, std::min(8, at::get_num_threads()));
+  c10::ThreadPool decode_pool(workers);
+
   for (size_t lat_start = 0; lat_start < comp_result.encoded_latents.size();
        lat_start += (size_t)batch_size * 2) {
     size_t lat_end = std::min(lat_start + (size_t)batch_size * 2,
@@ -148,48 +152,57 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     size_t cur_samples = cur_latents / 2;
     size_t sample_start = lat_start / 2;
 
-    std::vector<int32_t> hyper_size = {(int32_t)cur_latents, 64, 4, 4};
-
-    torch::Tensor hyper_index_tensor =
-        build_indexes_tensor(hyper_size).contiguous();
-
+    // Workers touch only CPU data and disjoint output rows. Decode straight
+    // into float staging storage, avoiding a temporary tensor per stream.
     torch::Tensor decoded_hyper_latents =
-        torch::zeros({(long)cur_latents, 64, 4, 4}).to(torch::kInt32);
+        torch::empty({(long)cur_latents, 64, 4, 4}, cpu_float_opts);
+    float *hyper_data = decoded_hyper_latents.data_ptr<float>();
+    decode_parallel(decode_pool, (int64_t)cur_latents,
+                    [&](int64_t begin, int64_t end) {
+                      RansDecoder decoder;
+                      for (int64_t i = begin; i < end; ++i) {
+                        auto decoded = decoder.decode_with_indexes(
+                            comp_result.encoded_hyper_latents[lat_start + i],
+                            hyper_index_vec, vbr_quantized_cdf_,
+                            vbr_cdf_length_, vbr_offset_);
+                        std::copy(decoded.begin(), decoded.end(),
+                                  hyper_data + i * 64 * 4 * 4);
+                      }
+                    });
 
-    for (size_t i = 0; i < cur_latents; i++) {
-      std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(
-          hyper_index_tensor.select(0, (long)i).reshape(-1));
-
-      std::vector<int32_t> hyper_decoded = range_decoder.decode_with_indexes(
-          comp_result.encoded_hyper_latents[lat_start + i], hyper_index_vec,
-          vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_);
-      torch::Tensor hyper_tensor =
-          torch::tensor(hyper_decoded).reshape({64, 4, 4});
-      decoded_hyper_latents.select(0, (long)i).copy_(hyper_tensor);
-    }
-
-    std::vector<torch::Tensor> hyper_outputs = hyper_decompressor_model_->run(
-        {decoded_hyper_latents.to(torch::kFloat32).to(device_)});
+    std::vector<torch::Tensor> hyper_outputs =
+        hyper_decompressor_model_->run({decoded_hyper_latents.to(device_)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
-    torch::Tensor latent_indexes_recon = hyper_outputs[1].to(torch::kInt32);
+    // The CPU entropy decoder needs every index in this batch. Transfer once,
+    // rather than synchronizing a device-to-host copy for each latent sample.
+    torch::Tensor latent_indexes_recon =
+        hyper_outputs[1].to(torch::kInt32).to(torch::kCPU).contiguous();
 
+    constexpr int64_t latent_elements = 64 * 16 * 16;
+    TORCH_CHECK(latent_indexes_recon.numel() ==
+                    (int64_t)cur_latents * latent_elements,
+                "Unexpected latent index shape");
     torch::Tensor decoded_latents_before_offset =
-        torch::zeros({(long)cur_latents, 64, 16, 16}).to(torch::kInt32);
-
-    for (size_t i = 0; i < cur_latents; i++) {
-      std::vector<int32_t> latent_index = tensor_to_vector<int32_t>(
-          latent_indexes_recon.select(0, (long)i).reshape(-1));
-
-      std::vector<int32_t> latent_decoded = range_decoder.decode_with_indexes(
-          comp_result.encoded_latents[lat_start + i], latent_index,
-          gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
-      torch::Tensor latent_tensor =
-          torch::tensor(latent_decoded).reshape({64, 16, 16});
-      decoded_latents_before_offset.select(0, (long)i).copy_(latent_tensor);
-    }
+        torch::empty({(long)cur_latents, 64, 16, 16}, cpu_float_opts);
+    const int32_t *index_data = latent_indexes_recon.data_ptr<int32_t>();
+    float *latent_data = decoded_latents_before_offset.data_ptr<float>();
+    decode_parallel(
+        decode_pool, (int64_t)cur_latents, [&](int64_t begin, int64_t end) {
+          RansDecoder decoder;
+          std::vector<int32_t> latent_index(latent_elements);
+          for (int64_t i = begin; i < end; ++i) {
+            std::copy_n(index_data + i * latent_elements, latent_elements,
+                        latent_index.begin());
+            auto decoded = decoder.decode_with_indexes(
+                comp_result.encoded_latents[lat_start + i], latent_index,
+                gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
+            std::copy(decoded.begin(), decoded.end(),
+                      latent_data + i * latent_elements);
+          }
+        });
 
     torch::Tensor q_latent_with_offset =
-        decoded_latents_before_offset.to(torch::kFloat32).to(device_) + mean;
+        decoded_latents_before_offset.to(device_) + mean;
 
     auto decoded_latents_sizes = q_latent_with_offset.sizes();
     std::vector<int64_t> new_shape = {-1, 2};
@@ -213,15 +226,14 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
     torch::Tensor denorm_output =
         norm_output * batched_scales + batched_offsets;
 
-    torch::Tensor indexes_cpu =
-        indexes_tensor.narrow(0, (long)sample_start, (long)cur_samples)
-            .to(torch::kCPU);
+    // Use host placement metadata directly; the reconstructed data stays on
+    // device.
     for (int64_t i = 0; i < (int64_t)cur_samples; ++i) {
-      torch::Tensor index_row = indexes_cpu.select(0, i);
-      int64_t idx0 = index_row[0].item<int64_t>();
-      int64_t idx1 = index_row[1].item<int64_t>();
-      int64_t start_t = index_row[2].item<int64_t>();
-      int64_t end_t = index_row[3].item<int64_t>();
+      const auto &index_row = meta.indexes.at(sample_start + i);
+      int64_t idx0 = index_row.at(0);
+      int64_t idx1 = index_row.at(1);
+      int64_t start_t = index_row.at(2);
+      int64_t end_t = index_row.at(3);
 
       torch::Tensor source_slice_3d = denorm_output.select(0, i).squeeze(0);
       torch::Tensor dest_slice =
@@ -235,7 +247,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
   offsets_tensor = torch::Tensor();
   scales_tensor = torch::Tensor();
-  indexes_tensor = torch::Tensor();
   if (!meta.filtered_blocks.empty()) {
     const int64_t S = static_cast<int64_t>(meta.data_input_shape[1]);
     const int64_t T = static_cast<int64_t>(meta.data_input_shape[2]);
