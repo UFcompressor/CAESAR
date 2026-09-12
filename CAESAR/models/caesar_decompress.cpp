@@ -1,4 +1,5 @@
 #include "caesar_decompress.h"
+#include "range_coder/rans_cuda.h"
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <c10/core/thread_pool.h>
@@ -132,6 +133,18 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   //   row_tensors.clear();
   //   row_tensors.shrink_to_fit();
 
+  const bool gpu_rans = caesar::rans_cuda::enabled(device_);
+  std::cout << "[rANS] decompression: " << (gpu_rans ? "CUDA" : "CPU") << "\n";
+  std::unique_ptr<caesar::rans_cuda::Codec> hyper_codec, latent_codec;
+  torch::Tensor hyper_indexes_gpu;
+  if (gpu_rans) {
+    hyper_codec = std::make_unique<caesar::rans_cuda::Codec>(
+        vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_, device_);
+    latent_codec = std::make_unique<caesar::rans_cuda::Codec>(
+        gs_quantized_cdf_, gs_cdf_length_, gs_offset_, device_);
+    hyper_indexes_gpu = build_indexes_tensor({1, 64, 4, 4}).to(device_);
+  }
+
   // All hyper streams use the same channel indexes. Build them once.
   const std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(
       build_indexes_tensor({1, 64, 4, 4}).contiguous().reshape(-1));
@@ -154,52 +167,75 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
 
     // Workers touch only CPU data and disjoint output rows. Decode straight
     // into float staging storage, avoiding a temporary tensor per stream.
-    torch::Tensor decoded_hyper_latents =
-        torch::empty({(long)cur_latents, 64, 4, 4}, cpu_float_opts);
-    float *hyper_data = decoded_hyper_latents.data_ptr<float>();
-    decode_parallel(decode_pool, (int64_t)cur_latents,
-                    [&](int64_t begin, int64_t end) {
-                      RansDecoder decoder;
-                      for (int64_t i = begin; i < end; ++i) {
-                        auto decoded = decoder.decode_with_indexes(
-                            comp_result.encoded_hyper_latents[lat_start + i],
-                            hyper_index_vec, vbr_quantized_cdf_,
-                            vbr_cdf_length_, vbr_offset_);
-                        std::copy(decoded.begin(), decoded.end(),
-                                  hyper_data + i * 64 * 4 * 4);
-                      }
-                    });
+    torch::Tensor decoded_hyper_latents;
+    if (gpu_rans) {
+      decoded_hyper_latents =
+          hyper_codec
+              ->decode(
+                  comp_result.encoded_hyper_latents, lat_start,
+                  hyper_indexes_gpu.expand({(int64_t)cur_latents, 64, 4, 4}))
+              .to(torch::kFloat32);
+    } else {
+      decoded_hyper_latents =
+          torch::empty({(long)cur_latents, 64, 4, 4}, cpu_float_opts);
+      float *hyper_data = decoded_hyper_latents.data_ptr<float>();
+      decode_parallel(decode_pool, (int64_t)cur_latents,
+                      [&](int64_t begin, int64_t end) {
+                        RansDecoder decoder;
+                        for (int64_t i = begin; i < end; ++i) {
+                          auto decoded = decoder.decode_with_indexes(
+                              comp_result.encoded_hyper_latents[lat_start + i],
+                              hyper_index_vec, vbr_quantized_cdf_,
+                              vbr_cdf_length_, vbr_offset_);
+                          std::copy(decoded.begin(), decoded.end(),
+                                    hyper_data + i * 64 * 4 * 4);
+                        }
+                      });
+    }
 
     std::vector<torch::Tensor> hyper_outputs =
         hyper_decompressor_model_->run({decoded_hyper_latents.to(device_)});
     torch::Tensor mean = hyper_outputs[0].to(torch::kFloat32);
-    // The CPU entropy decoder needs every index in this batch. Transfer once,
-    // rather than synchronizing a device-to-host copy for each latent sample.
+    // CUDA entropy decoding consumes the model indexes on device.
+    // The CPU path transfers the whole batch once.
     torch::Tensor latent_indexes_recon =
-        hyper_outputs[1].to(torch::kInt32).to(torch::kCPU).contiguous();
+        hyper_outputs[1]
+            .to(torch::kInt32)
+            .to(gpu_rans ? device_ : torch::Device(torch::kCPU))
+            .contiguous();
 
     constexpr int64_t latent_elements = 64 * 16 * 16;
     TORCH_CHECK(latent_indexes_recon.numel() ==
                     (int64_t)cur_latents * latent_elements,
                 "Unexpected latent index shape");
-    torch::Tensor decoded_latents_before_offset =
-        torch::empty({(long)cur_latents, 64, 16, 16}, cpu_float_opts);
-    const int32_t *index_data = latent_indexes_recon.data_ptr<int32_t>();
-    float *latent_data = decoded_latents_before_offset.data_ptr<float>();
-    decode_parallel(
-        decode_pool, (int64_t)cur_latents, [&](int64_t begin, int64_t end) {
-          RansDecoder decoder;
-          std::vector<int32_t> latent_index(latent_elements);
-          for (int64_t i = begin; i < end; ++i) {
-            std::copy_n(index_data + i * latent_elements, latent_elements,
-                        latent_index.begin());
-            auto decoded = decoder.decode_with_indexes(
-                comp_result.encoded_latents[lat_start + i], latent_index,
-                gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
-            std::copy(decoded.begin(), decoded.end(),
-                      latent_data + i * latent_elements);
-          }
-        });
+    torch::Tensor decoded_latents_before_offset;
+    if (gpu_rans) {
+      decoded_latents_before_offset =
+          latent_codec
+              ->decode(comp_result.encoded_latents, lat_start,
+                       latent_indexes_recon.reshape(
+                           {(int64_t)cur_latents, 64, 16, 16}))
+              .to(torch::kFloat32);
+    } else {
+      decoded_latents_before_offset =
+          torch::empty({(long)cur_latents, 64, 16, 16}, cpu_float_opts);
+      const int32_t *index_data = latent_indexes_recon.data_ptr<int32_t>();
+      float *latent_data = decoded_latents_before_offset.data_ptr<float>();
+      decode_parallel(
+          decode_pool, (int64_t)cur_latents, [&](int64_t begin, int64_t end) {
+            RansDecoder decoder;
+            std::vector<int32_t> latent_index(latent_elements);
+            for (int64_t i = begin; i < end; ++i) {
+              std::copy_n(index_data + i * latent_elements, latent_elements,
+                          latent_index.begin());
+              auto decoded = decoder.decode_with_indexes(
+                  comp_result.encoded_latents[lat_start + i], latent_index,
+                  gs_quantized_cdf_, gs_cdf_length_, gs_offset_);
+              std::copy(decoded.begin(), decoded.end(),
+                        latent_data + i * latent_elements);
+            }
+          });
+    }
 
     torch::Tensor q_latent_with_offset =
         decoded_latents_before_offset.to(device_) + mean;
