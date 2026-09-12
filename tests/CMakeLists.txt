@@ -126,7 +126,7 @@ endforeach()
 # Arithmetic tests run without CUDA or model files.
 add_executable(test_rans_kernels test_rans_kernels.cpp
     ../CAESAR/models/range_coder/rans_coder.cpp)
-if(CAESAR_ENABLE_CUDA_RANS)
+if(CAESAR_HAS_CUDA_RANS)
     add_executable(test_rans_cuda test_rans_cuda.cpp)
     target_link_libraries(test_rans_cuda PRIVATE caesar "${TORCH_LIBRARIES}" CUDA::cudart)
 endif()

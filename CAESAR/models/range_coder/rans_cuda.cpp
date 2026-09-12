@@ -1,9 +1,6 @@
 #include "rans_cuda.h"
-#include "rans_coder.hpp"
 #include "rans_cuda_kernels.h"
-#include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <iterator>
 #include <limits>
 #ifdef CAESAR_CUDA_RANS
@@ -14,13 +11,6 @@
 
 namespace caesar::rans_cuda {
 namespace {
-std::string mode() {
-  const char *value = std::getenv("CAESAR_RANS");
-  std::string result = value ? value : "cpu";
-  TORCH_CHECK(result == "cpu" || result == "cuda" || result == "verify",
-              "CAESAR_RANS must be cpu, cuda, or verify");
-  return result;
-}
 #ifdef CAESAR_CUDA_RANS
 void check_errors(const torch::Tensor &errors) {
   auto host = errors.cpu(); // also completes the current-stream kernel
@@ -42,25 +32,19 @@ void check_shape(const torch::Tensor &t, torch::Device device) {
 }
 #endif
 } // namespace
-bool verification_enabled() { return mode() == "verify"; }
 bool enabled(const torch::Device &device) {
-  if (mode() == "cpu")
-    return false;
-#ifdef CAESAR_CUDA_RANS
-  TORCH_CHECK(device.is_cuda(), "CAESAR_RANS=", mode(),
-              " requires CUDA models/device");
-  return true;
+#if defined(CAESAR_CUDA_RANS) && defined(USE_CUDA) && !defined(USE_ROCM)
+  return device.is_cuda();
 #else
-  TORCH_CHECK(
-      false,
-      "CUDA rANS was not built. Configure with -DCAESAR_ENABLE_CUDA_RANS=ON");
+  (void)device;
+  return false;
 #endif
 }
 
 Codec::Codec(const std::vector<std::vector<int32_t>> &cdfs,
              const std::vector<int32_t> &lengths,
              const std::vector<int32_t> &offsets, torch::Device device)
-    : device_(device), cdfs_(cdfs), lengths_(lengths), offsets_(offsets) {
+    : device_(device), row_count_(static_cast<int>(cdfs.size())) {
 #ifdef CAESAR_CUDA_RANS
   TORCH_CHECK(device.is_cuda(), "CUDA rANS requires CUDA device");
   c10::cuda::CUDAGuard guard(device);
@@ -118,7 +102,7 @@ std::vector<std::string> Codec::encode(const torch::Tensor &symbols,
   auto errors = torch::empty({n}, syms.options());
   launch_encode(syms.data_ptr<int32_t>(), idx.data_ptr<int32_t>(),
                 cdf_gpu_.data_ptr<int32_t>(), rows_gpu_.data_ptr<int32_t>(),
-                offsets_gpu_.data_ptr<int32_t>(), int(cdfs_.size()),
+                offsets_gpu_.data_ptr<int32_t>(), row_count_,
                 reinterpret_cast<uint32_t *>(words.data_ptr<int32_t>()),
                 lengths.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), n,
                 size, capacity,
@@ -134,23 +118,6 @@ std::vector<std::string> Codec::encode(const torch::Tensor &symbols,
     result[i].assign(reinterpret_cast<const char *>(
                          data + int64_t(i) * capacity + capacity - lens[i]),
                      size_t(lens[i]) * 4);
-  }
-  if (verification_enabled()) {
-    auto hs = syms.cpu(), hi = idx.cpu();
-    const auto *sp = hs.data_ptr<int32_t>();
-    const auto *ip = hi.data_ptr<int32_t>();
-    for (int i = 0; i < n; ++i) {
-      RansEncoder cpu;
-      int64_t start = int64_t(i) * size;
-      TORCH_CHECK(result[i] ==
-                      cpu.encode_with_indexes(
-                          std::vector<int32_t>(sp + start, sp + start + size),
-                          std::vector<int32_t>(ip + start, ip + start + size),
-                          cdfs_, lengths_, offsets_),
-                  "CUDA rANS encoded bytes differ from CPU at stream ", i);
-    }
-    std::cout << "[rANS verify] encode: " << n
-              << " streams match CPU byte-for-byte\n";
   }
   return result;
 #else
@@ -187,28 +154,11 @@ torch::Tensor Codec::decode(const std::vector<std::string> &strings,
   launch_decode(reinterpret_cast<const uint32_t *>(words.data_ptr<int32_t>()),
                 pos.data_ptr<int64_t>(), idx.data_ptr<int32_t>(),
                 cdf_gpu_.data_ptr<int32_t>(), rows_gpu_.data_ptr<int32_t>(),
-                offsets_gpu_.data_ptr<int32_t>(), int(cdfs_.size()),
+                offsets_gpu_.data_ptr<int32_t>(), row_count_,
                 result.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), n, size,
                 c10::cuda::getCurrentCUDAStream(device_.index()).stream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   check_errors(errors);
-  if (verification_enabled()) {
-    auto hi = idx.cpu(), decoded = result.cpu();
-    const auto *ip = hi.data_ptr<int32_t>();
-    const auto *dp = decoded.data_ptr<int32_t>();
-    for (int i = 0; i < n; ++i) {
-      RansDecoder cpu;
-      int64_t start = int64_t(i) * size;
-      auto expected = cpu.decode_with_indexes(
-          strings[begin + i],
-          std::vector<int32_t>(ip + start, ip + start + size), cdfs_, lengths_,
-          offsets_);
-      TORCH_CHECK(std::equal(expected.begin(), expected.end(), dp + start),
-                  "CUDA rANS decoded symbols differ from CPU at stream ", i);
-    }
-    std::cout << "[rANS verify] decode: " << n
-              << " streams match CPU exactly\n";
-  }
   return result;
 #else
   TORCH_CHECK(false, "CUDA rANS unavailable in this build");

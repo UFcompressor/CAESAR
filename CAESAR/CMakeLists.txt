@@ -27,7 +27,7 @@ else()
     add_library(zstd_target ALIAS PkgConfig::ZSTD)
 endif()
 
-if(TORCH_CUDA_ARCH_LIST OR CUDA_FOUND OR HIP_FOUND)
+if(CAESAR_HAS_CUDA_RANS OR TORCH_CUDA_ARCH_LIST OR CUDA_FOUND OR HIP_FOUND)
     set(USE_CUDA ON)
     message(STATUS "GPU Support Enabled (Torch/CUDA/HIP detected)")
 
@@ -68,11 +68,7 @@ set(CAESAR_SRC
     data_utils.cpp
 )
 
-# Opt-in until the real-data CUDA path has been verified on HiPerGator.
-if(CAESAR_ENABLE_CUDA_RANS)
-    if(HIP_FOUND OR NOT TARGET torch_cuda)
-        message(FATAL_ERROR "CUDA rANS requires NVIDIA CUDA LibTorch (torch_cuda target)")
-    endif()
+if(CAESAR_HAS_CUDA_RANS)
     # Separate target avoids passing C++-only flags/PCH to nvcc.
     add_library(caesar_rans_kernels OBJECT models/range_coder/rans_cuda_kernels.cu)
     set_target_properties(caesar_rans_kernels PROPERTIES
@@ -80,7 +76,7 @@ if(CAESAR_ENABLE_CUDA_RANS)
 endif()
 
 add_library(caesar_objs OBJECT ${CAESAR_SRC})
-if(CAESAR_ENABLE_CUDA_RANS)
+if(CAESAR_HAS_CUDA_RANS)
     target_compile_definitions(caesar_objs PRIVATE CAESAR_CUDA_RANS)
     target_link_libraries(caesar_objs PUBLIC CUDA::cudart)
 endif()
@@ -164,7 +160,7 @@ set_target_properties(caesar PROPERTIES
 add_executable(caesar_cli $<TARGET_OBJECTS:caesar_objs>)
 target_link_libraries(caesar_cli PRIVATE caesar_objs torch)
 
-if(CAESAR_ENABLE_CUDA_RANS)
+if(CAESAR_HAS_CUDA_RANS)
     target_sources(caesar PRIVATE $<TARGET_OBJECTS:caesar_rans_kernels>)
     target_sources(caesar_cli PRIVATE $<TARGET_OBJECTS:caesar_rans_kernels>)
     target_link_libraries(caesar PUBLIC CUDA::cudart)

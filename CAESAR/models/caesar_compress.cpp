@@ -418,16 +418,19 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     all_hyper_indexes.clear();
 
     if (caesar::rans_cuda::enabled(device_)) {
-      std::cout << "[rANS] compression: CUDA"
-                << (caesar::rans_cuda::verification_enabled() ? " (CPU verification)" : "") << "\n";
-      caesar::rans_cuda::Codec latent_codec(gs_quantized_cdf_,gs_cdf_length_,gs_offset_,device_);
-      caesar::rans_cuda::Codec hyper_codec(vbr_quantized_cdf_,vbr_cdf_length_,vbr_offset_,device_);
+      std::cout << "[rANS] compression: CUDA\n";
+      caesar::rans_cuda::Codec latent_codec(gs_quantized_cdf_, gs_cdf_length_,
+                                            gs_offset_, device_);
+      caesar::rans_cuda::Codec hyper_codec(vbr_quantized_cdf_, vbr_cdf_length_,
+                                           vbr_offset_, device_);
       result.encoded_latents = latent_codec.encode(
-          cat_q_latent.to(torch::kInt32).reshape({total_latent_codes,-1}),
-          cat_latent_indexes.to(torch::kInt32).reshape({total_latent_codes,-1}));
+          cat_q_latent.to(torch::kInt32).reshape({total_latent_codes, -1}),
+          cat_latent_indexes.to(torch::kInt32)
+              .reshape({total_latent_codes, -1}));
       result.encoded_hyper_latents = hyper_codec.encode(
-          cat_q_hyper.to(torch::kInt32).reshape({total_latent_codes,-1}),
-          cat_hyper_indexes.to(torch::kInt32).reshape({total_latent_codes,-1}));
+          cat_q_hyper.to(torch::kInt32).reshape({total_latent_codes, -1}),
+          cat_hyper_indexes.to(torch::kInt32)
+              .reshape({total_latent_codes, -1}));
     } else {
       std::cout << "[rANS] compression: CPU\n";
       torch::Tensor cpu_q_latent = cat_q_latent.to(torch::kCPU, true);
@@ -465,8 +468,8 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         threads.emplace_back([&, start, end]() {
           RansEncoder enc;
           for (int64_t j = start; j < end; ++j) {
-            auto latent_syms =
-                tensor_to_vector<int32_t>(cpu_q_latent.select(0, j).reshape(-1));
+            auto latent_syms = tensor_to_vector<int32_t>(
+                cpu_q_latent.select(0, j).reshape(-1));
             auto latent_idxs = tensor_to_vector<int32_t>(
                 cpu_latent_indexes.select(0, j).reshape(-1));
             auto hyper_syms =

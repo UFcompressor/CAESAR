@@ -4,9 +4,8 @@
 #include <vector>
 
 namespace caesar::rans_cuda {
-// CAESAR_RANS=cpu (default), cuda, or verify (GPU + exact CPU comparisons).
+// Use CUDA entropy coding for NVIDIA CUDA tensors; CPU/ROCm use CPU rANS.
 bool enabled(const torch::Device &device);
-bool verification_enabled();
 
 class Codec {
 public:
@@ -21,8 +20,7 @@ public:
 
 private:
   torch::Device device_;
-  std::vector<std::vector<int32_t>> cdfs_;
-  std::vector<int32_t> lengths_, offsets_;
+  int row_count_;
   torch::Tensor cdf_gpu_, rows_gpu_, offsets_gpu_;
 };
 } // namespace caesar::rans_cuda
