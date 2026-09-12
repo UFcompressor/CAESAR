@@ -1,9 +1,12 @@
 #include "caesar_decompress.h"
-#include "range_coder/rans_cuda.h"
+
 #include <ATen/Parallel.h>
-#include <algorithm>
 #include <c10/core/thread_pool.h>
+
+#include <algorithm>
 #include <future>
+
+#include "range_coder/rans_cuda.h"
 
 namespace {
 // Join every task before returning or propagating an error, so output buffers
@@ -134,7 +137,6 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   //   row_tensors.shrink_to_fit();
 
   const bool gpu_rans = caesar::rans_cuda::enabled(device_);
-  std::cout << "[rANS] decompression: " << (gpu_rans ? "CUDA" : "CPU") << "\n";
   std::unique_ptr<caesar::rans_cuda::Codec> hyper_codec, latent_codec;
   torch::Tensor hyper_indexes_gpu;
   if (gpu_rans) {

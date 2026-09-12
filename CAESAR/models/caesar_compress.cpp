@@ -1,4 +1,5 @@
 #include "caesar_compress.h"
+
 #include "range_coder/rans_cuda.h"
 
 template <typename T>
@@ -418,7 +419,6 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
     all_hyper_indexes.clear();
 
     if (caesar::rans_cuda::enabled(device_)) {
-      std::cout << "[rANS] compression: CUDA\n";
       caesar::rans_cuda::Codec latent_codec(gs_quantized_cdf_, gs_cdf_length_,
                                             gs_offset_, device_);
       caesar::rans_cuda::Codec hyper_codec(vbr_quantized_cdf_, vbr_cdf_length_,
@@ -432,7 +432,6 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
           cat_hyper_indexes.to(torch::kInt32)
               .reshape({total_latent_codes, -1}));
     } else {
-      std::cout << "[rANS] compression: CPU\n";
       torch::Tensor cpu_q_latent = cat_q_latent.to(torch::kCPU, true);
       cpu_latent_indexes = cat_latent_indexes.to(torch::kCPU, true);
       torch::Tensor cpu_q_hyper = cat_q_hyper.to(torch::kCPU, true);
