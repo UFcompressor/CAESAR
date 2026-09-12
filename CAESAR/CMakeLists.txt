@@ -58,6 +58,7 @@ set(CAESAR_SRC
     CAESAR.cpp
     dataset/dataset.cpp
     models/range_coder/rans_coder.cpp
+    models/range_coder/rans_cuda.cpp
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
     models/model_utils.cpp
@@ -67,7 +68,22 @@ set(CAESAR_SRC
     data_utils.cpp
 )
 
+# Opt-in until the real-data CUDA path has been verified on HiPerGator.
+if(CAESAR_ENABLE_CUDA_RANS)
+    if(HIP_FOUND OR NOT TARGET torch_cuda)
+        message(FATAL_ERROR "CUDA rANS requires NVIDIA CUDA LibTorch (torch_cuda target)")
+    endif()
+    # Separate target avoids passing C++-only flags/PCH to nvcc.
+    add_library(caesar_rans_kernels OBJECT models/range_coder/rans_cuda_kernels.cu)
+    set_target_properties(caesar_rans_kernels PROPERTIES
+        POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+endif()
+
 add_library(caesar_objs OBJECT ${CAESAR_SRC})
+if(CAESAR_ENABLE_CUDA_RANS)
+    target_compile_definitions(caesar_objs PRIVATE CAESAR_CUDA_RANS)
+    target_link_libraries(caesar_objs PUBLIC CUDA::cudart)
+endif()
 target_precompile_headers(caesar_objs PRIVATE <torch/torch.h>)
 set_target_properties(caesar_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -147,6 +163,12 @@ set_target_properties(caesar PROPERTIES
 
 add_executable(caesar_cli $<TARGET_OBJECTS:caesar_objs>)
 target_link_libraries(caesar_cli PRIVATE caesar_objs torch)
+
+if(CAESAR_ENABLE_CUDA_RANS)
+    target_sources(caesar PRIVATE $<TARGET_OBJECTS:caesar_rans_kernels>)
+    target_sources(caesar_cli PRIVATE $<TARGET_OBJECTS:caesar_rans_kernels>)
+    target_link_libraries(caesar PUBLIC CUDA::cudart)
+endif()
 
 target_link_libraries(caesar PUBLIC zstd_target torch)
 target_include_directories(caesar

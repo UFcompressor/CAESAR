@@ -122,3 +122,11 @@ foreach(t IN ITEMS test_caesarCD test_caesarC test_caesarD test_padding test_LBR
 
     target_precompile_headers(${t} REUSE_FROM caesar_objs)
 endforeach()
+
+# Arithmetic tests run without CUDA or model files.
+add_executable(test_rans_kernels test_rans_kernels.cpp
+    ../CAESAR/models/range_coder/rans_coder.cpp)
+if(CAESAR_ENABLE_CUDA_RANS)
+    add_executable(test_rans_cuda test_rans_cuda.cpp)
+    target_link_libraries(test_rans_cuda PRIVATE caesar "${TORCH_LIBRARIES}" CUDA::cudart)
+endif()

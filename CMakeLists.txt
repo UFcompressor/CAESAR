@@ -26,6 +26,15 @@ endif()
 
 find_package(Torch REQUIRED)
 
+option(CAESAR_ENABLE_CUDA_RANS "Build NVIDIA CUDA rANS encoder/decoder" OFF)
+if(CAESAR_ENABLE_CUDA_RANS)
+    if(NOT TARGET torch_cuda)
+        message(FATAL_ERROR "CUDA rANS requires NVIDIA CUDA LibTorch (torch_cuda target)")
+    endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+endif()
+
 add_subdirectory(CAESAR)
 
 option(BUILD_TESTS "Build CAESAR test files" OFF)
