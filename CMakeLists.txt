@@ -26,6 +26,15 @@ endif()
 
 find_package(Torch REQUIRED)
 
+# NVIDIA CUDA LibTorch automatically uses CUDA entropy coding. ROCm keeps
+# the CPU entropy coder even though Torch exposes its device as "cuda".
+set(CAESAR_HAS_CUDA_RANS OFF)
+if(TARGET torch_cuda AND NOT TARGET torch_hip AND NOT HIP_FOUND AND NOT USE_ROCM)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    set(CAESAR_HAS_CUDA_RANS ON)
+endif()
+
 add_subdirectory(CAESAR)
 
 option(BUILD_TESTS "Build CAESAR test files" OFF)
