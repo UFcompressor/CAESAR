@@ -107,7 +107,8 @@ std::string BufferedRansEncoder::flush() {
   Rans64State rans;
   Rans64EncInit(&rans);
 
-  std::vector<uint32_t> output(_syms.size(), 0xCC);
+  // Flush always writes two state words, even for empty/tiny streams.
+  std::vector<uint32_t> output(_syms.size() + 2, 0xCC);
   uint32_t *ptr = output.data() + output.size();
 
   while (!_syms.empty()) {
