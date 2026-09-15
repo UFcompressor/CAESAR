@@ -435,7 +435,6 @@ void print_usage(const char *program_name) {
   std::cout << "  -e, --error-bound <val>  Error bound (default: 0.001)\n";
   std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
-  std::cout << "  --force-padding          Force padding\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n\n";
   std::cout << "Decompression Options:\n";
   std::cout << "  --decompress-device <dev> Device (cpu/cuda)\n";
@@ -586,7 +585,7 @@ int compress_file(const std::string &input_file, const std::string &output_file,
                   int batch_size, int n_frame, const std::string &model_type,
                   torch::Device compress_device, bool show_timing,
                   bool show_metadata, bool verbose, bool quiet,
-                  bool force_padding, const std::string &metrics_csv) {
+                  const std::string &metrics_csv) {
   if (!quiet) {
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
@@ -605,24 +604,16 @@ int compress_file(const std::string &input_file, const std::string &output_file,
     std::cout << "After squeeze, shape: " << raw.sizes() << "\n";
   }
 
-  torch::Tensor raw_5d;
   PaddingInfo padding_info;
-
-  if (shape.size() >= 5 && shape[3] >= 128 && shape[4] >= 128) {
-    std::tie(raw_5d, padding_info) =
-        to_5d_and_pad(raw, shape[3], shape[4], force_padding);
-  } else if (shape.size() == 4 || shape.size() == 3) {
-    std::tie(raw_5d, padding_info) =
-        to_5d_and_pad(raw, 128, 128, force_padding);
-  } else {
-    std::tie(raw_5d, padding_info) =
-        to_5d_and_pad(raw, 256, 256, force_padding);
-  }
+  torch::Tensor padded_5d;
+  std::tie(padded_5d, padding_info) = to_5d(raw);
+  padded_5d = padded_5d.contiguous();
+  raw = torch::Tensor();
 
   Compressor compressor(compress_device);
 
   DatasetConfig config;
-  config.memory_data = raw_5d;
+  config.memory_data = padded_5d;
   config.variable_idx = 0;
   config.n_frame = n_frame;
   config.dataset_name = "CAESAR Compression Dataset";
@@ -840,7 +831,6 @@ int main(int argc, char *argv[]) {
     bool verbose = false;
     bool quiet = false;
     bool verify = false;
-    bool force_padding = false;
     std::string metrics_csv;
     std::string original_file;
 
@@ -871,8 +861,6 @@ int main(int argc, char *argv[]) {
         quiet = true;
       } else if (arg == "--verify") {
         verify = true;
-      } else if (arg == "--force-padding") {
-        force_padding = true;
       } else if (arg == "--metrics-csv" && i + 1 < argc) {
         metrics_csv = argv[++i];
       } else if (arg == "--original" && i + 1 < argc) {
@@ -898,7 +886,7 @@ int main(int argc, char *argv[]) {
       return compress_file(input_file, output_file, shape, error_bound,
                            batch_size, n_frame, model_type, compress_device,
                            show_timing, show_metadata, verbose, quiet,
-                           force_padding, metrics_csv);
+                           metrics_csv);
 
     } else if (command == "decompress") {
       torch::Device decompress_device =
