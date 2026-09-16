@@ -320,7 +320,7 @@ jobs:
 
       - name: Download pretrained models
         run: |
-          conda run -n compress_env python model_registry.py caesar_v2
+          conda run -n compress_env python model_registry.py caesar_v2 --output "$env:GITHUB_WORKSPACE\pretrained"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify torch install
@@ -339,7 +339,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           conda run -n compress_env python tests/check_registered_checkpoints.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmd /c "`"$vcvars`" && `"$python`" compile_model.py cpu"
+          $selection = Join-Path $env:GITHUB_WORKSPACE "pretrained\selected_model.json"
+          Write-Host "Selected model metadata:"
+          Get-Content $selection
+          cmd /c "`"$vcvars`" && `"$python`" compile_model.py cpu --selection `"$selection`" --output `"$env:GITHUB_WORKSPACE\exported_model`""
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify exported models
