@@ -2,11 +2,11 @@
 
 The UFL_MODELS repository owns `model_catalog.json`. CAESAR ships a synchronized
 snapshot so a release can download immutable checkpoint URLs and compile offline.
-All four registered checkpoints support 3D–5D inputs. CAESAR v1 (registration 1)
-and CAESAR v2 (registration 2) are foundation models; v2 is the newer optimized
-release and remains the default. eelsM1 (registration 3) is a domain fine-tune
-trained and tested on one EELS dataset. microscopy (registration 4) is a
-domain-specific model trained and tested across four microscopy datasets.
+All four currently registered checkpoints support 3D–5D inputs. CAESAR v1
+(registration 1) and CAESAR v2 (registration 2) are foundation models; v2 is the
+newer optimized release and remains the default. eelsM1 (registration 3) is a
+domain fine-tune trained and tested on one EELS dataset. microscopy (registration
+4) is a domain-specific model trained and tested across four microscopy datasets.
 
 ## Download and compile
 
