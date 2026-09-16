@@ -156,8 +156,16 @@ std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
   return std::vector<T>(ptr, ptr + cpu_tensor.numel());
 }
 
-Compressor::Compressor(torch::Device device) : device_(device) {
-  at::globalContext().setDeterministicAlgorithms(true, false);
+Compressor::Compressor(torch::Device device,
+                       const std::string &required_model_id)
+    : device_(device) {
+  if (!required_model_id.empty())
+    require_model(required_model_id);
+  if (device_.type() != select_model_device().type())
+    throw std::runtime_error(
+        "Runtime device does not match the compiled CAESAR model device: " +
+        get_model_device());
+  initialize_model_runtime();
   load_models();
   load_probability_tables();
 }
@@ -185,6 +193,9 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
         "rel_eb must be greater than single percision epsilon ");
   }
 
+  if (std::this_thread::get_id() != owner_thread_)
+    throw std::runtime_error("Create a separate CAESAR compressor/decompressor "
+                             "in each calling thread");
   c10::InferenceMode guard;
 
   ScientificDataset dataset(config, device_);

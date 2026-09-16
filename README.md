@@ -145,12 +145,16 @@ del temp_requirements.txt
 ### 4. Download and Prepare Pretrained Models
 
 ```bash
-./download_models.sh
-
-python3 CAESAR_compressor.py cpu
-python3 CAESAR_hyper_decompressor.py cpu
-python3 CAESAR_decompressor.py cpu
+python3 model_registry.py --list
+python3 model_registry.py caesar_v2
+python3 compile_model.py cpu
 ```
+
+CAESAR v1 is the original foundation model (`caesar_v.pt`); CAESAR v2 is
+its newer optimized foundation model (`model_bs64_ep100k.pt`) and the default.
+Checkpoints must be registered in the UFL catalog and match their registered
+SHA-256 before compilation. See [model installation and identity](docs/models.md)
+for offline downloads, registration, devices, caching, and the ADIOS contract.
 
 ### 5. Configure and Build with CMake
 

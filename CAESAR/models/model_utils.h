@@ -1,4 +1,5 @@
 #pragma once
+#include "model_metadata.h"
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -63,6 +64,10 @@ get_time(std::chrono::high_resolution_clock::time_point start);
 
 int get_allocated_cores();
 
+void initialize_model_runtime();
+const ModelMetadata &get_model_metadata();
+std::string get_model_id();
+void require_model(const std::string &required_id);
 std::string get_model_name();
 std::string get_model_device();
 torch::Device select_model_device();

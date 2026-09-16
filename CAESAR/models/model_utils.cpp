@@ -50,8 +50,9 @@ fs::path get_model_file(const std::string &filename) {
     if (fs::exists(model_path)) {
       return normalize_path(model_path);
     }
-    std::cerr << "Warning: CAESAR_MODEL_DIR is set but file not found at: "
-              << model_path << std::endl;
+    throw std::runtime_error(
+        "CAESAR_MODEL_DIR is set but the required file is missing: " +
+        model_path.string());
   }
 
   try {
@@ -153,34 +154,35 @@ int get_allocated_cores() {
   return 4;
 }
 
-static std::string read_model_text_file(const std::string &filename,
-                                        const std::string &fallback = "") {
+void initialize_model_runtime() {
+  // Torch stores this setting in process-global non-atomic state.
+  static const bool initialized = [] {
+    at::globalContext().setDeterministicAlgorithms(true, false);
+    return true;
+  }();
+  (void)initialized;
+}
+
+const ModelMetadata &get_model_metadata() {
+  // C++ static initialization serializes the first metadata read per process.
+  static const ModelMetadata metadata =
+      read_model_metadata(get_model_file("model_metadata.txt"));
+  return metadata;
+}
+
+std::string get_model_id() { return get_model_metadata().id; }
+
+void require_model(const std::string &required_id) {
   try {
-    std::ifstream f(get_model_file(filename));
-    std::string value;
-    std::getline(f, value);
-    value.erase(std::remove_if(value.begin(), value.end(),
-                               [](unsigned char c) { return std::isspace(c); }),
-                value.end());
-    if (!value.empty())
-      return value;
-  } catch (const std::exception &) {
-    if (fallback.empty())
-      throw;
+    get_model_metadata().require(required_id);
+  } catch (const std::exception &error) {
+    throw std::runtime_error("Required CAESAR model: " + required_id + ". " +
+                             error.what());
   }
-  return fallback;
 }
 
-std::string get_model_name() {
-  static const std::string name = read_model_text_file("model_name.txt");
-  return name;
-}
-
-std::string get_model_device() {
-  static const std::string device =
-      read_model_text_file("model_device.txt", "cpu");
-  return device;
-}
+std::string get_model_name() { return get_model_metadata().name; }
+std::string get_model_device() { return get_model_metadata().device; }
 
 torch::Device select_model_device() {
   const std::string model_device = get_model_device();
