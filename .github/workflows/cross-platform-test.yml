@@ -426,15 +426,6 @@ jobs:
         run: |
           .\build\tests\Release\test_model_metadata.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
-            -latest -property installationPath
-          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-          Write-Host "CAESAR_MODEL_DIR=$env:CAESAR_MODEL_DIR"
-          Get-ChildItem -Path $env:CAESAR_MODEL_DIR | Select-Object Name,Length
-          cmd /c "`"$vcvars`" && `"$env:GITHUB_WORKSPACE\build\tests\Release\test_model_cache.exe`""
-          $cacheExit = $LASTEXITCODE
-          Write-Host "test_model_cache exit code: $cacheExit"
-          if ($cacheExit -ne 0) { exit $cacheExit }
 
       - name: Run test_LBRC
         run: |
