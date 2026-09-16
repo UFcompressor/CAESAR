@@ -3,7 +3,7 @@
 #include <future>
 #include <iostream>
 
-int main(int argc, char **argv) {
+static int run_model_cache_tests(int argc, char **argv) {
   if (argc == 2 && std::string(argv[1]) == "--missing") {
     try {
       require_model("ufl:2@sha256:" + std::string(64, '0'));
@@ -58,4 +58,18 @@ int main(int argc, char **argv) {
   if (cache.get_hyper_decompressor_model() == model)
     throw std::runtime_error("Cache clear did not reload the model");
   std::cout << "Cache reuse, thread isolation, and identity checks passed\n";
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  try {
+    return run_model_cache_tests(argc, argv);
+  } catch (const std::exception &error) {
+    std::cerr << "Model cache test failed: " << error.what() << std::endl;
+    return 1;
+  } catch (...) {
+    std::cerr << "Model cache test failed with an unknown exception"
+              << std::endl;
+    return 1;
+  }
 }
