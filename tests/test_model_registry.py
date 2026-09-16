@@ -101,7 +101,7 @@ class ModelRegistryTests(unittest.TestCase):
 
     def test_altered_registration_metadata_rejected(self):
         altered = copy.deepcopy(self.model)
-        altered["min_dims"] = 3
+        altered["min_dims"] = 4
         registry.download(altered, self.root / "pretrained", self.source)
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             with self.assertRaisesRegex(ValueError, "does not match"):
@@ -148,7 +148,7 @@ class ModelRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not registered"):
             registry.validate_installation(self.root)
         path = self.root / "model_metadata.txt"
-        path.write_text(path.read_text().replace("min_dims=2", "min_dims=3"))
+        path.write_text(path.read_text().replace("min_dims=3", "min_dims=4"))
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             with self.assertRaisesRegex(ValueError, "does not match"):
                 registry.validate_installation(self.root)

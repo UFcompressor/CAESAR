@@ -2,9 +2,11 @@
 
 The UFL_MODELS repository owns `model_catalog.json`. CAESAR ships a synchronized
 snapshot so a release can download immutable checkpoint URLs and compile offline.
-The four registered checkpoints are CAESAR v1 (registration 1, original foundation
-model), CAESAR v2 (registration 2, newer optimized foundation model), eelsM1 (3),
-and microscopy (4). CAESAR v2 remains the default.
+All four registered checkpoints support 3D–5D inputs. CAESAR v1 (registration 1)
+and CAESAR v2 (registration 2) are foundation models; v2 is the newer optimized
+release and remains the default. eelsM1 (registration 3) is a domain fine-tune
+trained and tested on one EELS dataset. microscopy (registration 4) is a
+domain-specific model trained and tested across four microscopy datasets.
 
 ## Download and compile
 
@@ -103,7 +105,7 @@ identity; their compatibility policy belongs to that later integration.
 ## Input preparation
 
 Padding and conversion to the model's 5D input are internal CAESAR responsibilities.
-The 2D–5D catalog range describes user input ranks handled through CAESAR's internal
+The 3D–5D catalog range describes user input ranks handled through CAESAR's internal
 preparation; it is not an assertion that the exported network accepts arbitrary
 shapes directly. Deferred removal of `PaddingInfo.H/W/was_padded` belongs to the
 serialization cleanup, not model installation.
