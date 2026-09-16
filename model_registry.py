@@ -151,7 +151,15 @@ def read_selection(path):
     # A selection file is not a registration: independently consult our catalog.
     registered = select_model(load_catalog(), model["id"])
     if model != registered:
-        raise ValueError("Selection does not match its registered UFL catalog entry")
+        differences = {
+            key: (repr(model.get(key)), repr(registered.get(key)))
+            for key in sorted(set(model) | set(registered))
+            if model.get(key) != registered.get(key)
+        }
+        raise ValueError(
+            "Selection does not match its registered UFL catalog entry: "
+            + repr(differences)
+        )
     checkpoint = path.parent / model["filename"]
     verify_checkpoint(checkpoint, model)
     return model, checkpoint
