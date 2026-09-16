@@ -204,7 +204,9 @@ def write_installation(output, model, device):
 def validate_installation(directory):
     directory = Path(directory)
     fields = {}
-    for line in (directory / "model_metadata.txt").read_text(encoding="utf-8").splitlines():
+    for line in (
+        (directory / "model_metadata.txt").read_text(encoding="utf-8").splitlines()
+    ):
         key, separator, value = line.partition("=")
         if not separator or not value or key in fields:
             raise ValueError("Malformed installation metadata")
