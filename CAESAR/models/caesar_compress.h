@@ -1,4 +1,5 @@
 #pragma once
+#include <thread>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
 #include <fstream>
@@ -62,18 +63,21 @@ struct CompressionResult {
 
 class Compressor {
 public:
-  explicit Compressor(torch::Device device = torch::Device(torch::kCPU));
+  explicit Compressor(torch::Device device = torch::Device(torch::kCPU),
+                      const std::string &required_model_id = "");
   ~Compressor() = default;
 
   CompressionResult compress(const DatasetConfig &config, int batch_size = 32,
                              float rel_eb = 0.1);
 
 private:
+  const std::thread::id owner_thread_ = std::this_thread::get_id();
   torch::Device device_;
 
-  torch::inductor::AOTIModelPackageLoader *compressor_model_;
-  torch::inductor::AOTIModelPackageLoader *hyper_decompressor_model_;
-  torch::inductor::AOTIModelPackageLoader *decompressor_model_;
+  std::shared_ptr<torch::inductor::AOTIModelPackageLoader> compressor_model_;
+  std::shared_ptr<torch::inductor::AOTIModelPackageLoader>
+      hyper_decompressor_model_;
+  std::shared_ptr<torch::inductor::AOTIModelPackageLoader> decompressor_model_;
 
   torch::Tensor reshape_batch_2d_3d(const torch::Tensor &batch_data,
                                     int64_t batch_size);

@@ -28,3 +28,5 @@ venv_cpu
 exported_model
 build_script_atlas.sh
 pretrained
+.caesar-export-*/
+exported_model.lock/
