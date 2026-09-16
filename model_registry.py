@@ -60,7 +60,7 @@ def load_catalog(path=DEFAULT_CATALOG):
         with urlopen(path, timeout=60) as response:
             catalog = json.load(response)
     else:
-        catalog = json.loads(Path(path).read_text())
+        catalog = json.loads(Path(path).read_text(encoding="utf-8"))
     if catalog["schema_version"] != 1:
         raise ValueError("Unsupported model catalog schema")
     names, identities, numbers, hashes = set(), set(), set(), set()
@@ -105,7 +105,7 @@ def atomic_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".metadata-")
     try:
-        with os.fdopen(fd, "w") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(data, stream, indent=2)
             stream.write("\n")
         os.replace(temporary, path)
@@ -144,7 +144,7 @@ def download(model, destination, source_dir=None):
 
 def read_selection(path):
     path = Path(path).resolve()
-    selected = json.loads(path.read_text())
+    selected = json.loads(path.read_text(encoding="utf-8"))
     if selected["schema_version"] != 1:
         raise ValueError("Unsupported selection schema")
     model = validate_model(selected["model"])
@@ -195,14 +195,16 @@ def write_installation(output, model, device):
         device=device,
     )
     (output / "model_metadata.txt").write_text(
-        "".join(f"{key}={value}\n" for key, value in fields.items())
+        "".join(f"{key}={value}\n" for key, value in fields.items()),
+        encoding="utf-8",
+        newline="\n",
     )
 
 
 def validate_installation(directory):
     directory = Path(directory)
     fields = {}
-    for line in (directory / "model_metadata.txt").read_text().splitlines():
+    for line in (directory / "model_metadata.txt").read_text(encoding="utf-8").splitlines():
         key, separator, value = line.partition("=")
         if not separator or not value or key in fields:
             raise ValueError("Malformed installation metadata")
