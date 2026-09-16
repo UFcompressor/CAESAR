@@ -201,12 +201,19 @@ export LD_LIBRARY_PATH=$HOME/local/nvcomp/lib:$LD_LIBRARY_PATH
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
   --index-url https://download.pytorch.org/whl/cu128
 
-cmake .. \
+TORCH_PATH=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+GPU_ARCH=$(python -c 'import torch; a,b=torch.cuda.get_device_capability(); print(f"{a}{b}")')
+
+# Run from the repository root; target the current NVIDIA GPU architecture.
+cmake -S . -B build \
+  -DCMAKE_CUDA_ARCHITECTURES="$GPU_ARCH" \
   -DCMAKE_PREFIX_PATH="$TORCH_PATH;$HOME/local/nvcomp" \
   -DCMAKE_CXX_FLAGS="-I$HOME/local/nvcomp/include" \
   -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/local/nvcomp/lib" \
   -DBUILD_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
+
+cmake --build build -j6
 ```
 
 </details>
