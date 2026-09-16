@@ -185,24 +185,27 @@ std::string get_model_name() { return get_model_metadata().name; }
 std::string get_model_device() { return get_model_metadata().device; }
 
 torch::Device select_model_device() {
-  const std::string model_device = get_model_device();
-  if (model_device == "cpu")
-    return torch::Device(torch::kCPU);
+  static const torch::Device device = [] {
+    const std::string &model_device = get_model_metadata().device;
+    if (model_device == "cpu")
+      return torch::Device(torch::kCPU);
 #ifdef USE_CUDA
-  if ((model_device == "cuda" || model_device == "rocm") &&
-      torch::cuda::is_available())
-    return torch::Device(torch::kCUDA);
+    if ((model_device == "cuda" || model_device == "rocm") &&
+        torch::cuda::is_available())
+      return torch::Device(torch::kCUDA);
 #endif
 #if __has_include(<torch/mps.h>)
-  if (model_device == "mps" && torch::mps::is_available()) {
-    return torch::Device(torch::kMPS);
-  }
+    if (model_device == "mps" && torch::mps::is_available()) {
+      return torch::Device(torch::kMPS);
+    }
 #endif
 #if __has_include(<torch/xpu.h>)
-  if (model_device == "xpu" && torch::xpu::is_available()) {
-    return torch::Device(torch::kXPU);
-  }
+    if (model_device == "xpu" && torch::xpu::is_available()) {
+      return torch::Device(torch::kXPU);
+    }
 #endif
-  throw std::runtime_error("CAESAR model device is not available: " +
-                           model_device);
+    throw std::runtime_error("CAESAR model device is not available: " +
+                             model_device);
+  }();
+  return device;
 }
