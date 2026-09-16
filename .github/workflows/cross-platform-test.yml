@@ -216,11 +216,11 @@ jobs:
       - name: Run model metadata test
         shell: bash
         run: |
-          ./build/tests/test_model_metadata
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            export DYLD_LIBRARY_PATH=$(brew --prefix libomp)/lib:$DYLD_LIBRARY_PATH
+            export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH:-}"
             export OMP_NUM_THREADS=1
           fi
+          ./build/tests/test_model_metadata
           CAESAR_MODEL_DIR="$PWD/exported_model" ./build/tests/test_model_cache
 
       - name: Run test_LBRC
