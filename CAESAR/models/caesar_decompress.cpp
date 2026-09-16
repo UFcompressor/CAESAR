@@ -68,8 +68,16 @@ torch::Tensor build_indexes_tensor(const std::vector<int32_t> &size) {
   return indexes.expand(size_int64).to(torch::kInt32);
 }
 
-Decompressor::Decompressor(torch::Device device) : device_(device) {
-  at::globalContext().setDeterministicAlgorithms(true, false);
+Decompressor::Decompressor(torch::Device device,
+                           const std::string &required_model_id)
+    : device_(device) {
+  if (!required_model_id.empty())
+    require_model(required_model_id);
+  if (device_.type() != select_model_device().type())
+    throw std::runtime_error(
+        "Runtime device does not match the compiled CAESAR model device: " +
+        get_model_device());
+  initialize_model_runtime();
   load_models();
   load_probability_tables();
 }
@@ -104,6 +112,9 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor &batch_data,
 torch::Tensor Decompressor::decompress(const unsigned int batch_size,
                                        const unsigned int n_frame,
                                        const CompressionResult &comp_result) {
+  if (std::this_thread::get_id() != owner_thread_)
+    throw std::runtime_error("Create a separate CAESAR compressor/decompressor "
+                             "in each calling thread");
   c10::InferenceMode guard;
 
   DecompressionResult result;

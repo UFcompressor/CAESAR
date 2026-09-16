@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "default_model": "caesar_v2",
+  "models": [
+    {
+      "name": "caesar_v1",
+      "id": "ufl:1@sha256:4acebeb189ab0f8b99de167326cc32b5390bc9c5025a85d9502641b73a7ad355",
+      "sha256": "4acebeb189ab0f8b99de167326cc32b5390bc9c5025a85d9502641b73a7ad355",
+      "description": "Original CAESAR v foundation model.",
+      "filename": "caesar_v.pt",
+      "url": "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/872cb58e71be4c55caaf2731af315b887f4b11da/caesar_v.pt",
+      "min_dims": 2,
+      "max_dims": 5,
+      "architecture": "caesar-bcrn-v1",
+      "display_name": "CAESAR v1",
+      "registration_id": 1
+    },
+    {
+      "name": "caesar_v2",
+      "id": "ufl:2@sha256:11a75ebb6ad489db367bff19b537ce6406b22e7e2a6be38e3ee58a93741118c7",
+      "sha256": "11a75ebb6ad489db367bff19b537ce6406b22e7e2a6be38e3ee58a93741118c7",
+      "description": "Newer CAESAR v foundation model with optimizations; checkpoint model_bs64_ep100k.pt.",
+      "filename": "model_bs64_ep100k.pt",
+      "url": "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/872cb58e71be4c55caaf2731af315b887f4b11da/model_bs64_ep100k.pt",
+      "min_dims": 2,
+      "max_dims": 5,
+      "architecture": "caesar-bcrn-v1",
+      "display_name": "CAESAR v2",
+      "registration_id": 2
+    },
+    {
+      "name": "eelsM1",
+      "id": "ufl:3@sha256:1adf19f5bcfd15db5a98eab2db234392862d31a871ca854db45a1b275aa7fffb",
+      "sha256": "1adf19f5bcfd15db5a98eab2db234392862d31a871ca854db45a1b275aa7fffb",
+      "description": "EELS checkpoint (eelsM1). Detailed training provenance is not recorded in this repository.",
+      "filename": "eelsM1.pt",
+      "url": "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/872cb58e71be4c55caaf2731af315b887f4b11da/eelsM1.pt",
+      "min_dims": 2,
+      "max_dims": 5,
+      "architecture": "caesar-bcrn-v1",
+      "display_name": "eelsM1",
+      "registration_id": 3
+    },
+    {
+      "name": "microscopy",
+      "id": "ufl:4@sha256:c6c5f93c96d8c0fcb0cae5d77f6a3f1fc182be4bf7eed560cffca45de5d5db22",
+      "sha256": "c6c5f93c96d8c0fcb0cae5d77f6a3f1fc182be4bf7eed560cffca45de5d5db22",
+      "description": "Microscopy checkpoint. Detailed training provenance is not recorded in this repository.",
+      "filename": "microscopy.pt",
+      "url": "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/872cb58e71be4c55caaf2731af315b887f4b11da/microscopy.pt",
+      "min_dims": 2,
+      "max_dims": 5,
+      "architecture": "caesar-bcrn-v1",
+      "display_name": "microscopy",
+      "registration_id": 4
+    }
+  ]
+}

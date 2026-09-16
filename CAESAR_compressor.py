@@ -1,4 +1,5 @@
 import os
+from model_registry import export_context
 import sys
 import numpy as np
 import torch
@@ -417,6 +418,8 @@ if device not in {"cpu", "cuda", "mps", "xpu"}:
         "  xpu  - Intel GPU"
     )
 
+selected_model, checkpoint_path, export_dir = export_context()
+
 model_name = f"caesar_compressor"
 
 
@@ -448,7 +451,7 @@ model = CompressorMix(
     device=device,
 )
 
-raw_state_dict = torch.load("./pretrained/caesar_v.pt", map_location=device)
+raw_state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
 state_dict = remove_module_prefix(raw_state_dict)
 
 try:
@@ -485,19 +488,15 @@ gs_quantized_cdf = model.entropy_model.range_coder.gaussian._quantized_cdf
 gs_cdf_length = model.entropy_model.range_coder.gaussian._cdf_length
 gs_offset = model.entropy_model.range_coder.gaussian._offset
 
-os.makedirs("./exported_model/", exist_ok=True)
-with open("./exported_model/model_name.txt", "w") as f:
-    f.write("caesar_v")
-with open("./exported_model/model_device.txt", "w") as f:
-    f.write(device)
+export_dir.mkdir(parents=True, exist_ok=True)
 
-quantized_cdf.detach().cpu().numpy().tofile("exported_model/vbr_quantized_cdf.bin")
-cdf_length.detach().cpu().numpy().tofile("exported_model/vbr_cdf_length.bin")
-offset.to(torch.int32).detach().cpu().numpy().tofile("exported_model/vbr_offset.bin")
+quantized_cdf.detach().cpu().numpy().tofile(export_dir / "vbr_quantized_cdf.bin")
+cdf_length.detach().cpu().numpy().tofile(export_dir / "vbr_cdf_length.bin")
+offset.to(torch.int32).detach().cpu().numpy().tofile(export_dir / "vbr_offset.bin")
 
-gs_quantized_cdf.detach().cpu().numpy().tofile("exported_model/gs_quantized_cdf.bin")
-gs_cdf_length.detach().cpu().numpy().tofile("exported_model/gs_cdf_length.bin")
-gs_offset.detach().cpu().numpy().tofile("exported_model/gs_offset.bin")
+gs_quantized_cdf.detach().cpu().numpy().tofile(export_dir / "gs_quantized_cdf.bin")
+gs_cdf_length.detach().cpu().numpy().tofile(export_dir / "gs_cdf_length.bin")
+gs_offset.detach().cpu().numpy().tofile(export_dir / "gs_offset.bin")
 
 model.eval()
 with torch.no_grad():
@@ -510,6 +509,6 @@ with torch.no_grad():
     )
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-        package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
+        package_path=str(export_dir / f"{model_name}.pt2"),
     )
     print(f"Compressed model saved to exported_model/{model_name}.pt2")

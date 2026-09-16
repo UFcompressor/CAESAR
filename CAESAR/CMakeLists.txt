@@ -228,17 +228,32 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/models/pretrained")
     )
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt")
-    install(FILES 
-        "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_device.txt"
-        DESTINATION share/caesar/models
-    )
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_name.txt" CAESAR_MODEL_NAME)
-    string(STRIP "${CAESAR_MODEL_NAME}" CAESAR_MODEL_NAME)
-else()
-    message(FATAL_ERROR "model_name.txt not found in exported_model/. Run the export script first.")
+set(CAESAR_METADATA "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_metadata.txt")
+if(NOT EXISTS "${CAESAR_METADATA}")
+    message(FATAL_ERROR "model_metadata.txt not found. Run download_models.sh and compile_model.py <device> first.")
 endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../model_registry.py"
+            --validate-installation "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model"
+    RESULT_VARIABLE CAESAR_REGISTRY_STATUS
+    OUTPUT_VARIABLE CAESAR_REGISTRY_OUTPUT
+    ERROR_VARIABLE CAESAR_REGISTRY_ERROR
+)
+if(NOT CAESAR_REGISTRY_STATUS EQUAL 0)
+    message(FATAL_ERROR "CAESAR requires a registered model installation: ${CAESAR_REGISTRY_ERROR}")
+endif()
+message(STATUS "${CAESAR_REGISTRY_OUTPUT}")
+# Revalidate on incremental builds too: an installation can change after configure.
+add_custom_target(caesar_validate_model
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../model_registry.py"
+            --validate-installation "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model"
+    VERBATIM
+)
+add_dependencies(caesar_objs caesar_validate_model)
+install(FILES "${CAESAR_METADATA}" DESTINATION share/caesar/models)
+file(STRINGS "${CAESAR_METADATA}" CAESAR_MODEL_NAME REGEX "^model_name=")
+string(REPLACE "model_name=" "" CAESAR_MODEL_NAME "${CAESAR_MODEL_NAME}")
 
 message(STATUS "")
 message(STATUS "========================================")

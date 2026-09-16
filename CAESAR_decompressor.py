@@ -1,4 +1,5 @@
 import os
+from model_registry import export_context
 import sys
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
@@ -443,6 +444,8 @@ if device not in {"cpu", "cuda", "mps", "xpu"}:
         "  mps  - Apple Silicon GPU (M1/M2/M3/M4)\n"
         "  xpu  - Intel GPU"
     )
+selected_model, checkpoint_path, export_dir = export_context()
+
 model_name = f"caesar_decompressor"
 
 model = CompressorMix(
@@ -467,7 +470,7 @@ def strip_orig_mod_prefix(state_dict):
 
 
 state_dict = remove_module_prefix(
-    torch.load("./pretrained/caesar_v.pt", map_location=device)
+    torch.load(checkpoint_path, map_location=device, weights_only=True)
 )
 
 try:
@@ -500,11 +503,7 @@ model.entropy_model.range_coder = RangeCoder(
     device=device,
 )
 
-os.makedirs("./exported_model/", exist_ok=True)
-with open("./exported_model/model_name.txt", "w") as f:
-    f.write("caesar_v")
-with open("./exported_model/model_device.txt", "w") as f:
-    f.write(device)
+export_dir.mkdir(parents=True, exist_ok=True)
 
 model.eval()
 with torch.no_grad():
@@ -517,7 +516,7 @@ with torch.no_grad():
     )
     output_path = torch._inductor.aoti_compile_and_package(
         exported,
-        package_path=str(Path(os.getcwd()) / "exported_model" / f"{model_name}.pt2"),
+        package_path=str(export_dir / f"{model_name}.pt2"),
     )
     print()
     print(f"decompress model saved to exported_model/{model_name}.pt2")

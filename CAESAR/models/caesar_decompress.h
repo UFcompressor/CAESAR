@@ -1,4 +1,5 @@
 #pragma once
+#include <thread>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
 #include "array_utils.h"
@@ -17,7 +18,8 @@ struct DecompressionResult {
 
 class Decompressor {
 public:
-  explicit Decompressor(torch::Device device = torch::Device(torch::kCPU));
+  explicit Decompressor(torch::Device device = torch::Device(torch::kCPU),
+                        const std::string &required_model_id = "");
   ~Decompressor() = default;
 
   torch::Tensor decompress(const unsigned int batch_size,
@@ -25,10 +27,12 @@ public:
                            const CompressionResult &comp_result);
 
 private:
+  const std::thread::id owner_thread_ = std::this_thread::get_id();
   torch::Device device_;
 
-  torch::inductor::AOTIModelPackageLoader *hyper_decompressor_model_;
-  torch::inductor::AOTIModelPackageLoader *decompressor_model_;
+  std::shared_ptr<torch::inductor::AOTIModelPackageLoader>
+      hyper_decompressor_model_;
+  std::shared_ptr<torch::inductor::AOTIModelPackageLoader> decompressor_model_;
 
   void load_models();
   void load_probability_tables();
