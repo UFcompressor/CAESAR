@@ -342,6 +342,8 @@ jobs:
           $selection = Join-Path $env:GITHUB_WORKSPACE "pretrained\selected_model.json"
           Write-Host "Selected model metadata:"
           Get-Content $selection
+          Write-Host "Registered catalog metadata:"
+          conda run -n compress_env python -c "import json; print(json.dumps(next(m for m in json.load(open('model_catalog.json'))['models'] if m['name'] == 'caesar_v2'), indent=2))"
           cmd /c "`"$vcvars`" && `"$python`" compile_model.py cpu --selection `"$selection`" --output `"$env:GITHUB_WORKSPACE\exported_model`""
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
