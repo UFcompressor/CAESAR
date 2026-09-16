@@ -426,7 +426,10 @@ jobs:
         run: |
           .\build\tests\Release\test_model_metadata.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\build\tests\Release\test_model_cache.exe
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+          cmd /c "`"$vcvars`" && `"$env:GITHUB_WORKSPACE\build\tests\Release\test_model_cache.exe`""
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run test_LBRC
