@@ -149,12 +149,22 @@ private:
 
   ModelMetadata metadata_;
 
+  static std::mutex &aoti_loader_mutex() {
+    static std::mutex mutex;
+    return mutex;
+  }
+
+  static std::shared_ptr<torch::inductor::AOTIModelPackageLoader>
+  make_aoti_loader(const fs::path &model_path) {
+    std::lock_guard<std::mutex> lock(aoti_loader_mutex());
+    return std::make_shared<torch::inductor::AOTIModelPackageLoader>(
+        model_path.string());
+  }
+
   void load_compressor_model() {
     auto model_path = model_file("caesar_compressor.pt2");
 
-    compressor_model_ =
-        std::make_shared<torch::inductor::AOTIModelPackageLoader>(
-            model_path.string());
+    compressor_model_ = make_aoti_loader(model_path);
 
     compressor_model_loaded_ = true;
   }
@@ -162,16 +172,13 @@ private:
   void load_hyper_decompressor_model() {
     auto model_path = model_file("caesar_hyper_decompressor.pt2");
 
-    hyper_decompressor_model_ =
-        std::make_shared<torch::inductor::AOTIModelPackageLoader>(
-            model_path.string());
+    hyper_decompressor_model_ = make_aoti_loader(model_path);
     hyper_decompressor_model_loaded_ = true;
   }
 
   void load_decompressor_model() {
     decompressor_model_ =
-        std::make_shared<torch::inductor::AOTIModelPackageLoader>(
-            model_file("caesar_decompressor.pt2").string());
+        make_aoti_loader(model_file("caesar_decompressor.pt2"));
     decompressor_model_loaded_ = true;
   }
 
