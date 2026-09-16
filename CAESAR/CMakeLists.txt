@@ -230,7 +230,7 @@ endif()
 
 set(CAESAR_METADATA "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_metadata.txt")
 if(NOT EXISTS "${CAESAR_METADATA}")
-    message(FATAL_ERROR "model_metadata.txt not found. Run download_models.sh and compile_model.py <device> first.")
+    message(FATAL_ERROR "model_metadata.txt not found. Run python3 model_registry.py and python3 compile_model.py <device> first.")
 endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(

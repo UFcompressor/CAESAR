@@ -145,8 +145,8 @@ del temp_requirements.txt
 ### 4. Download and Prepare Pretrained Models
 
 ```bash
-./download_models.sh --list
-./download_models.sh caesar_v2
+python3 model_registry.py --list
+python3 model_registry.py caesar_v2
 python3 compile_model.py cpu
 ```
 

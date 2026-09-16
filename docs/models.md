@@ -14,7 +14,7 @@ python3 model_registry.py caesar_v2
 python3 compile_model.py cpu
 ```
 
-The shell wrappers `download_models.sh` and `compile_model.sh` invoke these commands.
+The shell wrapper `compile_model.sh` invokes the compilation command.
 The Python entrypoints also work on Windows. Use the same Python environment that
 contains torch and CAESAR's dependencies. Choose `cpu`, `cuda` (including ROCm),
 `mps`, or `xpu`; the backend must support AOTI compilation on your platform.

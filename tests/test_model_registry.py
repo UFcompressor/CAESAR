@@ -77,7 +77,8 @@ class ModelRegistryTests(unittest.TestCase):
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             selected, path = registry.read_selection(output / "selected_model.json")
         self.assertEqual(selected, self.model)
-        self.assertEqual(path, target)
+        # Temporary directories can use aliases (macOS /var or Windows 8.3 names).
+        self.assertEqual(path, target.resolve())
 
     def test_failed_download_preserves_selection_and_checkpoint(self):
         output = self.root / "pretrained"
