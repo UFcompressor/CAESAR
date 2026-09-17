@@ -23,36 +23,36 @@ static fs::path normalize_path(fs::path path) {
 fs::path get_executable_path() {
 #ifdef _WIN32
   char result[MAX_PATH];
-  DWORD count = GetModuleFileNameA(NULL , result , MAX_PATH);
+  DWORD count = GetModuleFileNameA(NULL, result, MAX_PATH);
   if (count != 0 && count < MAX_PATH) {
     return fs::path(result);
   }
 #elif defined(__linux__)
   char result[PATH_MAX];
-  ssize_t count = readlink("/proc/self/exe" , result , PATH_MAX);
+  ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
   if (count != -1) {
-    return fs::path(std::string(result , count));
+    return fs::path(std::string(result, count));
   }
 #elif defined(__APPLE__)
   char result[PATH_MAX];
   uint32_t size = sizeof(result);
-  if (_NSGetExecutablePath(result , &size) == 0) {
+  if (_NSGetExecutablePath(result, &size) == 0) {
     return fs::canonical(fs::path(result));
   }
 #endif
   throw std::runtime_error("Unable to determine executable path");
 }
 
-fs::path get_model_file(const std::string& filename) {
-  const char* env_p = std::getenv("CAESAR_MODEL_DIR");
+fs::path get_model_file(const std::string &filename) {
+  const char *env_p = std::getenv("CAESAR_MODEL_DIR");
   if (env_p) {
     fs::path model_path = fs::path(env_p) / filename;
     if (fs::exists(model_path)) {
       return normalize_path(model_path);
     }
     throw std::runtime_error(
-      "CAESAR_MODEL_DIR is set but the required file is missing: " +
-      model_path.string());
+        "CAESAR_MODEL_DIR is set but the required file is missing: " +
+        model_path.string());
   }
 
   try {
@@ -73,42 +73,41 @@ fs::path get_model_file(const std::string& filename) {
     if (fs::exists(model_path)) {
       return normalize_path(fs::canonical(model_path));
     }
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "Warning: Could not check executable-relative path: "
-      << e.what() << std::endl;
+              << e.what() << std::endl;
   }
 
 #ifdef DEFAULT_CAESAR_MODEL_DIR
   fs::path install_path = fs::path(DEFAULT_CAESAR_MODEL_DIR) / filename;
   if (fs::exists(install_path)) {
     return normalize_path(install_path);
-}
+  }
 #endif
 
   throw std::runtime_error(
-    "Could not find model file: " + filename +
-    "\n"
-    "Searched locations:\n"
-    "  1. CAESAR_MODEL_DIR environment variable" +
-    std::string(env_p ? " (" + std::string(env_p) + ")" : " (not set)") +
-    "\n"
-    "  2. ../exported_model/ relative to executable\n"
-    "  3. ./exported_model/ relative to executable\n"
+      "Could not find model file: " + filename +
+      "\n"
+      "Searched locations:\n"
+      "  1. CAESAR_MODEL_DIR environment variable" +
+      std::string(env_p ? " (" + std::string(env_p) + ")" : " (not set)") +
+      "\n"
+      "  2. ../exported_model/ relative to executable\n"
+      "  3. ./exported_model/ relative to executable\n"
 #ifdef DEFAULT_CAESAR_MODEL_DIR
-    "  4. Install location: " +
-    std::string(DEFAULT_CAESAR_MODEL_DIR) +
-    "\n"
+      "  4. Install location: " +
+      std::string(DEFAULT_CAESAR_MODEL_DIR) +
+      "\n"
 #endif
-    "\nPlease set CAESAR_MODEL_DIR to point to your exported_model "
-    "directory.");
+      "\nPlease set CAESAR_MODEL_DIR to point to your exported_model "
+      "directory.");
 }
 
 // for memory debugging
 double rss_gb() {
 #ifdef __linux__
   std::ifstream statm("/proc/self/statm");
-  long dummy = 0 , rss_pages = 0;
+  long dummy = 0, rss_pages = 0;
   statm >> dummy >> rss_pages;
   return (double)rss_pages * sysconf(_SC_PAGESIZE) / (1024.0 * 1024 * 1024);
 #else
@@ -118,11 +117,11 @@ double rss_gb() {
 
 #ifdef USE_CUDA
 double gpu_used_gb() {
-  size_t free_bytes , total_bytes;
+  size_t free_bytes, total_bytes;
 #if defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
-  (void)hipMemGetInfo(&free_bytes , &total_bytes);
+  (void)hipMemGetInfo(&free_bytes, &total_bytes);
 #else
-  cudaMemGetInfo(&free_bytes , &total_bytes);
+  cudaMemGetInfo(&free_bytes, &total_bytes);
 #endif
   return (double)(total_bytes - free_bytes) / (1024.0 * 1024 * 1024);
 }
@@ -143,12 +142,11 @@ int get_allocated_cores() {
 #ifdef __linux__
   cpu_set_t cpu_set;
   CPU_ZERO(&cpu_set);
-  if (sched_getaffinity(0 , sizeof(cpu_set) , &cpu_set) == 0) {
+  if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
     int count = CPU_COUNT(&cpu_set);
     if (count > 0 && count > 4) {
       return count;
-    }
-    else {
+    } else {
       return 4;
     }
   }
@@ -159,44 +157,41 @@ int get_allocated_cores() {
 void initialize_model_runtime() {
   // Torch stores this setting in process-global non-atomic state.
   static const bool initialized = [] {
-    at::globalContext().setDeterministicAlgorithms(true , false);
+    at::globalContext().setDeterministicAlgorithms(true, false);
     return true;
-    }();
+  }();
   (void)initialized;
 }
 
-const ModelMetadata& get_model_metadata() {
+const ModelMetadata &get_model_metadata() {
   // C++ static initialization serializes the first metadata read per process.
   static const ModelMetadata metadata =
-    read_model_metadata(get_model_file("model_metadata.txt"));
+      read_model_metadata(get_model_file("model_metadata.txt"));
   return metadata;
 }
 
 std::string get_model_id() { return get_model_metadata().id; }
 
-void require_model(const std::string& required_id) {
+void require_model(const std::string &required_id) {
   try {
     get_model_metadata().require(required_id);
-  }
-  catch (const std::exception& error) {
+  } catch (const std::exception &error) {
     throw std::runtime_error("Required CAESAR model: " + required_id + ". " +
-      error.what());
+                             error.what());
   }
 }
-
 
 std::string get_model_name() { return get_model_metadata().name; }
 std::string get_model_device() { return get_model_metadata().device; }
 
-
 torch::Device select_model_device() {
   static const torch::Device device = [] {
-    const std::string& model_device = get_model_metadata().device;
+    const std::string &model_device = get_model_metadata().device;
     if (model_device == "cpu")
       return torch::Device(torch::kCPU);
 #ifdef USE_CUDA
     if ((model_device == "cuda" || model_device == "rocm") &&
-      torch::cuda::is_available())
+        torch::cuda::is_available())
       return torch::Device(torch::kCUDA);
 #endif
 #if __has_include(<torch/mps.h>)
@@ -210,7 +205,7 @@ torch::Device select_model_device() {
     }
 #endif
     throw std::runtime_error("CAESAR model device is not available: " +
-      model_device);
-    }();
+                             model_device);
+  }();
   return device;
 }
