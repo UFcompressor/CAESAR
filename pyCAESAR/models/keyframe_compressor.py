@@ -4,10 +4,7 @@ from .utils import quantize, NormalDistribution
 import time
 import torch
 from .RangeEncoding import RangeCoder
-import numpy as np
 from .BCRN.bcrn_model import BluePrintConvNeXt_SR
-import torch
-import torch.nn.init as init
 
 
 def load_yaml(file_path):

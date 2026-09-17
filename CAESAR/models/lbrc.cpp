@@ -1,4 +1,9 @@
 #include "lbrc.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <thread>
+#include <zstd.h>
 /*
  * The LBRC algorithm implemented here is based on:
  * Zhu, L., Ranka, S., and Rangarajan, A.

@@ -3,7 +3,6 @@
 #include "../CAESAR/models/range_coder/rans_coder.hpp"
 #include "../CAESAR/models/range_coder/rans_cuda_kernels.cu"
 #include <algorithm>
-#include <cstring>
 #include <iostream>
 #include <random>
 #include <stdexcept>

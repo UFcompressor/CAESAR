@@ -2,24 +2,15 @@ import torch
 import numpy as np
 import cupy as cp
 
-import numpy as np
-
 # from sklearn.decomposition import PCA
 # import Huffman as huffman
-from numpy import linalg as LA
-from tqdm import tqdm
 import argparse
 
 
-from tqdm import tqdm
-
 import time
 import zstandard as zstd  # to do remove
-import torch
-from tqdm import tqdm
 
 import nvidia.nvcomp as nvcomp  # to do remove
-import cupy as cp
 
 import os
 import json
@@ -666,9 +657,7 @@ def run_gae(args):
 
 if __name__ == "__main__":
 
-    import argparse
     from metrics import *
-    from Huffman2 import encoding_unsign_integer
 
     parser = argparse.ArgumentParser()
 

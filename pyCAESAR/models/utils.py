@@ -55,9 +55,6 @@ def save_json(json_pth, data, mode="update"):
         json.dump(data, json_file, indent=4)
 
 
-import torch
-
-
 def relative_rmse_error_ornl(original, reconstructed, device=None):
 
     if device is None:
