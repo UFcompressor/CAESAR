@@ -5,7 +5,7 @@
  * with CAESAR.
  *
  * CAESAR expects 5D tensors in the form:
- * [batch, channel, time, height, width].
+ * [variable, channel, time, height, width].
  */
 
 #include <cmath>
