@@ -145,12 +145,16 @@ del temp_requirements.txt
 ### 4. Download and Prepare Pretrained Models
 
 ```bash
-./download_models.sh
-
-python3 CAESAR_compressor.py cpu
-python3 CAESAR_hyper_decompressor.py cpu
-python3 CAESAR_decompressor.py cpu
+python3 model_registry.py --list
+python3 model_registry.py caesar_v2
+python3 compile_model.py cpu
 ```
+
+CAESAR v1 is the original foundation model (`caesar_v.pt`); CAESAR v2 is
+its newer optimized foundation model (`model_bs64_ep100k.pt`) and the default.
+Checkpoints must be registered in the UFL catalog and match their registered
+SHA-256 before compilation. See [model installation and identity](docs/models.md)
+for offline downloads, registration, devices, caching, and the ADIOS contract.
 
 ### 5. Configure and Build with CMake
 
@@ -197,12 +201,19 @@ export LD_LIBRARY_PATH=$HOME/local/nvcomp/lib:$LD_LIBRARY_PATH
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
   --index-url https://download.pytorch.org/whl/cu128
 
-cmake .. \
+TORCH_PATH=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+GPU_ARCH=$(python -c 'import torch; a,b=torch.cuda.get_device_capability(); print(f"{a}{b}")')
+
+# Run from the repository root; target the current NVIDIA GPU architecture.
+cmake -S . -B build \
+  -DCMAKE_CUDA_ARCHITECTURES="$GPU_ARCH" \
   -DCMAKE_PREFIX_PATH="$TORCH_PATH;$HOME/local/nvcomp" \
   -DCMAKE_CXX_FLAGS="-I$HOME/local/nvcomp/include" \
   -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/local/nvcomp/lib" \
   -DBUILD_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
+
+cmake --build build -j6
 ```
 
 </details>

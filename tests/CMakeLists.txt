@@ -79,7 +79,11 @@ else()
     message(STATUS "Building test_runGaeCuda in CPU-only mode")
 endif()
 
+add_executable(test_model_cache test_model_cache.cpp)
+target_link_libraries(test_model_cache PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
 set(TEST_TARGETS
+    test_model_cache
     test_caesarCD
     test_caesarC
     test_caesarD
@@ -98,7 +102,7 @@ if(MSVC)
     endforeach()
 endif()
 
-foreach(t IN ITEMS test_caesarCD test_caesarC test_caesarD test_padding test_LBRC test_runGaeCuda)
+foreach(t IN ITEMS test_model_cache test_caesarCD test_caesarC test_caesarD test_padding test_LBRC test_runGaeCuda)
     target_compile_options(${t} PRIVATE
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fPIC>
         $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Release>>:-O3 -mtune=native -fprefetch-loop-arrays>
@@ -134,3 +138,6 @@ if(CAESAR_HAS_CUDA_RANS)
     add_executable(test_rans_cuda test_rans_cuda.cpp)
     target_link_libraries(test_rans_cuda PRIVATE caesar "${TORCH_LIBRARIES}" CUDA::cudart)
 endif()
+
+# Manifest validation does not require torch or a compiled model.
+add_executable(test_model_metadata test_model_metadata.cpp)

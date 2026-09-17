@@ -1,8 +1,11 @@
 #pragma once
-#include "models/model_utils.h"
+#include <torch/torch.h>
+
 #include <cstdint>
 #include <stdexcept>
-#include <torch/torch.h>
+
+#include "models/model_utils.h"
+
 /**
  * Structure to hold padding metadata for 5D tensor conversion
  */
@@ -15,22 +18,7 @@ struct PaddingInfo {
   bool was_padded;
 };
 
-/**
- * Convert any N-dimensional tensor to a padded 5D tensor (1, 1, D, H, W)
- *
- * Fast path: If input is 3D/4D with dimensions >= [8, 128, 128], just reshapes
- * to 5D Slow path: Otherwise flattens and pads to H×W patches
- *
- * @param arr Input tensor of any shape
- * @param H Height of the spatial blocks (default 256)
- * @param W Width of the spatial blocks (default 256)
- * @param force_padding If true, always use slow path (default false)
- * @return std::pair containing the padded 5D tensor and PaddingInfo metadata
- */
-std::pair<torch::Tensor, PaddingInfo> to_5d_and_pad(torch::Tensor &arr,
-                                                    int64_t H = 256,
-                                                    int64_t W = 256,
-                                                    bool force_padding = false);
+std::pair<torch::Tensor, PaddingInfo> to_5d(torch::Tensor &arr);
 
 /**
  * Restore original tensor from padded 5D format using metadata

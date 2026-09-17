@@ -339,21 +339,10 @@ int main(int argc, char *argv[]) {
     raw = raw.squeeze();
     std::cout << "After squeeze, shape: " << raw.sizes() << "\n";
 
-    torch::Tensor raw_5d;
     PaddingInfo padding_info;
-    bool force_padding = false;
-
-    if (shape.size() >= 5 && shape[3] >= 128 && shape[4] >= 128) {
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, shape[3], shape[4], force_padding);
-    } else if (shape.size() == 4 || shape.size() == 3) {
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, 128, 128, force_padding);
-    } else {
-      std::tie(raw_5d, padding_info) =
-          to_5d_and_pad(raw, 256, 256, force_padding);
-    }
-
+    torch::Tensor padded_5d;
+    std::tie(padded_5d, padding_info) = to_5d(raw);
+    padded_5d = padded_5d.contiguous();
     raw = torch::Tensor();
 
     torch::Device compression_device = select_model_device();
@@ -362,7 +351,7 @@ int main(int argc, char *argv[]) {
     Compressor compressor(compression_device);
 
     DatasetConfig config;
-    config.memory_data = raw_5d;
+    config.memory_data = padded_5d;
     config.variable_idx = 0;
     config.n_frame = n_frame;
     config.dataset_name = "TCf48 Dataset";
@@ -375,8 +364,6 @@ int main(int argc, char *argv[]) {
     config.n_overlap = 0;
     config.test_size = {256, 256};
     config.augment_type = {};
-
-    raw_5d = torch::Tensor();
 
     std::cout << "Error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();

@@ -5,17 +5,17 @@
  * with CAESAR.
  *
  * CAESAR expects 5D tensors in the form:
- * [batch, channel, time, height, width].
+ * [variable, channel, time, height, width].
  */
+
+#include <cmath>
+#include <iostream>
 
 #include "../CAESAR/data_utils.h"
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/array_utils.h"
 #include "../CAESAR/models/caesar_compress.h"
 #include "../CAESAR/models/caesar_decompress.h"
-
-#include <cmath>
-#include <iostream>
 
 int main() {
   try {
@@ -48,15 +48,16 @@ int main() {
               << ", max=" << raw_max << "\n";
 
     // Convert the input to CAESAR's 5D representation and pad if necessary.
-    torch::Tensor raw_5d;
     PaddingInfo padding_info;
-    std::tie(raw_5d, padding_info) =
-        to_5d_and_pad(raw, dim_x, dim_y, /*force_padding=*/false);
+    torch::Tensor padded_5d;
+    std::tie(padded_5d, padding_info) = to_5d(raw);
+    padded_5d = padded_5d.contiguous();
+    raw = torch::Tensor();
 
     torch::Device device = select_model_device();
 
     DatasetConfig config;
-    config.memory_data = raw_5d;
+    config.memory_data = padded_5d;
     config.variable_idx = 0;
 
     // Number of time frames processed per temporal window.
