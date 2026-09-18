@@ -1,5 +1,8 @@
 #include "dataset.h"
 
+#include <algorithm>
+#include <stdexcept>
+
 torch::Tensor centerCrop(const torch::Tensor &x,
                          std::pair<int64_t, int64_t> tShape) {
   auto sizes = x.sizes();

@@ -1,7 +1,6 @@
 #include "rans_coder.hpp"
 #include <algorithm>
 #include <cassert>
-#include <stdexcept>
 
 namespace {
 

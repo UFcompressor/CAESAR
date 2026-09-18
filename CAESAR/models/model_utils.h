@@ -3,7 +3,6 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <torch/torch.h>

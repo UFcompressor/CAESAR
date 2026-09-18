@@ -1,5 +1,8 @@
 #include "runGaeCuda.h"
 
+#include <stdexcept>
+#include <zstd.h>
+
 PCA::PCA(int numComponents, const std::string &device)
     : numComponents_(numComponents), device_(torch::Device(device)) {}
 

@@ -18,7 +18,7 @@
 #endif
 
 #if defined(USE_CUDA) && defined(ENABLE_NVCOMP)
-#include <torch/script.h>
+#include <torch/torch.h>
 
 #include <cstddef>
 #include <cstdint>

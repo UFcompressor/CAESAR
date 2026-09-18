@@ -8,7 +8,6 @@
  * [variable, channel, time, height, width].
  */
 
-#include <cmath>
 #include <iostream>
 
 #include "../CAESAR/data_utils.h"

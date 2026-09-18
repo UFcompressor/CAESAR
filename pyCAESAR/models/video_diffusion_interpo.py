@@ -8,12 +8,12 @@ from functools import partial
 from torch.utils import data
 from pathlib import Path
 from torch.optim import Adam
-from torchvision import transforms as T, utils
+from torchvision import transforms as T
 from torch.cuda.amp import autocast, GradScaler
 
 from tqdm import tqdm
 from einops import rearrange
-from einops_exts import check_shape, rearrange_many
+from einops_exts import rearrange_many
 
 from rotary_embedding_torch import RotaryEmbedding
 import time

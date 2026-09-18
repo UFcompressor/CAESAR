@@ -2,7 +2,6 @@
 #include <torch/torch.h>
 
 #include <cstdint>
-#include <stdexcept>
 
 #include "models/model_utils.h"
 

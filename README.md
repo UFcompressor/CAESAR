@@ -24,6 +24,10 @@ _A C++ / LibTorch foundation model for efficient compression of scientific data_
 
 CAESAR is a unified framework for spatio-temporal scientific data reduction. The baseline model, **CAESAR-V**, is built on a variational autoencoder (VAE) with scale hyperpriors and super-resolution modules to achieve high compression ratios while preserving scientific fidelity.
 
+Developer notes are in [Things to know about the codebase](docs/codebase.md).
+The same Markdown is the source for a Read the Docs site once this repository
+is connected to a Read the Docs project.
+
 It encodes data into a compact latent space and uses learned priors for information-rich representation. This repository ports CAESAR into **C++ with LibTorch** for deployment in high-performance computing (HPC) environments and scientific workflows.
 
 CAESAR runs on CPU by default, and supports GPU acceleration on both NVIDIA (CUDA) and Apple Silicon (Metal / MPS) platforms.

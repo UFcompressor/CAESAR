@@ -2,7 +2,6 @@
 #include "rans_cuda_kernels.h"
 #include <cstring>
 #include <iterator>
-#include <limits>
 #ifdef CAESAR_CUDA_RANS
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
