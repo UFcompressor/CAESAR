@@ -1,7 +1,6 @@
 #include "../CAESAR/models/lbrc.h"
 #include <cassert>
 #include <cmath>
-#include <numeric>
 #include <random>
 
 // ---- stub for the CAESAR helper used inside lbrc.cpp ----------------------

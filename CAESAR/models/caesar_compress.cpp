@@ -1,5 +1,7 @@
 #include "caesar_compress.h"
 
+#include <limits>
+
 #include "range_coder/rans_cuda.h"
 
 template <typename T>

@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-import numpy as np
 
 import compressai.entropy_models.entropy_models as entropy_models_lib
 import compressai.entropy_models.entropy_models_vbr as entropy_models_vbr_lib

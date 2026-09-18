@@ -13,7 +13,6 @@ import time
 import yaml
 from .BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch
-import torch.nn.init as init
 
 
 def load_yaml(file_path):
