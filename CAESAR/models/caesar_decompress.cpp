@@ -327,9 +327,17 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
       deblockHW(recon_tensor, block_info_1, block_info_2, block_info_3);
   recon_tensor = torch::Tensor();
 
+  caesar::correction_method_from_byte(
+      static_cast<uint8_t>(comp_result.correction_method));
   //  ---- LBRC path --------------------------------
   //  ---------------------------------------------------------
-  if (comp_result.use_lbrc) {
+  if (comp_result.correction_method == caesar::CorrectionMethod::NGLR) {
+    auto reconstruction =
+        recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
+    return nglr::decompress(reconstruction, comp_result.nglrMetaData,
+                            comp_result.nglr_comp_data);
+  }
+  if (comp_result.correction_method == caesar::CorrectionMethod::LBRC) {
     torch::Tensor recon_ =
         recon_tensor_deblock.to(device_).to(torch::kFloat32).contiguous();
     recon_tensor_deblock = torch::Tensor();

@@ -13,7 +13,7 @@
 - [ ] Add CAESAR-owned serialization methods for ADIOS integration; preserve model identity and all data needed for decoding.
 - [ ] Document developer workflows, artifact contracts, and validation behavior.
 - [ ] Investigate filtering, padding, and error-bound failures with focused reproductions.
-- [ ] Add NGLR as another option alongside LBRC and GAE.
+- [x] Add NGLR as another option alongside LBRC and GAE (unit-tested; full-pipeline error-bound validation remains pending).
 - [ ] Expose the C++ implementation to Python through pybind11.
 - [ ] Improve model training with distributed learning.
 - [ ] Evaluate federated learning after the distributed training work.

@@ -66,6 +66,8 @@ set(CAESAR_SRC
     models/gpu_lossess.cpp
     models/lbrc.cpp
     models/nglr.cpp
+    models/nglr_network.cpp
+    models/nglr_train.cpp
     data_utils.cpp 
 )
 # to do remove data_utils this is for handling un supports model DIMS not needs just say model cannot handle it 

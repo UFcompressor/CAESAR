@@ -124,9 +124,9 @@ void save_complete_metadata(const std::string &filename,
   file.write(reinterpret_cast<const char *>(&size), sizeof(size));
   file.write(reinterpret_cast<const char *>(comp.gae_comp_data.data()), size);
 
-  // Save use_lbrc
-  file.write(reinterpret_cast<const char *>(&comp.use_lbrc),
-             sizeof(comp.use_lbrc));
+  // Save correction_method
+  file.write(reinterpret_cast<const char *>(&comp.correction_method),
+             sizeof(comp.correction_method));
 
   // Save LBRCMetaData
   const auto &lbrc_meta = comp.lbrcMetaData;
@@ -161,6 +161,44 @@ void save_complete_metadata(const std::string &filename,
     }
   }
 
+  if (comp.correction_method == caesar::CorrectionMethod::NGLR) {
+    const auto &m = comp.nglrMetaData;
+    auto scalar = [&](const auto &value) {
+      file.write(reinterpret_cast<const char *>(&value), sizeof(value));
+    };
+    auto vector = [&](const auto &values) {
+      const uint64_t n = values.size();
+      scalar(n);
+      using T = typename std::decay_t<decltype(values)>::value_type;
+      if (n)
+        file.write(reinterpret_cast<const char *>(values.data()),
+                   n * sizeof(T));
+    };
+    scalar(m.schema_version);
+    scalar(m.correction_occurred);
+    scalar(m.constant_input);
+    scalar(m.quantization.x_mean);
+    scalar(m.quantization.scale);
+    scalar(m.quantization.step);
+    scalar(m.quantization.q_context_scale);
+    scalar(m.quantization.delta_scale);
+    scalar(m.quantization.block_t);
+    scalar(m.quantization.block_h);
+    scalar(m.quantization.block_w);
+    scalar(m.hidden);
+    scalar(m.q_hidden);
+    scalar(m.model_blocks);
+    vector(m.shape);
+    scalar(static_cast<uint64_t>(m.weights.size()));
+    for (const auto &weight : m.weights) {
+      vector(weight.name);
+      vector(weight.shape);
+      vector(weight.values);
+    }
+    vector(comp.nglr_comp_data);
+    if (!file)
+      throw std::runtime_error("Failed writing NGLR metadata");
+  }
   file.close();
 }
 
@@ -287,8 +325,9 @@ CompressionResult load_complete_metadata(const std::string &filename,
   comp.gae_comp_data.resize(size);
   file.read(reinterpret_cast<char *>(comp.gae_comp_data.data()), size);
 
-  // Load use_lbrc
-  file.read(reinterpret_cast<char *>(&comp.use_lbrc), sizeof(comp.use_lbrc));
+  // Load correction_method
+  file.read(reinterpret_cast<char *>(&comp.correction_method),
+            sizeof(comp.correction_method));
 
   // Load LBRCMetaData
   LBRCMetaData lbrc_meta;
@@ -323,6 +362,55 @@ CompressionResult load_complete_metadata(const std::string &filename,
     }
   }
 
+  if (comp.correction_method == caesar::CorrectionMethod::NGLR) {
+    auto &m = comp.nglrMetaData;
+    const auto begin = file.tellg();
+    file.seekg(0, std::ios::end);
+    const auto end = file.tellg();
+    file.seekg(begin);
+    auto scalar = [&](auto &value) {
+      if (!file.read(reinterpret_cast<char *>(&value), sizeof(value)))
+        throw std::runtime_error("Truncated NGLR metadata");
+    };
+    auto vector = [&](auto &values) {
+      uint64_t n = 0;
+      scalar(n);
+      using T = typename std::decay_t<decltype(values)>::value_type;
+      if (n > static_cast<uint64_t>(end - file.tellg()) / sizeof(T))
+        throw std::runtime_error("Truncated NGLR vector");
+      values.resize(n);
+      if (n &&
+          !file.read(reinterpret_cast<char *>(values.data()), n * sizeof(T)))
+        throw std::runtime_error("Truncated NGLR vector");
+    };
+    scalar(m.schema_version);
+    scalar(m.correction_occurred);
+    scalar(m.constant_input);
+    scalar(m.quantization.x_mean);
+    scalar(m.quantization.scale);
+    scalar(m.quantization.step);
+    scalar(m.quantization.q_context_scale);
+    scalar(m.quantization.delta_scale);
+    scalar(m.quantization.block_t);
+    scalar(m.quantization.block_h);
+    scalar(m.quantization.block_w);
+    scalar(m.hidden);
+    scalar(m.q_hidden);
+    scalar(m.model_blocks);
+    vector(m.shape);
+    uint64_t count = 0;
+    scalar(count);
+    if (count > 1024)
+      throw std::runtime_error("Invalid NGLR parameter count");
+    m.weights.resize(count);
+    for (auto &weight : m.weights) {
+      vector(weight.name);
+      vector(weight.shape);
+      vector(weight.values);
+    }
+    vector(comp.nglr_comp_data);
+    nglr::validate_metadata(m);
+  }
   file.close();
 
   return comp;
@@ -433,6 +521,7 @@ void print_usage(const char *program_name) {
   std::cout << "  -h, --help               Show this help message\n\n";
   std::cout << "Compression Options:\n";
   std::cout << "  -e, --error-bound <val>  Error bound (default: 0.001)\n";
+  std::cout << "  --correction <method>    gae (default), lbrc, or nglr\n";
   std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n\n";
@@ -585,7 +674,8 @@ int compress_file(const std::string &input_file, const std::string &output_file,
                   int batch_size, int n_frame, const std::string &model_type,
                   torch::Device compress_device, bool show_timing,
                   bool show_metadata, bool verbose, bool quiet,
-                  const std::string &metrics_csv) {
+                  const std::string &metrics_csv,
+                  caesar::CorrectionMethod correction_method) {
   if (!quiet) {
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
@@ -628,7 +718,8 @@ int compress_file(const std::string &input_file, const std::string &output_file,
   config.augment_type = {};
 
   auto start_time_c = std::chrono::high_resolution_clock::now();
-  CompressionResult comp = compressor.compress(config, batch_size, error_bound);
+  CompressionResult comp =
+      compressor.compress(config, batch_size, error_bound, correction_method);
   auto end_time_c = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<double> compression_time = end_time_c - start_time_c;
@@ -821,6 +912,7 @@ int main(int argc, char *argv[]) {
     std::string output_file;
     std::vector<int64_t> shape;
     float error_bound = 0.001f;
+    auto correction_method = caesar::CorrectionMethod::GAE;
     int batch_size = 128;
     int n_frame = 8;
     std::string model_type = get_model_name();
@@ -847,6 +939,8 @@ int main(int argc, char *argv[]) {
         batch_size = std::stoi(argv[++i]);
       } else if ((arg == "-f" || arg == "--n-frame") && i + 1 < argc) {
         n_frame = std::stoi(argv[++i]);
+      } else if (arg == "--correction" && i + 1 < argc) {
+        correction_method = caesar::correction_method_from_string(argv[++i]);
       } else if (arg == "--compress-device" && i + 1 < argc) {
         compress_device_str = argv[++i];
       } else if (arg == "--decompress-device" && i + 1 < argc) {
@@ -886,7 +980,7 @@ int main(int argc, char *argv[]) {
       return compress_file(input_file, output_file, shape, error_bound,
                            batch_size, n_frame, model_type, compress_device,
                            show_timing, show_metadata, verbose, quiet,
-                           metrics_csv);
+                           metrics_csv, correction_method);
 
     } else if (command == "decompress") {
       torch::Device decompress_device =

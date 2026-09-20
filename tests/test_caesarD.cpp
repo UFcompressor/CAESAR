@@ -176,9 +176,9 @@ load_compression_result_metadata(const std::string &filename) {
   // // Load latent_indexes
   // read_2d_vector(result.latent_indexes);
 
-  // Load use_lbrc
-  file.read(reinterpret_cast<char *>(&result.use_lbrc),
-            sizeof(result.use_lbrc));
+  // Load correction_method
+  file.read(reinterpret_cast<char *>(&result.correction_method),
+            sizeof(result.correction_method));
 
   // Load lbrcMetaData
   file.read(reinterpret_cast<char *>(&lbrc_meta.lbrc_correction_occur),
@@ -213,6 +213,55 @@ load_compression_result_metadata(const std::string &filename) {
     }
   }
 
+  if (result.correction_method == caesar::CorrectionMethod::NGLR) {
+    auto &m = result.nglrMetaData;
+    const auto begin = file.tellg();
+    file.seekg(0, std::ios::end);
+    const auto end = file.tellg();
+    file.seekg(begin);
+    auto scalar = [&](auto &value) {
+      if (!file.read(reinterpret_cast<char *>(&value), sizeof(value)))
+        throw std::runtime_error("Truncated NGLR metadata");
+    };
+    auto vector = [&](auto &values) {
+      uint64_t n = 0;
+      scalar(n);
+      using T = typename std::decay_t<decltype(values)>::value_type;
+      if (n > static_cast<uint64_t>(end - file.tellg()) / sizeof(T))
+        throw std::runtime_error("Truncated NGLR vector");
+      values.resize(n);
+      if (n &&
+          !file.read(reinterpret_cast<char *>(values.data()), n * sizeof(T)))
+        throw std::runtime_error("Truncated NGLR vector");
+    };
+    scalar(m.schema_version);
+    scalar(m.correction_occurred);
+    scalar(m.constant_input);
+    scalar(m.quantization.x_mean);
+    scalar(m.quantization.scale);
+    scalar(m.quantization.step);
+    scalar(m.quantization.q_context_scale);
+    scalar(m.quantization.delta_scale);
+    scalar(m.quantization.block_t);
+    scalar(m.quantization.block_h);
+    scalar(m.quantization.block_w);
+    scalar(m.hidden);
+    scalar(m.q_hidden);
+    scalar(m.model_blocks);
+    vector(m.shape);
+    uint64_t count = 0;
+    scalar(count);
+    if (count > 1024)
+      throw std::runtime_error("Invalid NGLR parameter count");
+    m.weights.resize(count);
+    for (auto &weight : m.weights) {
+      vector(weight.name);
+      vector(weight.shape);
+      vector(weight.values);
+    }
+    vector(result.nglr_comp_data);
+    nglr::validate_metadata(m);
+  }
   file.close();
   return result;
 }

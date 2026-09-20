@@ -1,4 +1,12 @@
 #include "nglr.h"
+
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <type_traits>
+#include <zstd.h>
+
 namespace nglr {
 namespace {
 
@@ -7,19 +15,6 @@ constexpr uint32_t kFormatVersion = 1;
 
 [[noreturn]] void fail(const std::string &message) {
   throw std::runtime_error("nglr: " + message);
-}
-
-std::string trim(std::string value) {
-  const auto first = value.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos)
-    return {};
-  const auto last = value.find_last_not_of(" \t\r\n");
-  return value.substr(first, last - first + 1);
-}
-
-c10::Device select_model_device() {
-  return torch::cuda::is_available() ? c10::Device(c10::kCUDA)
-                                     : c10::Device(c10::kCPU);
 }
 
 void require(bool condition, const std::string &message) {
@@ -198,6 +193,15 @@ torch::Tensor gather_recons_features(const torch::Tensor &features,
       .view({-1, channels, 1, 1, 1});
 }
 
+torch::Tensor checked_reference(const torch::Tensor &prediction) {
+  require(
+      torch::isfinite(prediction).all().item<bool>() &&
+          prediction.abs().max().item<double>() <=
+              static_cast<double>(INT32_MAX) * 8,
+      "neural predictor is nonfinite or outside the supported integer range");
+  return prediction.round().to(torch::kInt64);
+}
+
 torch::Tensor strict_delta_encode(const NGLRModel &model,
                                   const torch::Tensor &q_block,
                                   const torch::Tensor &recons_block,
@@ -206,10 +210,10 @@ torch::Tensor strict_delta_encode(const NGLRModel &model,
   const auto device = model.device();
   const int64_t nb = q_block.size(0), t = q_block.size(2), h = q_block.size(3),
                 w = q_block.size(4);
-  const auto target = q_block.index({Slice(), 0}).to(device, torch::kInt32);
+  const auto target = q_block.index({Slice(), 0}).to(device, torch::kInt64);
   auto qhat =
       torch::zeros({nb, t, h, w},
-                   torch::TensorOptions().dtype(torch::kInt32).device(device));
+                   torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto delta = torch::zeros_like(qhat);
   const auto features =
       model.encode_recons(recons_block.to(device, torch::kFloat32));
@@ -219,22 +223,23 @@ torch::Tensor strict_delta_encode(const NGLRModel &model,
     const auto context_and_prediction =
         lorenzo_context(qhat, ts, hs, ws, meta.q_context_scale);
     const auto context = context_and_prediction.first.reshape({-1, 8, 1, 1, 1});
-    const auto reference =
-        torch::round(
-            context_and_prediction.second.to(torch::kFloat64) +
-            model.forward_from_recons_feature(
-                     gather_recons_features(features, ts, hs, ws), context)
-                    .reshape({nb, -1})
-                    .to(torch::kFloat64) *
-                meta.delta_scale)
-            .to(torch::kInt32);
+    const auto reference = checked_reference(
+        context_and_prediction.second.to(torch::kFloat64) +
+        model.forward_from_recons_feature(
+                 gather_recons_features(features, ts, hs, ws), context)
+                .reshape({nb, -1})
+                .to(torch::kFloat64) *
+            meta.delta_scale);
     const auto d = target.index({Slice(), ts, hs, ws}) - reference;
     delta.index_put_({Slice(), ts, hs, ws}, d);
     qhat.index_put_({Slice(), ts, hs, ws}, reference + d);
   }
   require(torch::equal(qhat, target),
           "strict encoder reconstruction check failed");
-  return delta.to(torch::kCPU).contiguous();
+  require(delta.min().item<int64_t>() >= INT32_MIN &&
+              delta.max().item<int64_t>() <= INT32_MAX,
+          "neural residual exceeds int32 bitplane range");
+  return delta.to(torch::kCPU, torch::kInt32).contiguous();
 }
 
 torch::Tensor strict_delta_decode(const NGLRModel &model,
@@ -245,10 +250,10 @@ torch::Tensor strict_delta_decode(const NGLRModel &model,
   const auto device = model.device();
   const int64_t nb = delta_block.size(0), t = delta_block.size(1),
                 h = delta_block.size(2), w = delta_block.size(3);
-  const auto delta = delta_block.to(device, torch::kInt32);
+  const auto delta = delta_block.to(device, torch::kInt64);
   auto qhat =
       torch::zeros({nb, t, h, w},
-                   torch::TensorOptions().dtype(torch::kInt32).device(device));
+                   torch::TensorOptions().dtype(torch::kInt64).device(device));
   const auto features =
       model.encode_recons(recons_block.to(device, torch::kFloat32));
   for (const auto &diagonal : diagonal_indices(t, h, w)) {
@@ -257,19 +262,20 @@ torch::Tensor strict_delta_decode(const NGLRModel &model,
     const auto context_and_prediction =
         lorenzo_context(qhat, ts, hs, ws, meta.q_context_scale);
     const auto context = context_and_prediction.first.reshape({-1, 8, 1, 1, 1});
-    const auto reference =
-        torch::round(
-            context_and_prediction.second.to(torch::kFloat64) +
-            model.forward_from_recons_feature(
-                     gather_recons_features(features, ts, hs, ws), context)
-                    .reshape({nb, -1})
-                    .to(torch::kFloat64) *
-                meta.delta_scale)
-            .to(torch::kInt32);
+    const auto reference = checked_reference(
+        context_and_prediction.second.to(torch::kFloat64) +
+        model.forward_from_recons_feature(
+                 gather_recons_features(features, ts, hs, ws), context)
+                .reshape({nb, -1})
+                .to(torch::kFloat64) *
+            meta.delta_scale);
     qhat.index_put_({Slice(), ts, hs, ws},
                     reference + delta.index({Slice(), ts, hs, ws}));
   }
-  return qhat.to(torch::kCPU).contiguous();
+  require(qhat.min().item<int64_t>() >= INT32_MIN &&
+              qhat.max().item<int64_t>() <= INT32_MAX,
+          "decoded residual exceeds int32 range");
+  return qhat.to(torch::kCPU, torch::kInt32).contiguous();
 }
 
 struct EncodedBlock {
@@ -384,69 +390,18 @@ void check_header(ByteReader &reader, const torch::Tensor &recons,
 
 } // namespace
 
-NGLRMeta load_meta_from_model_dir(const std::string &model_dir) {
-  std::ifstream input(model_dir + "/nglr_meta.txt");
-  if (!input)
-    fail("could not open " + model_dir + "/nglr_meta.txt");
-  std::unordered_map<std::string, std::string> values;
-  for (std::string line; std::getline(input, line);) {
-    const auto equal = line.find('=');
-    if (equal != std::string::npos)
-      values[trim(line.substr(0, equal))] = trim(line.substr(equal + 1));
-  }
-  const auto number = [&values](const char *key) {
-    const auto it = values.find(key);
-    if (it == values.end())
-      fail(std::string("metadata missing key ") + key);
-    try {
-      return std::stod(it->second);
-    } catch (...) {
-      fail(std::string("metadata key is not numeric: ") + key);
-    }
-  };
-  NGLRMeta meta;
-  meta.x_mean = number("x_mean");
-  meta.scale = number("scale");
-  meta.step = number("step");
-  meta.q_context_scale = number("q_context_scale");
-  meta.delta_scale = number("delta_scale");
-  meta.block_t = static_cast<int64_t>(number("block_t"));
-  meta.block_h = static_cast<int64_t>(number("block_h"));
-  meta.block_w = static_cast<int64_t>(number("block_w"));
-  require(std::isfinite(meta.scale) && meta.scale != 0.0 &&
-              std::isfinite(meta.step) && meta.step > 0.0,
-          "scale must be nonzero and step must be positive");
-  return meta;
-}
-
-NGLRModel::NGLRModel(const std::string &path,
-                     std::optional<c10::Device> requested)
-    : device_(requested.value_or(select_model_device())) {
-  try {
-    module_ = torch::jit::load(path, device_);
-    module_.eval();
-  } catch (const c10::Error &e) {
-    fail("failed to load scripted model '" + path + "': " + e.what());
-  }
-}
-
-torch::Tensor NGLRModel::encode_recons(const torch::Tensor &recons) const {
-  torch::NoGradGuard guard;
-  return module_.get_method("encode_recons")({recons}).toTensor();
-}
-
-torch::Tensor
-NGLRModel::forward_from_recons_feature(const torch::Tensor &feature,
-                                       const torch::Tensor &context) const {
-  torch::NoGradGuard guard;
-  return module_.get_method("forward_from_recons_feature")({feature, context})
-      .toTensor();
-}
-
-NGLRBundle NGLRBundle::load(const std::string &model_dir,
-                            std::optional<c10::Device> device) {
-  return {NGLRModel(model_dir + "/nglr_model.pt", device),
-          load_meta_from_model_dir(model_dir)};
+void validate_meta(const NGLRMeta &meta) {
+  require(std::isfinite(meta.x_mean), "x_mean must be finite");
+  require(std::isfinite(meta.scale) && meta.scale > 0.0,
+          "scale must be finite and positive");
+  require(std::isfinite(meta.step) && meta.step > 0.0,
+          "step must be finite and positive");
+  require(std::isfinite(meta.q_context_scale) && meta.q_context_scale > 0.0,
+          "q_context_scale must be finite and positive");
+  require(std::isfinite(meta.delta_scale) && meta.delta_scale > 0.0,
+          "delta_scale must be finite and positive");
+  require(meta.block_t > 0 && meta.block_h > 0 && meta.block_w > 0,
+          "block dimensions must be positive");
 }
 
 NGLREncodeStats nglr_encode(const torch::Tensor &original,
@@ -454,6 +409,7 @@ NGLREncodeStats nglr_encode(const torch::Tensor &original,
                             const NGLRMeta &meta,
                             std::vector<uint8_t> &correction_out,
                             int zstd_level) {
+  validate_meta(meta);
   require(original.defined() && recons.defined() &&
               original.sizes() == recons.sizes(),
           "original and recons must be defined tensors with identical shape");
@@ -464,9 +420,12 @@ NGLREncodeStats nglr_encode(const torch::Tensor &original,
   const auto recons_norm =
       ((recons.to(torch::kCPU, torch::kFloat32) - meta.x_mean) / meta.scale)
           .contiguous();
-  const auto q = torch::round((original_norm - recons_norm) / meta.step)
-                     .to(torch::kInt32)
-                     .contiguous();
+  const auto rounded = torch::round((original_norm - recons_norm) / meta.step);
+  require(torch::isfinite(rounded).all().item<bool>() &&
+              rounded.to(torch::kFloat64).abs().max().item<double>() <=
+                  INT32_MAX,
+          "quantized residual exceeds int32 range");
+  const auto q = rounded.to(torch::kInt32).contiguous();
   const auto slices = block_slices(q, meta);
   ByteWriter writer;
   write_header(writer, q, meta, slices.size(), zstd_level);
@@ -497,6 +456,7 @@ NGLREncodeStats nglr_encode(const torch::Tensor &original,
 torch::Tensor nglr_decode(const torch::Tensor &recons, const NGLRModel &model,
                           const NGLRMeta &meta,
                           const std::vector<uint8_t> &correction) {
+  validate_meta(meta);
   require(recons.defined() && recons.dim() == 5,
           "recons must be a defined 5-D [B,C,T,H,W] tensor");
   ByteReader reader(correction);
