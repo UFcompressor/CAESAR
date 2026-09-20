@@ -141,3 +141,6 @@ endif()
 
 # Manifest validation does not require torch or a compiled model.
 add_executable(test_model_metadata test_model_metadata.cpp)
+
+add_executable(test_nglr_compare test_nglr_compare.cpp)
+target_link_libraries(test_nglr_compare PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
