@@ -3,8 +3,6 @@ from collections import OrderedDict
 from .models.run_gae_cuda import PCACompressor
 import math
 import torch.nn.functional as F
-import numpy as np
-import time
 
 
 def normalize_latent(x):

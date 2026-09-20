@@ -2,6 +2,12 @@
 
 ## Known behavior to preserve and investigate
 
+- GPU compression followed by CPU decompression can produce garbled output. The
+  compressed data does not currently save the latent indexes or bundle the
+  `*.bin` probability tables needed for decoding. Keep the exact tables and
+  indexes used for compression available to the CPU decoder; validate a
+  GPU-to-CPU round trip after changing the format. Latent indexes may need one
+  byte each, or potentially four bits each if their range permits bit packing.
 - Apple GPU currently cannot handle double-precision data in this path. Failing explicitly is acceptable for now; do not silently downcast or claim support.
 - Requested error bounds are not always met, especially when data filtering occurs. Treat a requested bound as a target to validate, not a guarantee. In one 16-step, 80-variable run, EB=0.0001 passed with maximum NRMSE 1.000651e-04 as reported by the validator, while EB=1e-05 failed for all 16 `rho` steps (maximum 2.299144e-05). EB=5e-06 also failed for all 16 `rho` steps (maximum 2.297053e-05).
 - Padding may also contribute to bound failures; this is a hypothesis, not a confirmed cause. Another run at EB=5e-06 checked 4,488 variables over 204 steps and found 1,140 failures, with maximum NRMSE 1.784122e-05. Several `Diagnostics/*` variables failed, including `ParticleTemp` and `Tpar`. GAE appears to become active in this case, unlike the `rho` example, but causality has not been established.
@@ -11,6 +17,7 @@
 
 - [ ] Clean up the compression and decompression configuration API.
 - [ ] Add CAESAR-owned serialization methods for ADIOS integration; preserve model identity and all data needed for decoding.
+- [ ] Make GPU-compressed data portable to CPU decompression by serializing latent indexes and ensuring the matching `*.bin` probability tables travel with the compressed data or its model artifact. Evaluate bit packing for indexes after checking their value range.
 - [ ] Document developer workflows, artifact contracts, and validation behavior.
 - [ ] Investigate filtering, padding, and error-bound failures with focused reproductions.
 - [x] Add NGLR as another option alongside LBRC and GAE (unit-tested; full-pipeline error-bound validation remains pending).

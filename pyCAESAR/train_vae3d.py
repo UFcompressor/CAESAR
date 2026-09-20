@@ -6,18 +6,15 @@ AOTI inference model.
 """
 
 import os
-import json
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
-from tqdm import tqdm
 import argparse
 import shutil
 import time
 from collections import OrderedDict
-import torch
 from pyCAESAR.models.utils import (
     build_dataset,
     convert_args,
