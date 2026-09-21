@@ -130,8 +130,8 @@ NGLRModel::NGLRModel(int32_t hidden, int32_t q_hidden, int32_t blocks,
   network_->to(device_);
   network_->eval();
 }
-NGLRModel::NGLRModel(const NGLRMetaData &m)
-    : NGLRModel(m.hidden, m.q_hidden, m.model_blocks) {
+NGLRModel::NGLRModel(const NGLRMetaData &m, c10::Device device)
+    : NGLRModel(m.hidden, m.q_hidden, m.model_blocks, device) {
   validate_metadata(m);
   require(m.correction_occurred, "no trained model in this correction");
   load_weights(m.weights);
@@ -180,7 +180,7 @@ void NGLRModel::load_weights(const std::vector<NGLRWeight> &weights) {
 void compress(const torch::Tensor &original, const torch::Tensor &recons,
               double target, NGLRMetaData &metadata,
               std::vector<uint8_t> &correction, const NGLRTrainOptions &options,
-              c10::Device training_device) {
+              c10::Device training_device, c10::Device codec_device) {
   validate_options(options);
   require(std::isfinite(target) && target > 0,
           "target NRMSE must be finite and positive");
@@ -312,9 +312,8 @@ void compress(const torch::Tensor &original, const torch::Tensor &recons,
   }
   m.weights = std::move(best);
   m.correction_occurred = true;
-  // Both strict coding directions use CPU float32 inference with these exact
-  // weights. Training may use the requested accelerator independently.
-  NGLRModel codec(m);
+  // Decode must use a compatible predictor device with these exact weights.
+  NGLRModel codec(m, codec_device);
   std::vector<uint8_t> encoded;
   nglr_encode(x, r, codec, qm, encoded, options.zstd_level);
   metadata = std::move(m);
@@ -323,7 +322,8 @@ void compress(const torch::Tensor &original, const torch::Tensor &recons,
 
 torch::Tensor decompress(const torch::Tensor &recons,
                          const NGLRMetaData &metadata,
-                         const std::vector<uint8_t> &correction) {
+                         const std::vector<uint8_t> &correction,
+                         c10::Device codec_device) {
   validate_metadata(metadata);
   validate_input(recons);
   require(recons.sizes().vec() == metadata.shape,
@@ -336,7 +336,7 @@ torch::Tensor decompress(const torch::Tensor &recons,
                : recons;
   }
   require(!correction.empty(), "missing NGLR correction bytes");
-  NGLRModel model(metadata);
+  NGLRModel model(metadata, codec_device);
   return nglr_decode(recons, model, metadata.quantization, correction);
 }
 } // namespace nglr

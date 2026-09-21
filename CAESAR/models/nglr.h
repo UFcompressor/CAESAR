@@ -55,7 +55,8 @@ public:
   explicit NGLRModel(int32_t hidden = 32, int32_t q_hidden = 16,
                      int32_t blocks = 4,
                      c10::Device device = c10::Device(c10::kCPU));
-  explicit NGLRModel(const NGLRMetaData &metadata);
+  explicit NGLRModel(const NGLRMetaData &metadata,
+                     c10::Device device = c10::Device(c10::kCPU));
   const c10::Device &device() const noexcept { return device_; }
   torch::Tensor encode_recons(const torch::Tensor &recons) const;
   torch::Tensor forward_from_recons_feature(const torch::Tensor &features,
@@ -75,10 +76,12 @@ void compress(const torch::Tensor &original, const torch::Tensor &recons,
               double target_nrmse, NGLRMetaData &metadata,
               std::vector<uint8_t> &correction,
               const NGLRTrainOptions &options = {},
-              c10::Device training_device = c10::Device(c10::kCPU));
+              c10::Device training_device = c10::Device(c10::kCPU),
+              c10::Device codec_device = c10::Device(c10::kCPU));
 torch::Tensor decompress(const torch::Tensor &recons,
                          const NGLRMetaData &metadata,
-                         const std::vector<uint8_t> &correction);
+                         const std::vector<uint8_t> &correction,
+                         c10::Device codec_device = c10::Device(c10::kCPU));
 
 struct NGLREncodeStats {
   uint64_t correction_bytes = 0;

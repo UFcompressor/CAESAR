@@ -1,7 +1,7 @@
 #pragma once
-#include <thread>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
+#include <thread>
 #include <utility>
 
 #include "../dataset/dataset.h"
@@ -58,6 +58,7 @@ struct CompressionResult {
   CompressionMetaData compressionMetaData;
   GAEMetaData gaeMetaData;
 
+  // set correction_method here
   caesar::CorrectionMethod correction_method = caesar::CorrectionMethod::GAE;
   nglr::NGLRMetaData nglrMetaData;
   std::vector<uint8_t> nglr_comp_data;

@@ -34,11 +34,19 @@ retained. Zero neural loss concerns prediction of quantized residuals; it does
 not replace the separate reconstructed-NRMSE check.
 
 Training uses the compressor's device. Strict diagonal correction encoding and
-decoding currently both use CPU float32 network inference. This makes the NGLR
+decoding default to CPU float32 network inference. This makes the NGLR
 predictor execution path consistent; it does not resolve the foundation model's
 existing GPU-to-CPU latent-index portability issue. Training precomputes block
 layout and scale estimates, and builds contexts per minibatch to limit retained
 context memory. Large block/batch configurations still require substantial memory.
+
+The direct NGLR API accepts an optional `codec_device` for compression and
+decompression. Use the same device for both predictor paths; cross-device
+prediction equivalence is not established. `test_nglr_compare` requires CUDA
+and explicitly uses `cuda:0` for training and both codec inference paths.
+Normalization, quantization, and bitplane/Zstd processing still use CPU.
+Run this comparison on the GPU host with
+`build/tests/test_nglr_compare /path/to/compare_out` after rebuilding.
 
 ## Saved metadata
 
