@@ -188,9 +188,15 @@ void Compressor::load_probability_tables() {
   gs_offset_ = ModelCache::instance().get_gs_offset();
 }
 
-CompressionResult Compressor::compress(const DatasetConfig &config,
-                                       int batch_size, float rel_eb) {
-  if (rel_eb < std::numeric_limits<float>::epsilon() * 2) {
+CompressionResult
+Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
+                     caesar::CorrectionMethod correction_method,
+                     const nglr::NGLRTrainOptions &nglr_options) {
+  caesar::correction_method_from_byte(static_cast<uint8_t>(correction_method));
+  if (correction_method == caesar::CorrectionMethod::NGLR)
+    nglr::validate_options(nglr_options);
+  if (!std::isfinite(rel_eb) ||
+      rel_eb < std::numeric_limits<float>::epsilon() * 2) {
     throw std::invalid_argument(
         "rel_eb must be greater than single percision epsilon ");
   }
@@ -203,6 +209,7 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
   ScientificDataset dataset(config, device_);
 
   CompressionResult result;
+  result.correction_method = correction_method;
 
   int64_t pad_T = dataset.get_pad_T();
   result.compressionMetaData.pad_T = pad_T;
@@ -557,8 +564,18 @@ CompressionResult Compressor::compress(const DatasetConfig &config,
 
   recon_tensor = torch::Tensor();
 
-  result.use_lbrc = false; // hard code still for safty
-  if (result.use_lbrc) {
+  if (correction_method == caesar::CorrectionMethod::NGLR) {
+    // Exclude reflected tail frames from quantization, training and correction.
+    auto original =
+        recons_data(dataset.original_data(),
+                    result.compressionMetaData.data_input_shape, pad_T);
+    auto reconstruction = recons_data(
+        recon_deblk, result.compressionMetaData.data_input_shape, pad_T);
+    nglr::compress(original, reconstruction, rel_eb, result.nglrMetaData,
+                   result.nglr_comp_data, nglr_options, device_);
+    return result;
+  }
+  if (correction_method == caesar::CorrectionMethod::LBRC) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
     torch::Tensor recon_ =
