@@ -55,6 +55,9 @@ target_link_libraries(test_LBRC PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM
 add_executable(test_runGaeCuda testRunGaeCuda.cpp)
 target_link_libraries(test_runGaeCuda PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
 
+add_executable(test_NGLR test_NGLR.cpp)
+target_link_libraries(test_NGLR PRIVATE caesar "${TORCH_LIBRARIES}" ${FILESYSTEM_LIB})
+
 if(USE_CUDA)
     target_compile_definitions(test_runGaeCuda PRIVATE USE_CUDA)
     
@@ -87,6 +90,7 @@ set(TEST_TARGETS
     test_padding
     test_runGaeCuda
     test_LBRC
+    test_NGLR
 )
 
 if(MSVC)
@@ -137,3 +141,4 @@ endif()
 
 # Manifest validation does not require torch or a compiled model.
 add_executable(test_model_metadata test_model_metadata.cpp)
+

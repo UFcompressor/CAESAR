@@ -164,6 +164,20 @@ size_t calculate_metadata_size(const CompressionResult &result) {
       total_bytes += s.size();
   }
 
+  total_bytes += sizeof(result.correction_method);
+  if (result.correction_method == caesar::CorrectionMethod::NGLR) {
+    const auto &m = result.nglrMetaData;
+    total_bytes += sizeof(m.schema_version) + sizeof(m.correction_occurred) +
+                   sizeof(m.constant_input) + 5 * sizeof(double) +
+                   3 * sizeof(int64_t) + 3 * sizeof(int32_t);
+    total_bytes += 3 * sizeof(uint64_t) + m.shape.size() * sizeof(int64_t);
+    total_bytes += result.nglr_comp_data.size();
+    for (const auto &w : m.weights)
+      total_bytes += 3 * sizeof(uint64_t) + w.name.size() +
+                     w.shape.size() * sizeof(int64_t) +
+                     w.values.size() * sizeof(float);
+  }
+
   return total_bytes;
 }
 
@@ -222,7 +236,10 @@ int main() {
     float rel_eb = 0.0001f;
     std::cout << "error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
-    CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
+    // Select correction here for testing; configuration cleanup is deferred.
+    const auto correction_method = caesar::CorrectionMethod::GAE;
+    CompressionResult comp =
+        compressor.compress(config, batch_size, rel_eb, correction_method);
     auto end_timeC = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsC =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC -

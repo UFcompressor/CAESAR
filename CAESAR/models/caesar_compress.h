@@ -1,29 +1,31 @@
 #pragma once
-#include <thread>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 
+#include <thread>
 #include <utility>
 
 #include "../dataset/dataset.h"
 #include "array_utils.h"
+#include "correction_method.h"
 #include "lbrc.h"
 #include "model_cache.h"
 #include "model_utils.h"
+#include "nglr.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h"
 
 struct GAEMetaData {
-  bool GAE_correction_occur;
+  bool GAE_correction_occur = false;
   std::vector<int>
       padding_recon_info; // global info before GAE (GAE preparation)
   std::vector<std::vector<float>>
       pcaBasis;                  // tensor is converted into vector for adios
   std::vector<float> uniqueVals; // tensor is converted into vector for adios
-  double quanBin;
-  int64_t nVec;
-  int64_t prefixLength;
-  int64_t dataBytes;
-  size_t coeffIntBytes;
+  double quanBin = 0;
+  int64_t nVec = 0;
+  int64_t prefixLength = 0;
+  int64_t dataBytes = 0;
+  size_t coeffIntBytes = 0;
 };
 
 struct CompressionMetaData {
@@ -34,9 +36,9 @@ struct CompressionMetaData {
   std::tuple<int32_t, int32_t, std::vector<int32_t>> block_info; // global info
   std::vector<int32_t> data_input_shape;                         // global info
   std::vector<std::pair<int32_t, float>> filtered_blocks;        // global info
-  float global_scale;                                            // global info
-  float global_offset;                                           // global info
-  int64_t pad_T;                                                 // global_info
+  float global_scale = 0;                                        // global info
+  float global_offset = 0;                                       // global info
+  int64_t pad_T = 0;                                             // global_info
   bool all_filtered = false; // all data is the same
 };
 
@@ -56,7 +58,10 @@ struct CompressionResult {
   CompressionMetaData compressionMetaData;
   GAEMetaData gaeMetaData;
 
-  bool use_lbrc = true;
+  // set correction_method here
+  caesar::CorrectionMethod correction_method = caesar::CorrectionMethod::GAE;
+  nglr::NGLRMetaData nglrMetaData;
+  std::vector<uint8_t> nglr_comp_data;
 };
 
 class Compressor {
@@ -66,7 +71,10 @@ public:
   ~Compressor() = default;
 
   CompressionResult compress(const DatasetConfig &config, int batch_size = 32,
-                             float rel_eb = 0.1);
+                             float rel_eb = 0.1,
+                             caesar::CorrectionMethod correction_method =
+                                 caesar::CorrectionMethod::GAE,
+                             const nglr::NGLRTrainOptions &nglr_options = {});
 
 private:
   const std::thread::id owner_thread_ = std::this_thread::get_id();

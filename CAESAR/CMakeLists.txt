@@ -65,9 +65,14 @@ set(CAESAR_SRC
     models/runGaeCuda.cpp
     models/gpu_lossess.cpp
     models/lbrc.cpp
-    data_utils.cpp
+    models/nglr.cpp
+    models/nglr_network.cpp
+    models/nglr_train.cpp
+    data_utils.cpp 
 )
+# to do remove data_utils this is for handling un supports model DIMS not needs just say model cannot handle it 
 
+# to do add  amd one
 if(CAESAR_HAS_CUDA_RANS)
     # Separate target avoids passing C++-only flags/PCH to nvcc.
     add_library(caesar_rans_kernels OBJECT models/range_coder/rans_cuda_kernels.cu)
@@ -108,6 +113,11 @@ if(NVCOMP_FOUND)
 endif()
 
 # todo: fix this to read in the file and set it to just some model name
+# it needs to read the unqiue number then after that we say built for model name
+# this can be done at run time compile time for the code think of it like compiling a file 
+# this file will have information on the dimenctions it supports and who it is unqiue
+# example name: caesar_v  unqiue_identifer: 0X1F48AQ9%*_D DIMS: 3-5 
+
 target_compile_definitions(caesar_objs PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
 

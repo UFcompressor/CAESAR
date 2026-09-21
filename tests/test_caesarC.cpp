@@ -133,6 +133,20 @@ size_t calculate_metadata_size(const CompressionResult &result) {
       total_bytes += s.size();
   }
 
+  total_bytes += sizeof(result.correction_method);
+  if (result.correction_method == caesar::CorrectionMethod::NGLR) {
+    const auto &m = result.nglrMetaData;
+    total_bytes += sizeof(m.schema_version) + sizeof(m.correction_occurred) +
+                   sizeof(m.constant_input) + 5 * sizeof(double) +
+                   3 * sizeof(int64_t) + 3 * sizeof(int32_t);
+    total_bytes += 3 * sizeof(uint64_t) + m.shape.size() * sizeof(int64_t);
+    total_bytes += result.nglr_comp_data.size();
+    for (const auto &w : m.weights)
+      total_bytes += 3 * sizeof(uint64_t) + w.name.size() +
+                     w.shape.size() * sizeof(int64_t) +
+                     w.values.size() * sizeof(float);
+  }
+
   return total_bytes;
 }
 
@@ -254,9 +268,9 @@ bool save_compression_result_metadata(const CompressionResult &result,
   // // Save latent_indexes
   // write_2d_vector(result.latent_indexes);
 
-  // Save use_lbrc
-  file.write(reinterpret_cast<const char *>(&result.use_lbrc),
-             sizeof(result.use_lbrc));
+  // Save correction_method
+  file.write(reinterpret_cast<const char *>(&result.correction_method),
+             sizeof(result.correction_method));
 
   // Save lbrcMetaData
   file.write(reinterpret_cast<const char *>(&lbrc_meta.lbrc_correction_occur),
@@ -290,6 +304,44 @@ bool save_compression_result_metadata(const CompressionResult &result,
     }
   }
 
+  if (result.correction_method == caesar::CorrectionMethod::NGLR) {
+    const auto &m = result.nglrMetaData;
+    auto scalar = [&](const auto &value) {
+      file.write(reinterpret_cast<const char *>(&value), sizeof(value));
+    };
+    auto vector = [&](const auto &values) {
+      const uint64_t n = values.size();
+      scalar(n);
+      using T = typename std::decay_t<decltype(values)>::value_type;
+      if (n)
+        file.write(reinterpret_cast<const char *>(values.data()),
+                   n * sizeof(T));
+    };
+    scalar(m.schema_version);
+    scalar(m.correction_occurred);
+    scalar(m.constant_input);
+    scalar(m.quantization.x_mean);
+    scalar(m.quantization.scale);
+    scalar(m.quantization.step);
+    scalar(m.quantization.q_context_scale);
+    scalar(m.quantization.delta_scale);
+    scalar(m.quantization.block_t);
+    scalar(m.quantization.block_h);
+    scalar(m.quantization.block_w);
+    scalar(m.hidden);
+    scalar(m.q_hidden);
+    scalar(m.model_blocks);
+    vector(m.shape);
+    scalar(static_cast<uint64_t>(m.weights.size()));
+    for (const auto &weight : m.weights) {
+      vector(weight.name);
+      vector(weight.shape);
+      vector(weight.values);
+    }
+    vector(result.nglr_comp_data);
+    if (!file)
+      throw std::runtime_error("Failed writing NGLR metadata");
+  }
   file.close();
   return true;
 }
@@ -367,7 +419,10 @@ int main(int argc, char *argv[]) {
 
     std::cout << "Error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
-    CompressionResult comp = compressor.compress(config, batch_size, rel_eb);
+    // Select correction here for testing; configuration cleanup is deferred.
+    const auto correction_method = caesar::CorrectionMethod::GAE;
+    CompressionResult comp =
+        compressor.compress(config, batch_size, rel_eb, correction_method);
     auto end_timeC = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsC =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC -
