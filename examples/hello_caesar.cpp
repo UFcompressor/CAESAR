@@ -47,6 +47,7 @@ int main() {
               << ", max=" << raw_max << "\n";
 
     // Convert the input to CAESAR's 5D representation and pad if necessary.
+    //  TODO REMOVE PADDING NEEDS TO HAPPEN interally for CAESAR included in meta data
     PaddingInfo padding_info;
     torch::Tensor padded_5d;
     std::tie(padded_5d, padding_info) = to_5d(raw);
@@ -57,28 +58,15 @@ int main() {
 
     DatasetConfig config;
     config.memory_data = padded_5d;
-    config.variable_idx = 0;
 
     // Number of time frames processed per temporal window.
     config.n_frame = 8;
 
-    config.dataset_name = "hello_caesar";
-    config.section_range = std::nullopt;
-    config.frame_range = std::nullopt;
-    config.train_size = 256;
-    config.inst_norm = true;
-    config.norm_type = "mean_range";
-    config.train_mode = false;
-    config.n_overlap = 0;
-    config.test_size = {dim_x, dim_y};
-    config.augment_type = {};
-
-    const int batch_size = 128;
     const float rel_eb = 1e-4f;
-
-    Compressor compressor(device);
+// you compile it for a ceratin device you have have to do it for a different device so no point in device
+    Compressor compressor;
     CompressionResult compressed =
-        compressor.compress(config, batch_size, rel_eb);
+        compressor.compress(config,rel_eb);
 
     // Calculate the size of the encoded latent streams.
     uint64_t compressed_bytes = 0;

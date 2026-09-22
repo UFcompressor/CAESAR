@@ -15,7 +15,29 @@
 
 ## Planned work
 
-- [ ] Clean up the compression and decompression configuration API.
+- [ ] Next: simplify the public compression and decompression API, then update
+  the CLI, existing tests, example, and ADIOS integration to use it.
+  - Use the current edits in `examples/hello_caesar.cpp` as the reference sketch
+    for how the finished public API should look; the example is intentionally
+    ahead of the implementation and may not compile until this work is done.
+  - Accept the caller's original 3D-5D tensor and perform conversion to CAESAR's
+    internal 5D representation inside the library.
+  - For a 5D input, always select variable index 0; document this behavior in
+    the public API.
+  - Keep `n_frame` as a required compression configuration value.
+  - Put the correction method in the compression configuration, with GAE as the
+    default and LBRC and NGLR as alternatives.
+  - Remove batch size from the public API and use a fixed internal batch size of
+    128 for compression and decompression.
+  - Remove device selection from the public constructors; use the device for
+    which the installed model was compiled.
+  - Return the compressed payload with all metadata needed for decompression,
+    including the original shape, internal shape-conversion information,
+    `n_frame`, correction method, and model identity.
+  - Make decompression consume that self-describing result and restore the
+    original user-visible shape internally.
+  - Preserve this metadata in the ADIOS compressed-buffer format and update the
+    executable, `examples/hello_caesar.cpp`, and existing tests for the new API.
 - [ ] Add CAESAR-owned serialization methods for ADIOS integration; preserve model identity and all data needed for decoding.
 - [ ] Make GPU-compressed data portable to CPU decompression by serializing latent indexes and ensuring the matching `*.bin` probability tables travel with the compressed data or its model artifact. Evaluate bit packing for indexes after checking their value range.
 - [ ] Document developer workflows, artifact contracts, and validation behavior.
