@@ -195,7 +195,6 @@ int main() {
 
     std::filesystem::create_directories(out_dir);
 
-    const int batch_size = 128;
     const int n_frame = 8;
     torch::Tensor raw = loadRawBinary(raw_path, shape);
 
@@ -206,40 +205,24 @@ int main() {
     float raw_max = raw.max().item<float>();
     auto raw_shape = raw.sizes().vec();
 
-    PaddingInfo padding_info;
-    torch::Tensor padded_5d;
-    std::tie(padded_5d, padding_info) = to_5d(raw);
-    padded_5d = padded_5d.contiguous();
-    raw = torch::Tensor();
-
     torch::Device compression_device = select_model_device();
     torch::Device decompression_device = select_model_device();
 
     std::cout << "\n===== COMPRESSION =====\n";
-    Compressor compressor(compression_device);
+    Compressor compressor;
 
-    DatasetConfig config;
-    config.memory_data = padded_5d;
-    config.variable_idx = 0;
+    CompressionConfig config;
+    config.memory_data = raw;
+
     config.n_frame = n_frame;
-    config.dataset_name = "TCf48 Dataset";
-    config.section_range = std::nullopt;
-    config.frame_range = std::nullopt;
-    config.train_size = 256;
-    config.inst_norm = true;
-    config.norm_type = "mean_range";
-    config.train_mode = false;
-    config.n_overlap = 0;
-    config.test_size = {256, 256};
-    config.augment_type = {};
 
     float rel_eb = 0.0001f;
     std::cout << "error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
-    // Select correction here for testing; configuration cleanup is deferred.
+    // Select the correction method through the compression configuration.
     const auto correction_method = caesar::CorrectionMethod::GAE;
-    CompressionResult comp =
-        compressor.compress(config, batch_size, rel_eb, correction_method);
+    config.correction_method = correction_method;
+    CompressionResult comp = compressor.compress(config, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsC =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC -
@@ -323,9 +306,8 @@ int main() {
     }
 
     auto start_timeD = std::chrono::high_resolution_clock::now();
-    Decompressor decompressor(decompression_device);
-    torch::Tensor recon =
-        decompressor.decompress(batch_size, config.n_frame, comp);
+    Decompressor decompressor;
+    torch::Tensor recon = decompressor.decompress(comp);
     auto end_timeD = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsD =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeD -
@@ -340,7 +322,7 @@ int main() {
 
     std::cout << "Reconstructed tensor shape: " << recon.sizes() << "\n";
 
-    torch::Tensor restored = restore_from_5d(recon, padding_info);
+    torch::Tensor restored = recon;
     recon = torch::Tensor();
 
     torch::Tensor raw_for_metrics = loadRawBinary(raw_path, shape).squeeze();

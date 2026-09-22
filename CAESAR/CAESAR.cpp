@@ -1,10 +1,10 @@
+#include "cli_result_header.h"
 #include "data_utils.h"
 #include "dataset/dataset.h"
 #include "models/caesar_compress.h"
 #include "models/caesar_decompress.h"
 
 void save_complete_metadata(const std::string &filename,
-                            const PaddingInfo &padding_info,
                             const CompressionResult &comp) {
   std::ofstream file(filename, std::ios::binary);
   if (!file.is_open()) {
@@ -12,26 +12,9 @@ void save_complete_metadata(const std::string &filename,
                              filename);
   }
 
-  // Save PaddingInfo
-  size_t size = padding_info.original_shape.size();
-  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char *>(padding_info.original_shape.data()),
-             size * sizeof(int64_t));
+  caesar::cli::write_result_header(file, comp);
 
-  file.write(reinterpret_cast<const char *>(&padding_info.original_length),
-             sizeof(padding_info.original_length));
-
-  size = padding_info.padded_shape.size();
-  file.write(reinterpret_cast<const char *>(&size), sizeof(size));
-  file.write(reinterpret_cast<const char *>(padding_info.padded_shape.data()),
-             size * sizeof(int64_t));
-
-  file.write(reinterpret_cast<const char *>(&padding_info.H),
-             sizeof(padding_info.H));
-  file.write(reinterpret_cast<const char *>(&padding_info.W),
-             sizeof(padding_info.W));
-  file.write(reinterpret_cast<const char *>(&padding_info.was_padded),
-             sizeof(padding_info.was_padded));
+  size_t size;
 
   // Save CompressionMetaData
   const auto &meta = comp.compressionMetaData;
@@ -202,8 +185,7 @@ void save_complete_metadata(const std::string &filename,
   file.close();
 }
 
-CompressionResult load_complete_metadata(const std::string &filename,
-                                         PaddingInfo &padding_info) {
+CompressionResult load_complete_metadata(const std::string &filename) {
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Cannot open metadata file for reading: " +
@@ -211,26 +193,9 @@ CompressionResult load_complete_metadata(const std::string &filename,
   }
 
   CompressionResult comp;
+  caesar::cli::read_result_header(file, comp);
 
-  // Load PaddingInfo
   size_t size;
-  file.read(reinterpret_cast<char *>(&size), sizeof(size));
-  padding_info.original_shape.resize(size);
-  file.read(reinterpret_cast<char *>(padding_info.original_shape.data()),
-            size * sizeof(int64_t));
-
-  file.read(reinterpret_cast<char *>(&padding_info.original_length),
-            sizeof(padding_info.original_length));
-
-  file.read(reinterpret_cast<char *>(&size), sizeof(size));
-  padding_info.padded_shape.resize(size);
-  file.read(reinterpret_cast<char *>(padding_info.padded_shape.data()),
-            size * sizeof(int64_t));
-
-  file.read(reinterpret_cast<char *>(&padding_info.H), sizeof(padding_info.H));
-  file.read(reinterpret_cast<char *>(&padding_info.W), sizeof(padding_info.W));
-  file.read(reinterpret_cast<char *>(&padding_info.was_padded),
-            sizeof(padding_info.was_padded));
 
   // Load CompressionMetaData
   CompressionMetaData meta;
@@ -485,8 +450,7 @@ std::vector<std::string> load_encoded_streams(const std::string &filename) {
   std::vector<std::string> out;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
-    std::cerr << "Error: Cannot open file to read: " << filename << std::endl;
-    return out;
+    throw std::runtime_error("Cannot open stream file: " + filename);
   }
   uint64_t len;
   while (file.read(reinterpret_cast<char *>(&len), sizeof(len))) {
@@ -513,8 +477,8 @@ void print_usage(const char *program_name) {
   std::cout << "Common Options:\n";
   std::cout << "  -o, --output <file>      Output file path\n";
   std::cout << "  -s, --shape <shape>      Data shape (e.g., 1,24,256,256)\n";
-  std::cout << "  -b, --batch-size <n>     Batch size (default: 128)\n";
-  std::cout << "  -f, --n-frame <n>        Number of frames (default: 8)\n";
+  std::cout
+      << "  -f, --n-frame <n>        Required for compression (must be 8)\n";
   std::cout << "  -t, --timing             Show timing information\n";
   std::cout << "  -v, --verbose            Verbose output\n";
   std::cout << "  -q, --quiet              Suppress output\n";
@@ -522,11 +486,9 @@ void print_usage(const char *program_name) {
   std::cout << "Compression Options:\n";
   std::cout << "  -e, --error-bound <val>  Error bound (default: 0.001)\n";
   std::cout << "  --correction <method>    gae (default), lbrc, or nglr\n";
-  std::cout << "  --compress-device <dev>  Device (cpu/cuda)\n";
   std::cout << "  --metadata               Show detailed metadata\n";
   std::cout << "  --metrics-csv <file>     Save metrics to CSV\n\n";
   std::cout << "Decompression Options:\n";
-  std::cout << "  --decompress-device <dev> Device (cpu/cuda)\n";
   std::cout << "  --verify                  Verify reconstruction\n";
   std::cout << "  --original <file>         Original file for verification\n";
 }
@@ -539,64 +501,6 @@ std::vector<int64_t> parse_shape(const std::string &shape_str) {
     shape.push_back(std::stoll(item));
   }
   return shape;
-}
-
-torch::Device auto_select_device() {
-#ifdef USE_CUDA
-  if (torch::cuda::is_available()) {
-    return torch::Device(torch::kCUDA, 0);
-  }
-#endif
-#if __has_include(<torch/mps.h>)
-  if (torch::mps::is_available()) {
-    return torch::Device(torch::kMPS);
-  }
-#endif
-#if __has_include(<torch/xpu.h>)
-  if (torch::xpu::is_available()) {
-    return torch::Device(torch::kXPU);
-  }
-#endif
-  return torch::Device(torch::kCPU);
-}
-
-torch::Device parse_device(const std::string &device_str) {
-  if (device_str == "cpu") {
-    return torch::Device(torch::kCPU);
-  } else if (device_str.substr(0, 4) == "cuda") {
-    if (!torch::cuda::is_available()) {
-      std::cerr << "Warning: CUDA not available, using CPU\n";
-      return torch::Device(torch::kCPU);
-    }
-    if (device_str.size() > 5 && device_str[4] == ':') {
-      int device_id = std::stoi(device_str.substr(5));
-      return torch::Device(torch::kCUDA, device_id);
-    }
-    return torch::Device(torch::kCUDA, 0);
-  } else if (device_str == "mps") {
-#if __has_include(<torch/mps.h>)
-    if (!torch::mps::is_available()) {
-      std::cerr << "Warning: MPS not available, using CPU\n";
-      return torch::Device(torch::kCPU);
-    }
-    return torch::Device(torch::kMPS);
-#else
-    std::cerr << "Warning: MPS support unavailable in this build, using CPU\n";
-    return torch::Device(torch::kCPU);
-#endif
-  } else if (device_str == "xpu") {
-#if __has_include(<torch/xpu.h>)
-    if (!torch::xpu::is_available()) {
-      std::cerr << "Warning: XPU not available, using CPU\n";
-      return torch::Device(torch::kCPU);
-    }
-    return torch::Device(torch::kXPU);
-#else
-    std::cerr << "Warning: XPU support unavailable in this build, using CPU\n";
-    return torch::Device(torch::kCPU);
-#endif
-  }
-  throw std::runtime_error("Invalid device string: " + device_str);
 }
 
 double calculate_psnr(const torch::Tensor &original,
@@ -671,11 +575,11 @@ void save_metrics_to_csv(
 
 int compress_file(const std::string &input_file, const std::string &output_file,
                   const std::vector<int64_t> &shape, float error_bound,
-                  int batch_size, int n_frame, const std::string &model_type,
-                  torch::Device compress_device, bool show_timing,
+                  int n_frame, const std::string &model_type, bool show_timing,
                   bool show_metadata, bool verbose, bool quiet,
                   const std::string &metrics_csv,
                   caesar::CorrectionMethod correction_method) {
+  const auto compress_device = select_model_device();
   if (!quiet) {
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
@@ -683,43 +587,25 @@ int compress_file(const std::string &input_file, const std::string &output_file,
     std::cout << "Model: " << model_type << "\n";
     std::cout << "Compression device: " << compress_device << "\n";
     std::cout << "Error bound: " << error_bound << "\n";
-    std::cout << "Batch size: " << batch_size << "\n";
     std::cout << "N-frame: " << n_frame << "\n\n";
   }
 
   torch::Tensor raw = load_raw_binary(input_file, shape, verbose);
-  raw = raw.squeeze();
 
   if (verbose) {
-    std::cout << "After squeeze, shape: " << raw.sizes() << "\n";
+    std::cout << "Input shape: " << raw.sizes() << "\n";
   }
 
-  PaddingInfo padding_info;
-  torch::Tensor padded_5d;
-  std::tie(padded_5d, padding_info) = to_5d(raw);
-  padded_5d = padded_5d.contiguous();
-  raw = torch::Tensor();
+  Compressor compressor;
 
-  Compressor compressor(compress_device);
+  CompressionConfig config;
+  config.memory_data = raw;
 
-  DatasetConfig config;
-  config.memory_data = padded_5d;
-  config.variable_idx = 0;
   config.n_frame = n_frame;
-  config.dataset_name = "CAESAR Compression Dataset";
-  config.section_range = std::nullopt;
-  config.frame_range = std::nullopt;
-  config.train_size = 256;
-  config.inst_norm = true;
-  config.norm_type = "mean_range";
-  config.train_mode = false;
-  config.n_overlap = 0;
-  config.test_size = {256, 256};
-  config.augment_type = {};
 
   auto start_time_c = std::chrono::high_resolution_clock::now();
-  CompressionResult comp =
-      compressor.compress(config, batch_size, error_bound, correction_method);
+  config.correction_method = correction_method;
+  CompressionResult comp = compressor.compress(config, error_bound);
   auto end_time_c = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<double> compression_time = end_time_c - start_time_c;
@@ -744,7 +630,7 @@ int compress_file(const std::string &input_file, const std::string &output_file,
   }
 
   try {
-    save_complete_metadata(metadata_file, padding_info, comp);
+    save_complete_metadata(metadata_file, comp);
   } catch (const std::exception &e) {
     std::cerr << "Failed to save metadata: " << e.what() << "\n";
     return 1;
@@ -762,12 +648,11 @@ int compress_file(const std::string &input_file, const std::string &output_file,
 }
 
 int decompress_file(const std::string &input_base,
-                    const std::string &output_file,
-                    const std::vector<int64_t> &original_shape, int batch_size,
-                    int n_frame, torch::Device decompress_device,
-                    bool show_timing, bool verbose, bool quiet, bool verify,
+                    const std::string &output_file, bool show_timing,
+                    bool verbose, bool quiet, bool verify,
                     const std::string &original_file,
                     const std::string &metrics_csv) {
+  const auto decompress_device = select_model_device();
   if (!quiet) {
     std::cout << "=== CAESAR DECOMPRESSION ===\n";
     std::cout << "Input base: " << input_base << "\n";
@@ -782,21 +667,15 @@ int decompress_file(const std::string &input_base,
   std::vector<std::string> loaded_latents = load_encoded_streams(latents_file);
   std::vector<std::string> loaded_hyper = load_encoded_streams(hyper_file);
 
-  if (loaded_latents.empty() || loaded_hyper.empty()) {
-    std::cerr << "Error: Failed to load compressed streams\n";
-    return 1;
-  }
-
   if (verbose) {
     std::cout << "Loaded " << loaded_latents.size() << " latent streams and "
               << loaded_hyper.size() << " hyper streams\n";
   }
 
-  PaddingInfo padding_info;
   CompressionResult comp;
 
   try {
-    comp = load_complete_metadata(metadata_file, padding_info);
+    comp = load_complete_metadata(metadata_file);
   } catch (const std::exception &e) {
     std::cerr << "Failed to load metadata: " << e.what() << "\n";
     return 1;
@@ -808,8 +687,8 @@ int decompress_file(const std::string &input_base,
   std::cout << "Metadata loaded successfully\n";
 
   auto start_time_d = std::chrono::high_resolution_clock::now();
-  Decompressor decompressor(decompress_device);
-  torch::Tensor recon = decompressor.decompress(batch_size, n_frame, comp);
+  Decompressor decompressor;
+  torch::Tensor recon = decompressor.decompress(comp);
   auto end_time_d = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<double> decompression_time = end_time_d - start_time_d;
@@ -828,7 +707,7 @@ int decompress_file(const std::string &input_base,
     std::cout << "Reconstructed tensor shape: " << recon.sizes() << "\n";
   }
 
-  torch::Tensor restored = restore_from_5d(recon, padding_info);
+  torch::Tensor restored = recon;
 
   if (verbose) {
     std::cout << "Restored tensor shape: " << restored.sizes() << "\n";
@@ -841,8 +720,9 @@ int decompress_file(const std::string &input_base,
       std::cout << "\n Verifying reconstruction...\n";
 
     torch::Tensor original =
-        load_raw_binary(original_file, original_shape, false);
-    original = original.squeeze();
+        load_raw_binary(original_file, comp.original_shape, false);
+    if (original.dim() == 5)
+      original = original.narrow(0, 0, 1);
 
     torch::Tensor orig_cpu = original.to(torch::kCPU);
     torch::Tensor recon_cpu = restored.to(torch::kCPU);
@@ -850,8 +730,9 @@ int decompress_file(const std::string &input_base,
     torch::Tensor diff = recon_cpu - orig_cpu;
     double mse = diff.pow(2).mean().item<double>();
     double rmse = std::sqrt(mse);
-    double nrmse =
-        rmse / (orig_cpu.max().item<double>() - orig_cpu.min().item<double>());
+    double range =
+        orig_cpu.max().item<double>() - orig_cpu.min().item<double>();
+    double nrmse = range == 0.0 ? rmse : rmse / range;
     double psnr = calculate_psnr(original, restored);
 
     if (!quiet) {
@@ -864,13 +745,14 @@ int decompress_file(const std::string &input_base,
 
     if (!metrics_csv.empty()) {
       uint64_t num_elements = 1;
-      for (auto d : original_shape)
+      for (auto d : comp.shape_info.original_shape)
         num_elements *= static_cast<uint64_t>(d);
       uint64_t uncompressed_bytes = num_elements * sizeof(float);
 
-      save_metrics_to_csv(metrics_csv, original_file, original_shape, 0.0,
+      save_metrics_to_csv(metrics_csv, original_file,
+                          comp.shape_info.original_shape, 0.0,
                           decompression_time.count(), uncompressed_bytes, 0, 0,
-                          0.0, 0.0, nrmse, psnr, 0.0, batch_size, n_frame, "V",
+                          0.0, 0.0, nrmse, psnr, 0.0, 128, comp.n_frame, "V",
                           "N/A", decompress_device.is_cuda() ? "cuda" : "cpu");
     }
   }
@@ -913,11 +795,8 @@ int main(int argc, char *argv[]) {
     std::vector<int64_t> shape;
     float error_bound = 0.001f;
     auto correction_method = caesar::CorrectionMethod::GAE;
-    int batch_size = 128;
-    int n_frame = 8;
+    int n_frame = 0;
     std::string model_type = get_model_name();
-    std::string compress_device_str;
-    std::string decompress_device_str;
     bool show_timing = false;
     bool show_metadata = false;
     bool verbose = false;
@@ -935,16 +814,10 @@ int main(int argc, char *argv[]) {
         shape = parse_shape(argv[++i]);
       } else if ((arg == "-e" || arg == "--error-bound") && i + 1 < argc) {
         error_bound = std::stof(argv[++i]);
-      } else if ((arg == "-b" || arg == "--batch-size") && i + 1 < argc) {
-        batch_size = std::stoi(argv[++i]);
       } else if ((arg == "-f" || arg == "--n-frame") && i + 1 < argc) {
         n_frame = std::stoi(argv[++i]);
       } else if (arg == "--correction" && i + 1 < argc) {
         correction_method = caesar::correction_method_from_string(argv[++i]);
-      } else if (arg == "--compress-device" && i + 1 < argc) {
-        compress_device_str = argv[++i];
-      } else if (arg == "--decompress-device" && i + 1 < argc) {
-        decompress_device_str = argv[++i];
       } else if (arg == "-t" || arg == "--timing") {
         show_timing = true;
       } else if (arg == "--metadata") {
@@ -959,6 +832,8 @@ int main(int argc, char *argv[]) {
         metrics_csv = argv[++i];
       } else if (arg == "--original" && i + 1 < argc) {
         original_file = argv[++i];
+      } else {
+        throw std::invalid_argument("Unknown option or missing value: " + arg);
       }
     }
 
@@ -969,23 +844,21 @@ int main(int argc, char *argv[]) {
         return 1;
       }
 
-      torch::Device compress_device = compress_device_str.empty()
-                                          ? auto_select_device()
-                                          : parse_device(compress_device_str);
+      if (n_frame != 8)
+        throw std::invalid_argument("Compression requires --n-frame 8");
 
       if (output_file.empty()) {
         output_file = input_file + ".cae";
       }
 
-      return compress_file(input_file, output_file, shape, error_bound,
-                           batch_size, n_frame, model_type, compress_device,
-                           show_timing, show_metadata, verbose, quiet,
-                           metrics_csv, correction_method);
+      return compress_file(input_file, output_file, shape, error_bound, n_frame,
+                           model_type, show_timing, show_metadata, verbose,
+                           quiet, metrics_csv, correction_method);
 
     } else if (command == "decompress") {
-      torch::Device decompress_device =
-          decompress_device_str.empty() ? auto_select_device()
-                                        : parse_device(decompress_device_str);
+      if (n_frame != 0 || !shape.empty())
+        throw std::invalid_argument("Decompression reads shape and n_frame "
+                                    "from metadata; omit -s and -f");
 
       if (output_file.empty()) {
         std::string base = input_file;
@@ -1000,8 +873,7 @@ int main(int argc, char *argv[]) {
         verify = false;
       }
 
-      return decompress_file(input_file, output_file, shape, batch_size,
-                             n_frame, decompress_device, show_timing, verbose,
+      return decompress_file(input_file, output_file, show_timing, verbose,
                              quiet, verify, original_file, metrics_csv);
     }
 

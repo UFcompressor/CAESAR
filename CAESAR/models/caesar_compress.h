@@ -4,6 +4,7 @@
 #include <thread>
 #include <utility>
 
+#include "../data_utils.h"
 #include "../dataset/dataset.h"
 #include "array_utils.h"
 #include "correction_method.h"
@@ -13,6 +14,16 @@
 #include "nglr.h"
 #include "range_coder/rans_coder.hpp"
 #include "runGaeCuda.h"
+
+// Pass the original [T,H,W], [S,T,H,W], or [V,S,T,H,W] tensor.
+// For 5D input only variable 0 is encoded; decoding returns [1,S,T,H,W].
+struct CompressionConfig {
+  torch::Tensor memory_data;
+  // Required. The current compiled architecture supports eight-frame windows.
+  int n_frame = 0;
+  caesar::CorrectionMethod correction_method = caesar::CorrectionMethod::GAE;
+  nglr::NGLRTrainOptions nglr_options;
+};
 
 struct GAEMetaData {
   bool GAE_correction_occur = false;
@@ -43,6 +54,13 @@ struct CompressionMetaData {
 };
 
 struct CompressionResult {
+  // Full caller shape, including the original variable count for 5D input.
+  std::vector<int64_t> original_shape;
+  // Conversion metadata describes the selected variable and restored shape.
+  PaddingInfo shape_info{};
+  int n_frame = 0;
+  std::string model_id;
+
   std::vector<std::string> encoded_latents;
   std::vector<std::string> encoded_hyper_latents;
   // std::vector<std::vector<uint8_t>> latent_indexes;
@@ -66,15 +84,11 @@ struct CompressionResult {
 
 class Compressor {
 public:
-  explicit Compressor(torch::Device device = torch::Device(torch::kCPU),
-                      const std::string &required_model_id = "");
+  explicit Compressor(const std::string &required_model_id = "");
   ~Compressor() = default;
 
-  CompressionResult compress(const DatasetConfig &config, int batch_size = 32,
-                             float rel_eb = 0.1,
-                             caesar::CorrectionMethod correction_method =
-                                 caesar::CorrectionMethod::GAE,
-                             const nglr::NGLRTrainOptions &nglr_options = {});
+  CompressionResult compress(const CompressionConfig &config,
+                             float rel_eb = 0.1);
 
 private:
   const std::thread::id owner_thread_ = std::this_thread::get_id();

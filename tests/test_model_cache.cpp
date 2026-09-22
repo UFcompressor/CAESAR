@@ -31,8 +31,7 @@ static int run_model_cache_tests(int argc, char **argv) {
       throw;
   }
   try {
-    Decompressor wrong(torch::Device(torch::kCPU),
-                       "ufl:999999@sha256:" + std::string(64, '0'));
+    Decompressor wrong("ufl:999999@sha256:" + std::string(64, '0'));
     throw std::logic_error("Decompressor accepted wrong identity");
   } catch (const std::runtime_error &error) {
     if (std::string(error.what()).find("Required CAESAR model") ==
