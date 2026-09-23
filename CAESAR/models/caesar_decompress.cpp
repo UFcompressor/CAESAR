@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <future>
+#include <limits>
 
 #include "range_coder/rans_cuda.h"
 
@@ -68,15 +69,10 @@ torch::Tensor build_indexes_tensor(const std::vector<int32_t> &size) {
   return indexes.expand(size_int64).to(torch::kInt32);
 }
 
-Decompressor::Decompressor(torch::Device device,
-                           const std::string &required_model_id)
-    : device_(device) {
+Decompressor::Decompressor(const std::string &required_model_id)
+    : device_(select_model_device()) {
   if (!required_model_id.empty())
     require_model(required_model_id);
-  if (device_.type() != select_model_device().type())
-    throw std::runtime_error(
-        "Runtime device does not match the compiled CAESAR model device: " +
-        get_model_device());
   initialize_model_runtime();
   load_models();
   load_probability_tables();
@@ -109,9 +105,43 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor &batch_data,
   return permuted_data;
 }
 
-torch::Tensor Decompressor::decompress(const unsigned int batch_size,
-                                       const unsigned int n_frame,
-                                       const CompressionResult &comp_result) {
+torch::Tensor Decompressor::decompress(const CompressionResult &comp_result) {
+  require_model(comp_result.model_id);
+  if (comp_result.n_frame != 8)
+    throw std::invalid_argument(
+        "Compressed n_frame must be 8 for this architecture");
+  const auto &shape = comp_result.original_shape;
+  if (shape.size() < 3 || shape.size() > 5 ||
+      std::any_of(shape.begin(), shape.end(), [](int64_t d) { return d <= 0; }))
+    throw std::invalid_argument("Invalid original shape in compression result");
+  auto selected_shape = shape;
+  if (shape.size() == 5)
+    selected_shape[0] = 1;
+  auto internal_shape = selected_shape;
+  internal_shape.insert(internal_shape.begin(), 5 - selected_shape.size(), 1);
+  int64_t length = 1;
+  for (auto dim : selected_shape) {
+    if (length > std::numeric_limits<int64_t>::max() / dim)
+      throw std::invalid_argument("Original shape overflows element count");
+    length *= dim;
+  }
+  if (comp_result.shape_info.padded_shape != internal_shape ||
+      comp_result.shape_info.original_length != length ||
+      comp_result.shape_info.original_shape != selected_shape)
+    throw std::invalid_argument("Inconsistent shape conversion metadata");
+  caesar::correction_method_from_byte(
+      static_cast<uint8_t>(comp_result.correction_method));
+  if (comp_result.encoded_latents.size() !=
+      comp_result.encoded_hyper_latents.size())
+    throw std::invalid_argument("Mismatched latent stream counts");
+  auto reconstruction = decompress_internal(comp_result);
+  return restore_from_5d(reconstruction, comp_result.shape_info);
+}
+
+torch::Tensor
+Decompressor::decompress_internal(const CompressionResult &comp_result) {
+  constexpr unsigned int batch_size = 128;
+  const auto n_frame = comp_result.n_frame;
   if (std::this_thread::get_id() != owner_thread_)
     throw std::runtime_error("Create a separate CAESAR compressor/decompressor "
                              "in each calling thread");
@@ -299,7 +329,7 @@ torch::Tensor Decompressor::decompress(const unsigned int batch_size,
   if (!meta.filtered_blocks.empty()) {
     const int64_t S = static_cast<int64_t>(meta.data_input_shape[1]);
     const int64_t T = static_cast<int64_t>(meta.data_input_shape[2]);
-    const int64_t nf = 8;
+    const int64_t nf = n_frame;
     const int64_t samples = T / nf;
     const int64_t SS = S * samples;
 

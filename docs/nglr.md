@@ -70,7 +70,7 @@ that later integration.
 
 ```sh
 build/CAESAR/caesar compress input.bin --shape 1,1,20,256,256 \
-  --error-bound 0.00001 --correction nglr --compress-device cpu
+  --error-bound 0.00001 --correction nglr --n-frame 8
 build/tests/test_caesarC 0.00001
 build/tests/test_caesarD
 build/tests/test_caesarCD

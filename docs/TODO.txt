@@ -13,9 +13,40 @@
 - Padding may also contribute to bound failures; this is a hypothesis, not a confirmed cause. Another run at EB=5e-06 checked 4,488 variables over 204 steps and found 1,140 failures, with maximum NRMSE 1.784122e-05. Several `Diagnostics/*` variables failed, including `ParticleTemp` and `Tpar`. GAE appears to become active in this case, unlike the `rho` example, but causality has not been established.
 - LBRC has shown the same `rho` error-bound issue. It may also affect `gx`, but that remains unverified. Do not attribute the observed failures solely to GAE or LBRC without isolating the cause.
 
+## CPU API validation completed
+
+- CPU library, CLI, and example build passed with the installed caesar_v2 model.
+- test_caesarC, test_caesarD, and test_caesarCD passed using their existing
+  20x256x256 fixture. D and CD measured NRMSE 9.75445e-05 at target 0.0001.
+- The updated tests/test_CLI.sh passed on the full real TCf48.bin.f32 file at
+  build/tests/100x500x500/TCf48.bin.f32 (100x500x500 float32, 100,000,000 bytes).
+  At target 0.001, GAE measured NRMSE 6.994591e-04 and LBRC 9.999986e-04;
+  both reconstructed files had the original byte count. The shell now fails
+  when NRMSE exceeds the target or file sizes differ.
+- The 11 model-registry tests and existing CPU unit binaries returned success;
+  see docs/public_api.md for details and Release-build assertion limitations.
+- ADIOS was not changed or tested. Its API migration is the next integration
+  task. GPU testing, GPU-to-CPU portability, and NGLR full-pipeline validation
+  remain pending; CPU results do not establish a general error-bound guarantee.
+
 ## Planned work
 
-- [ ] Clean up the compression and decompression configuration API.
+- [x] Simplify the public compression and decompression API and update the
+  CLI, existing tests, and example (see docs/public_api.md).
+  - CompressionConfig accepts the caller's original 3D-5D tensor; shape
+    conversion and padding happen inside the library.
+  - For 5D input, select variable index 0 and restore [1,S,T,H,W].
+  - Require n_frame=8; other values are currently unsupported.
+  - Configure GAE (default), LBRC, or NGLR in CompressionConfig.
+  - Use fixed internal compression/decompression batches of 128 and infer the
+    device from the installed model instead of public constructor arguments.
+  - CompressionResult carries the original shape, shape-conversion metadata,
+    n_frame, correction method, and model identity. Decompression consumes the
+    result and restores the selected input shape internally.
+  - CLI and C/D test metadata carry the new API fields in a versioned header;
+    older files require recompression.
+- [ ] Next: migrate ADIOS integration to the simplified API and preserve its metadata
+  in the compressed-buffer format. Deferred separately from the CPU API work.
 - [ ] Add CAESAR-owned serialization methods for ADIOS integration; preserve model identity and all data needed for decoding.
 - [ ] Make GPU-compressed data portable to CPU decompression by serializing latent indexes and ensuring the matching `*.bin` probability tables travel with the compressed data or its model artifact. Evaluate bit packing for indexes after checking their value range.
 - [ ] Document developer workflows, artifact contracts, and validation behavior.

@@ -1,3 +1,4 @@
+#include "../CAESAR/cli_result_header.h"
 #include "../CAESAR/data_utils.h"
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/caesar_compress.h"
@@ -56,50 +57,14 @@ torch::Tensor loadRawBinary(const std::string &bin_path,
   return t;
 }
 
-PaddingInfo load_padding_info(const std::string &filename) {
-  PaddingInfo padding_info;
-  std::ifstream file(filename, std::ios::binary);
-  if (!file.is_open())
-    throw std::runtime_error("Cannot open padding info file: " + filename);
-
-  // Load original_shape
-  uint64_t shape_size;
-  file.read(reinterpret_cast<char *>(&shape_size), sizeof(shape_size));
-  padding_info.original_shape.resize(shape_size);
-  for (uint64_t i = 0; i < shape_size; ++i) {
-    file.read(reinterpret_cast<char *>(&padding_info.original_shape[i]),
-              sizeof(int64_t));
-  }
-
-  // Load padded_shape
-  uint64_t padded_size;
-  file.read(reinterpret_cast<char *>(&padded_size), sizeof(padded_size));
-  padding_info.padded_shape.resize(padded_size);
-  for (uint64_t i = 0; i < padded_size; ++i) {
-    file.read(reinterpret_cast<char *>(&padding_info.padded_shape[i]),
-              sizeof(int64_t));
-  }
-
-  // Load padding_values
-  file.read(reinterpret_cast<char *>(&padding_info.original_length),
-            sizeof(padding_info.original_length));
-
-  // Load H, W, was_padded
-  file.read(reinterpret_cast<char *>(&padding_info.H), sizeof(padding_info.H));
-  file.read(reinterpret_cast<char *>(&padding_info.W), sizeof(padding_info.W));
-  file.read(reinterpret_cast<char *>(&padding_info.was_padded),
-            sizeof(padding_info.was_padded));
-
-  file.close();
-  return padding_info;
-}
-
 CompressionResult
 load_compression_result_metadata(const std::string &filename) {
   CompressionResult result;
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open())
     throw std::runtime_error("Cannot open metadata file: " + filename);
+
+  caesar::cli::read_result_header(file, result);
 
   // Helper lambda to read vector
   auto read_vector = [&file](auto &vec) {
@@ -289,9 +254,6 @@ int main() {
     const std::string raw_path = "TCf48.bin.f32";
     const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
 
-    const int batch_size = 128;
-    const int n_frame = 8;
-
     std::cout << "\n===== DECOMPRESSION =====\n";
 
     // Load error bound
@@ -340,22 +302,12 @@ int main() {
     comp.encoded_latents = loaded_latents;
     comp.encoded_hyper_latents = loaded_hyper;
 
-    // Load padding info
-    std::cout << "Loading padding info...\n";
-    PaddingInfo padding_info;
-    try {
-      padding_info = load_padding_info(out_dir + "padding_info.bin");
-    } catch (const std::exception &e) {
-      std::cerr << "Error: " << e.what() << "\n";
-      return 1;
-    }
-
     // Decompress
     torch::Device decompression_device = select_model_device();
 
     auto start_timeD = std::chrono::high_resolution_clock::now();
-    Decompressor decompressor(decompression_device);
-    torch::Tensor recon = decompressor.decompress(batch_size, n_frame, comp);
+    Decompressor decompressor;
+    torch::Tensor recon = decompressor.decompress(comp);
     auto end_timeD = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> secondsD =
@@ -371,8 +323,8 @@ int main() {
 
     std::cout << "Reconstructed shape: " << recon.sizes() << "\n";
 
-    // Restore from padding
-    torch::Tensor restored = restore_from_5d(recon, padding_info);
+    // Shape restoration is part of decompression.
+    torch::Tensor restored = recon;
     recon = torch::Tensor();
 
     // Calculate metrics

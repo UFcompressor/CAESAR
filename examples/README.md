@@ -31,3 +31,11 @@ above requests 100,000 steps. To load an existing checkpoint, add
 
 The repository-level `train.sh` contains the same launcher pattern for a real
 multi-dataset training run.
+
+## In-memory C++ round trip
+
+Build with `-DBUILD_EXAMPLES=ON`, then run `build/examples/hello_caesar` with
+`CAESAR_MODEL_DIR` pointing to the exported model installation. The example
+passes an original 3D tensor with `CompressionConfig::n_frame = 8` and restores
+its shape using `decompress(compressed)`. See [the API guide](../docs/public_api.md)
+for correction methods, 5D variable selection, and CPU validation.

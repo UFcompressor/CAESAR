@@ -1,3 +1,4 @@
+#include "../CAESAR/cli_result_header.h"
 #include "../CAESAR/data_utils.h"
 #include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/caesar_compress.h"
@@ -150,43 +151,6 @@ size_t calculate_metadata_size(const CompressionResult &result) {
   return total_bytes;
 }
 
-bool save_padding_info(const PaddingInfo &padding_info,
-                       const std::string &filename) {
-  std::ofstream file(filename, std::ios::binary);
-  if (!file.is_open()) {
-    std::cerr << "Error: Cannot open file to write: " << filename << std::endl;
-    return false;
-  }
-
-  // Save original_shape
-  uint64_t shape_size = padding_info.original_shape.size();
-  file.write(reinterpret_cast<const char *>(&shape_size), sizeof(shape_size));
-  for (int64_t dim : padding_info.original_shape) {
-    file.write(reinterpret_cast<const char *>(&dim), sizeof(dim));
-  }
-
-  // Save padded_shape
-  uint64_t padded_size = padding_info.padded_shape.size();
-  file.write(reinterpret_cast<const char *>(&padded_size), sizeof(padded_size));
-  for (int64_t dim : padding_info.padded_shape) {
-    file.write(reinterpret_cast<const char *>(&dim), sizeof(dim));
-  }
-
-  // Save padding_values
-  file.write(reinterpret_cast<const char *>(&padding_info.original_length),
-             sizeof(padding_info.original_length));
-
-  // Save H, W, was_padded
-  file.write(reinterpret_cast<const char *>(&padding_info.H),
-             sizeof(padding_info.H));
-  file.write(reinterpret_cast<const char *>(&padding_info.W),
-             sizeof(padding_info.W));
-  file.write(reinterpret_cast<const char *>(&padding_info.was_padded),
-             sizeof(padding_info.was_padded));
-  file.close();
-  return true;
-}
-
 bool save_compression_result_metadata(const CompressionResult &result,
                                       const std::string &filename) {
   std::ofstream file(filename, std::ios::binary);
@@ -195,6 +159,7 @@ bool save_compression_result_metadata(const CompressionResult &result,
     return false;
   }
 
+  caesar::cli::write_result_header(file, result);
   const auto &meta = result.compressionMetaData;
   const auto &gae_meta = result.gaeMetaData;
   const auto &lbrc_meta = result.lbrcMetaData;
@@ -384,45 +349,28 @@ int main(int argc, char *argv[]) {
 
     std::filesystem::create_directories(out_dir);
 
-    const int batch_size = 128;
     const int n_frame = 8;
     torch::Tensor raw = loadRawBinary(raw_path, shape);
 
     raw = raw.squeeze();
     std::cout << "After squeeze, shape: " << raw.sizes() << "\n";
 
-    PaddingInfo padding_info;
-    torch::Tensor padded_5d;
-    std::tie(padded_5d, padding_info) = to_5d(raw);
-    padded_5d = padded_5d.contiguous();
-    raw = torch::Tensor();
-
     torch::Device compression_device = select_model_device();
 
     std::cout << "\n===== COMPRESSION =====\n";
-    Compressor compressor(compression_device);
+    Compressor compressor;
 
-    DatasetConfig config;
-    config.memory_data = padded_5d;
-    config.variable_idx = 0;
+    CompressionConfig config;
+    config.memory_data = raw;
+
     config.n_frame = n_frame;
-    config.dataset_name = "TCf48 Dataset";
-    config.section_range = std::nullopt;
-    config.frame_range = std::nullopt;
-    config.train_size = 256;
-    config.inst_norm = true;
-    config.norm_type = "mean_range";
-    config.train_mode = false;
-    config.n_overlap = 0;
-    config.test_size = {256, 256};
-    config.augment_type = {};
 
     std::cout << "Error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
-    // Select correction here for testing; configuration cleanup is deferred.
+    // Select the correction method through the compression configuration.
     const auto correction_method = caesar::CorrectionMethod::GAE;
-    CompressionResult comp =
-        compressor.compress(config, batch_size, rel_eb, correction_method);
+    config.correction_method = correction_method;
+    CompressionResult comp = compressor.compress(config, rel_eb);
     auto end_timeC = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsC =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC -
@@ -449,14 +397,6 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     std::cout << "Metadata written to " << metadata_file << "\n";
-
-    // Save padding info
-    std::string padding_file = out_dir + "padding_info.bin";
-    if (!save_padding_info(padding_info, padding_file)) {
-      std::cerr << "Failed to save padding info\n";
-      return 1;
-    }
-    std::cout << "Padding info written to " << padding_file << "\n";
 
     // Save error bound
     std::string error_bound_file = out_dir + "error_bound.bin";

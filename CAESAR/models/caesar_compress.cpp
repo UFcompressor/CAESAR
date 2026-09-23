@@ -158,15 +158,10 @@ std::vector<T> tensor_to_vector(const torch::Tensor &tensor) {
   return std::vector<T>(ptr, ptr + cpu_tensor.numel());
 }
 
-Compressor::Compressor(torch::Device device,
-                       const std::string &required_model_id)
-    : device_(device) {
+Compressor::Compressor(const std::string &required_model_id)
+    : device_(select_model_device()) {
   if (!required_model_id.empty())
     require_model(required_model_id);
-  if (device_.type() != select_model_device().type())
-    throw std::runtime_error(
-        "Runtime device does not match the compiled CAESAR model device: " +
-        get_model_device());
   initialize_model_runtime();
   load_models();
   load_probability_tables();
@@ -188,10 +183,21 @@ void Compressor::load_probability_tables() {
   gs_offset_ = ModelCache::instance().get_gs_offset();
 }
 
-CompressionResult
-Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
-                     caesar::CorrectionMethod correction_method,
-                     const nglr::NGLRTrainOptions &nglr_options) {
+CompressionResult Compressor::compress(const CompressionConfig &config,
+                                       float rel_eb) {
+  constexpr int batch_size = 128;
+  const auto correction_method = config.correction_method;
+  const auto &nglr_options = config.nglr_options;
+  if (config.n_frame != 8)
+    throw std::invalid_argument(
+        "n_frame is required and must be 8 for the installed architecture");
+  if (!config.memory_data.defined() || config.memory_data.numel() == 0)
+    throw std::invalid_argument("memory_data must be a nonempty tensor");
+  get_model_metadata().require_dims(config.memory_data.dim());
+  if (!config.memory_data.is_floating_point())
+    throw std::invalid_argument("memory_data must be floating point");
+  if (device_.is_mps() && config.memory_data.scalar_type() == torch::kFloat64)
+    throw std::invalid_argument("MPS does not support double-precision input");
   caesar::correction_method_from_byte(static_cast<uint8_t>(correction_method));
   if (correction_method == caesar::CorrectionMethod::NGLR)
     nglr::validate_options(nglr_options);
@@ -206,9 +212,21 @@ Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
                              "in each calling thread");
   c10::InferenceMode guard;
 
-  ScientificDataset dataset(config, device_);
-
   CompressionResult result;
+  result.original_shape = config.memory_data.sizes().vec();
+  result.n_frame = config.n_frame;
+  result.model_id = get_model_id();
+  auto selected = config.memory_data;
+  if (selected.dim() == 5)
+    selected = selected.narrow(0, 0, 1);
+  DatasetConfig dataset_config;
+  torch::Tensor internal;
+  std::tie(internal, result.shape_info) = to_5d(selected);
+  // Dataset/correction code may mutate its storage; retain caller ownership.
+  dataset_config.memory_data = internal.contiguous().clone();
+  dataset_config.n_frame = config.n_frame;
+  dataset_config.variable_idx = 0;
+  ScientificDataset dataset(dataset_config, device_);
   result.correction_method = correction_method;
 
   int64_t pad_T = dataset.get_pad_T();
@@ -383,7 +401,7 @@ Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
       torch::Tensor idx_s = batched_indexes.select(1, 1);  // [N]
       torch::Tensor idx_t0 = batched_indexes.select(1, 2); // [N]
 
-      constexpr int64_t block_len = 8;
+      const int64_t block_len = config.n_frame;
       // = n_frame from DatasetConfig, fixed for this dataset same as nf
       torch::Tensor t_range =
           torch::arange(block_len, batched_indexes.options()); // [block_len]
@@ -528,7 +546,7 @@ Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[1]);
     const int64_t T =
         static_cast<int64_t>(result.compressionMetaData.data_input_shape[2]);
-    const int64_t nf = 8;
+    const int64_t nf = config.n_frame;
     const int64_t samples = T / nf;
 
     if (samples == 0 || S == 0) {
@@ -614,6 +632,9 @@ Compressor::compress(const DatasetConfig &config, int batch_size, float rel_eb,
   result.gaeMetaData.padding_recon_info = padding_recon_info;
   result.compressionMetaData.global_scale = global_scale;
   result.compressionMetaData.global_offset = global_offset;
+
+  if (global_scale == 0.0f)
+    return result;
 
   if (device_.is_mps()) {
     padded_original_tensor =
