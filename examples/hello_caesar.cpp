@@ -1,10 +1,9 @@
 /**
  * hello_caesar.cpp
  *
- * Minimal in-memory example of compressing and decompressing a 3D field
+ * Example of compressing and decompressing a 3D field
  * with CAESAR.
  *
- * Pass the original 3D tensor; CAESAR handles shape conversion and padding.
  */
 
 #include <iostream>
