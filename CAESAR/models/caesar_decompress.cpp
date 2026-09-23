@@ -194,8 +194,6 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
   const auto cpu_float_opts =
       torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
 
-  // Reuse a bounded pool across batches. This also works in builds without
-  // OpenMP, where the header-only at::parallel_for would execute serially.
   const int workers = std::max(1, std::min(8, at::get_num_threads()));
   c10::ThreadPool decode_pool(workers);
 
@@ -211,6 +209,7 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
     // Workers touch only CPU data and disjoint output rows. Decode straight
     // into float staging storage, avoiding a temporary tensor per stream.
     torch::Tensor decoded_hyper_latents;
+    // gpu cuda range enocder
     if (gpu_rans) {
       decoded_hyper_latents =
           hyper_codec
@@ -219,6 +218,7 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
                   hyper_indexes_gpu.expand({(int64_t)cur_latents, 64, 4, 4}))
               .to(torch::kFloat32);
     } else {
+      // NOTE AMD goes this path for now
       decoded_hyper_latents =
           torch::empty({(long)cur_latents, 64, 4, 4}, cpu_float_opts);
       float *hyper_data = decoded_hyper_latents.data_ptr<float>();
@@ -359,14 +359,14 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
 
   caesar::correction_method_from_byte(
       static_cast<uint8_t>(comp_result.correction_method));
-  //  ---- LBRC path --------------------------------
-  //  ---------------------------------------------------------
+  //  ------- NGLR path --------------------------------
   if (comp_result.correction_method == caesar::CorrectionMethod::NGLR) {
     auto reconstruction =
         recons_data(recon_tensor_deblock, meta.data_input_shape, meta.pad_T);
     return nglr::decompress(reconstruction, comp_result.nglrMetaData,
                             comp_result.nglr_comp_data);
   }
+  // -------------  LBRC path --------------------------------
   if (comp_result.correction_method == caesar::CorrectionMethod::LBRC) {
     torch::Tensor recon_ =
         recon_tensor_deblock.to(device_).to(torch::kFloat32).contiguous();
