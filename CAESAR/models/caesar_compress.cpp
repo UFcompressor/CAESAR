@@ -582,6 +582,7 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
 
   recon_tensor = torch::Tensor();
 
+  // -------------------- NGLR path -----------------------------------------
   if (correction_method == caesar::CorrectionMethod::NGLR) {
     // Exclude reflected tail frames from quantization, training and correction.
     auto original =
@@ -593,6 +594,8 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
                    result.nglr_comp_data, nglr_options, device_);
     return result;
   }
+  // -------- LBRC path
+  // ---------------------------------------------------------
   if (correction_method == caesar::CorrectionMethod::LBRC) {
     torch::Tensor original_ =
         dataset.original_data().to(device_).to(torch::kFloat32).contiguous();
@@ -636,6 +639,7 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   if (global_scale == 0.0f)
     return result;
 
+  // for apple gpu
   if (device_.is_mps()) {
     padded_original_tensor =
         (padded_original_tensor - global_offset) / global_scale;
