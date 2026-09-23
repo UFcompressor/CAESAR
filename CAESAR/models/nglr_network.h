@@ -4,8 +4,6 @@
 
 namespace nglr {
 
-// Native counterpart of tests/NGLR_train.py. A fresh network is fitted to
-// each input's quantized residual; no pretrained NGLR installation is used.
 torch::Tensor recons_features(const torch::Tensor &x);
 
 struct ResBlock3DImpl : torch::nn::Module {
