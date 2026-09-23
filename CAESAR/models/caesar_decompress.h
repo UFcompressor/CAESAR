@@ -18,13 +18,11 @@ struct DecompressionResult {
 
 class Decompressor {
 public:
-  explicit Decompressor(torch::Device device = torch::Device(torch::kCPU),
-                        const std::string &required_model_id = "");
+  explicit Decompressor(const std::string &required_model_id = "");
   ~Decompressor() = default;
 
-  torch::Tensor decompress(const unsigned int batch_size,
-                           const unsigned int n_frame,
-                           const CompressionResult &comp_result);
+  // Validates model identity and restores the selected input's original rank.
+  torch::Tensor decompress(const CompressionResult &comp_result);
 
 private:
   const std::thread::id owner_thread_ = std::this_thread::get_id();
@@ -34,6 +32,7 @@ private:
       hyper_decompressor_model_;
   std::shared_ptr<torch::inductor::AOTIModelPackageLoader> decompressor_model_;
 
+  torch::Tensor decompress_internal(const CompressionResult &comp_result);
   void load_models();
   void load_probability_tables();
 

@@ -203,8 +203,7 @@ data_filtering(const torch::Tensor &data, int nFrame,
   auto max_vals = std::get<0>(flat_blocks.max(-1, true));
 
   auto first_vals = flat_blocks.select(-1, 0).unsqueeze(-1);
-  auto is_constant =
-      torch::all(flat_blocks == first_vals, -1, false).squeeze(-1);
+  auto is_constant = torch::all(flat_blocks == first_vals, -1, false);
 
   auto is_constant_cpu = is_constant.cpu();
   auto min_vals_cpu = min_vals.squeeze(-1).cpu();
@@ -481,10 +480,10 @@ ScientificDataset::ScientificDataset(const DatasetConfig &config,
 
   pad_T = (t_samples - 1) * delta_t + n_frame - T;
   if (pad_T > 0) {
-    auto tail_frames =
-        data.index({torch::indexing::Slice(), torch::indexing::Slice(),
-                    torch::indexing::Slice(T - pad_T, T)});
-    tail_frames = torch::flip(tail_frames, {2});
+    auto tail_indexes = torch::arange(
+        pad_T, torch::TensorOptions().dtype(torch::kLong).device(device_));
+    tail_indexes = T - 1 - torch::remainder(tail_indexes, T);
+    auto tail_frames = data.index_select(2, tail_indexes);
     data = torch::cat({data, tail_frames}, 2);
   }
 
