@@ -387,7 +387,7 @@ jobs:
           echo "Torch CMake path: $TORCH_PATH"
           New-Item -ItemType Directory -Force -Path build
           Push-Location build
-          cmd /c "`"$vcvars`" && cmake .. -DCMAKE_PREFIX_PATH=`"$TORCH_PATH`" -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release"
+          cmd /c "`"$vcvars`" && cmake .. -G `"NMake Makefiles`" -DCMAKE_PREFIX_PATH=`"$TORCH_PATH`" -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release"
           if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
           Pop-Location
 
@@ -397,20 +397,20 @@ jobs:
             -latest -property installationPath
           $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
           Push-Location build
-          cmd /c "`"$vcvars`" && cmake --build . --config Release --parallel"
+          cmd /c "`"$vcvars`" && cmake --build ."
           if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
           Pop-Location
 
       - name: Generate dummy test data
         run: |
-          conda run -n compress_env python tests/gen_data.py build/tests/Release --filename TCf48.bin.f32
+          conda run -n compress_env python tests/gen_data.py build/tests --filename TCf48.bin.f32
 
       - name: Run test_caesarCD
         run: |
           $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -property installationPath
           $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-          Push-Location build/tests/Release
+          Push-Location build/tests
           New-Item -ItemType Directory -Force -Path output
           cmd /c "`"$vcvars`" && test_caesarCD.exe"
           if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
@@ -418,24 +418,24 @@ jobs:
 
       - name: Run test_runGaeCuda
         run: |
-          Push-Location build/tests/Release
+          Push-Location build/tests
           .\test_runGaeCuda.exe
           Pop-Location
 
       - name: Run test_padding
         run: |
-          Push-Location build/tests/Release
+          Push-Location build/tests
           .\test_padding.exe
           Pop-Location
 
       - name: Run model metadata test
         run: |
-          .\build\tests\Release\test_model_metadata.exe
+          .\build\tests\test_model_metadata.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run test_LBRC
         run: |
-          Push-Location build/tests/Release
+          Push-Location build/tests
           .\test_LBRC.exe
           Pop-Location
 
