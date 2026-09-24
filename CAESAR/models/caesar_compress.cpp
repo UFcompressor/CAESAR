@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "model_utils.h"
 #include "range_coder/rans_cuda.h"
 
 template <typename T>
@@ -188,6 +189,7 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   constexpr int batch_size = 128;
   const auto correction_method = config.correction_method;
   const auto &nglr_options = config.nglr_options;
+
   if (config.n_frame != 8)
     throw std::invalid_argument(
         "n_frame is required and must be 8 for the installed architecture");
@@ -223,10 +225,13 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   torch::Tensor internal;
   std::tie(internal, result.shape_info) = to_5d(selected);
   // Dataset/correction code may mutate its storage; retain caller ownership.
-  dataset_config.memory_data = internal.contiguous().clone();
+  dataset_config.memory_data =
+      internal.to(internal.options().device(device_), /*non_blocking=*/false,
+                  /*copy=*/true, torch::MemoryFormat::Contiguous);
   dataset_config.n_frame = config.n_frame;
   dataset_config.variable_idx = 0;
   ScientificDataset dataset(dataset_config, device_);
+  dataset_config.memory_data.reset();
   result.correction_method = correction_method;
 
   int64_t pad_T = dataset.get_pad_T();
