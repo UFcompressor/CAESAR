@@ -223,14 +223,17 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   DatasetConfig dataset_config;
   torch::Tensor internal;
   std::tie(internal, result.shape_info) = to_5d(selected);
-  // Dataset/correction code may mutate its storage; retain caller ownership.
-  dataset_config.memory_data =
-      internal.to(internal.options().device(device_), /*non_blocking=*/false,
-                  /*copy=*/true, torch::MemoryFormat::Contiguous);
+  auto input_fp32 = internal.to(torch::kFloat32);
+  dataset_config.memory_data = input_fp32.to(
+      input_fp32.options().device(device_),
+      /*non_blocking=*/false, /*copy=*/true, torch::MemoryFormat::Contiguous);
+  input_fp32 = torch::Tensor();
+
   dataset_config.n_frame = config.n_frame;
   dataset_config.variable_idx = 0;
   ScientificDataset dataset(dataset_config, device_);
   dataset_config.memory_data.reset();
+
   result.correction_method = correction_method;
 
   int64_t pad_T = dataset.get_pad_T();
