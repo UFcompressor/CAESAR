@@ -142,3 +142,7 @@ endif()
 # Manifest validation does not require torch or a compiled model.
 add_executable(test_model_metadata test_model_metadata.cpp)
 
+
+# Buffer serialization tests require no compiled-model execution.
+add_executable(test_serialization test_serialization.cpp)
+target_link_libraries(test_serialization PRIVATE caesar "${TORCH_LIBRARIES}")

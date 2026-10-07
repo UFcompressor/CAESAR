@@ -61,6 +61,7 @@ set(CAESAR_SRC
     models/range_coder/rans_cuda.cpp
     models/caesar_compress.cpp
     models/caesar_decompress.cpp
+    models/serialization.cpp
     models/model_utils.cpp
     models/runGaeCuda.cpp
     models/gpu_lossess.cpp

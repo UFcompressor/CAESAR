@@ -69,6 +69,51 @@ hyper-decoder and are not yet serialized. This API change does not resolve or
 validate that portability issue. ADIOS integration and its buffer format are
 unchanged and still need migration to the new API.
 
+## Saving complete results
+
+```cpp
+#include <caesar/models/serialization.h>
+
+// Save every result field in one file, then reload and decompress.
+caesar::save(compressed, "field.cae");
+auto reloaded = caesar::load("field.cae");
+auto restored_from_disk = decompressor.decompress(reloaded);
+
+// Buffer API for ADIOS2 and other integrations.
+auto bytes = caesar::serialize(compressed);
+auto reloaded_from_buffer = caesar::deserialize(bytes.data(), bytes.size());
+```
+
+The version-1 buffer includes model identity, frame count, original shape,
+all padding and compression metadata, both latent streams, and all GAE, LBRC,
+and NGLR metadata and payloads (including NGLR weights). Embedded zero bytes
+are preserved. The buffer has a magic number and version, uses little-endian
+scalars and uint64 lengths, and currently requires 32-bit int and 64-bit size_t.
+Readers reject unsupported versions, truncated data, invalid lengths, invalid
+booleans/correction methods, and trailing bytes. This is a new format; it does
+not read the old ADIOS2 field sequence or the CLI's three-file format.
+
+`save` overwrites its destination. Model packages and probability tables are
+still supplied separately by the matching installation. Serialization itself
+requires no model loading or GPU execution and does not establish GPU-to-CPU
+entropy-decoding portability.
+
+In ADIOS2, replace the field-by-field writer with a length-prefixed buffer:
+
+```cpp
+auto bytes = caesar::serialize(comp);
+WriteParameter(bufferOut, bufferOutOffset, uint64_t(bytes.size()));
+std::memcpy(bufferOut + bufferOutOffset, bytes.data(), bytes.size());
+bufferOutOffset += bytes.size();
+```
+
+On reading, validate that the length fits within the remaining input bytes,
+then call `caesar::deserialize(bufferIn + bufferInOffset, length)` and advance
+the offset. Pass the returned result to `Decompressor::decompress`. Bump the
+ADIOS2 operator buffer version when switching formats; keep its outer shape,
+data type, threshold handling, and per-variable slicing logic. See [the ADIOS2 migration notes](adios_serialization.md). The remote
+ADIOS2 source must be updated separately.
+
 ## CLI migration
 
 ```sh
@@ -91,5 +136,5 @@ starts with the `CAESAPI1` header carrying model identity, frame count, and shap
 information. Older metadata is rejected with a recompression message; this is a
 format break. These files retain the existing native binary payload encoding and
 are not a new portable serialization API. The C/D file-based tests also use the
-new header. ADIOS serialization is a separate deferred task.
+new header. ADIOS migration to the buffer API above remains a separate integration task.
 

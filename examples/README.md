@@ -37,5 +37,14 @@ multi-dataset training run.
 Build with `-DBUILD_EXAMPLES=ON`, then run `build/examples/hello_caesar` with
 `CAESAR_MODEL_DIR` pointing to the exported model installation. The example
 passes an original 3D tensor with `CompressionConfig::n_frame = 8` and restores
-its shape using `decompress(compressed)`. See [the API guide](../docs/public_api.md)
+its shape using `decompress(compressed)`. The field has shape `8x256x256`;
+the example checks its reconstructed shape and reports range-normalized RMSE
+(NRMSE) against a target of `0.001`. Mean/range normalization is internal.
+
+```bash
+CAESAR_MODEL_DIR="$PWD/exported_model" build/examples/hello_caesar gae
+CAESAR_MODEL_DIR="$PWD/exported_model" build/examples/hello_caesar lbrc
+```
+
+See [the API guide](../docs/public_api.md)
 for correction methods, 5D variable selection, and CPU validation.
