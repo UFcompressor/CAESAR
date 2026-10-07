@@ -11,8 +11,9 @@ echo "CAESAR Quick Test"
 echo "========================================"
 
 DATA="${CAESAR_TEST_DATA:-TCf48.bin.f32}"
-SHAPE="${CAESAR_TEST_SHAPE:-1,1,100,500,500}"
+SHAPE="${CAESAR_TEST_SHAPE:-1,1,20,256,256}"
 ERROR_BOUND="${CAESAR_TEST_ERROR_BOUND:-0.001}"
+CAESAR_EXE="${CAESAR_TEST_EXE:-./caesar}"
 
 # Check files exist
 if [ ! -f "$DATA" ]; then
@@ -20,8 +21,8 @@ if [ ! -f "$DATA" ]; then
     exit 1
 fi
 
-if [ ! -f "./caesar" ]; then
-    echo "ERROR: caesar executable not found!"
+if [ ! -f "$CAESAR_EXE" ]; then
+    echo "ERROR: $CAESAR_EXE executable not found!"
     exit 1
 fi
 
@@ -35,7 +36,7 @@ run_round_trip() {
     echo ""
     echo "Compressing $DATA with $METHOD..."
     echo "---"
-    ./caesar compress "$DATA" \
+    "$CAESAR_EXE" compress "$DATA" \
         -s "$SHAPE" \
         -o "$OUTPUT_BASE" \
         -f 8 \
@@ -62,7 +63,7 @@ run_round_trip() {
     echo ""
     echo "Decompressing $METHOD result..."
     echo "---"
-    DECOMP_LOG=$(./caesar decompress "$OUTPUT_BASE" \
+    DECOMP_LOG=$("$CAESAR_EXE" decompress "$OUTPUT_BASE" \
         -o "$OUTPUT_DATA" \
         -t \
         --verify \
@@ -84,8 +85,8 @@ run_round_trip() {
     fi
     echo "✓ $OUTPUT_DATA created"
 
-    ORIG_SIZE=$(stat -Lc%s "$DATA")
-    DECOMP_SIZE=$(stat -c%s "$OUTPUT_DATA")
+    ORIG_SIZE=$(wc -c < "$DATA")
+    DECOMP_SIZE=$(wc -c < "$OUTPUT_DATA")
 
     if [ "$ORIG_SIZE" -ne "$DECOMP_SIZE" ]; then
         echo "ERROR: File sizes don't match for $METHOD!"

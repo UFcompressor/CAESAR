@@ -40,7 +40,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
 
-    timeout-minutes: 15
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -124,7 +124,7 @@ jobs:
         shell: bash
         run: |
           source venv/bin/activate
-          python3 -m unittest discover -s tests -p test_model_registry.py -v
+          PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" python3 tests/test_model_registry.py
           python3 tests/check_registered_checkpoints.py
           python3 compile_model.py cpu
 
@@ -223,6 +223,29 @@ jobs:
           ./build/tests/test_model_metadata
           CAESAR_MODEL_DIR="$PWD/exported_model" ./build/tests/test_model_cache
 
+      - name: Run serialization and rANS kernel tests
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH:-}"
+            export OMP_NUM_THREADS=1
+          fi
+          ./build/tests/test_serialization
+          ./build/tests/test_rans_kernels
+
+      - name: Run CLI round-trip tests
+        shell: bash
+        run: |
+          export CAESAR_MODEL_DIR="$PWD/exported_model"
+          export CAESAR_TEST_DATA="$PWD/build/tests/TCf48.bin.f32"
+          export CAESAR_TEST_SHAPE="1,1,20,256,256"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH:-}"
+            export OMP_NUM_THREADS=1
+          fi
+          cd build/CAESAR
+          bash ../../tests/test_CLI.sh
+
       - name: Run test_LBRC
         shell: bash
         run: |
@@ -242,7 +265,7 @@ jobs:
           echo "Test completed successfully on ${{ matrix.os }}!"
 
   build-test-windows:
-    timeout-minutes: 15
+    timeout-minutes: 20
     runs-on: windows-latest
 
     env:
@@ -335,7 +358,8 @@ jobs:
           $python = (conda run -n compress_env python -c "import sys; print(sys.executable)").Trim()
           Write-Host "Using python: $python"
 
-          conda run -n compress_env python -m unittest discover -s tests -p test_model_registry.py -v
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE
+          conda run -n compress_env python tests/test_model_registry.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           conda run -n compress_env python tests/check_registered_checkpoints.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -438,6 +462,32 @@ jobs:
           Push-Location build/tests
           .\test_LBRC.exe
           Pop-Location
+
+      # Temporarily skip test_model_cache on Windows: loading multiple AOTI
+      # runners hits a locked extracted .pyd file (Windows error 32).
+      - name: Run serialization and rANS kernel tests
+        run: |
+          $torchLib = (conda run -n compress_env python -c "import pathlib, torch; print(pathlib.Path(torch.__file__).parent / 'lib')").Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = "$torchLib;$env:PATH"
+          .\build\tests\test_serialization.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\build\tests\test_rans_kernels.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run CLI round-trip tests
+        run: |
+          $torchLib = (conda run -n compress_env python -c "import pathlib, torch; print(pathlib.Path(torch.__file__).parent / 'lib')").Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = "$torchLib;$env:PATH"
+          $env:CAESAR_TEST_DATA = "$env:GITHUB_WORKSPACE/build/tests/TCf48.bin.f32"
+          $env:CAESAR_TEST_SHAPE = "1,1,20,256,256"
+          $env:CAESAR_TEST_EXE = "./caesar_cli.exe"
+          Push-Location build/CAESAR
+          & "C:/Program Files/Git/bin/bash.exe" ../../tests/test_CLI.sh
+          $testExitCode = $LASTEXITCODE
+          Pop-Location
+          exit $testExitCode
 
       - name: Check test results
         run: |

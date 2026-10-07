@@ -1,8 +1,5 @@
 #include "../CAESAR/cli_result_header.h"
-#include "../CAESAR/data_utils.h"
-#include "../CAESAR/dataset/dataset.h"
 #include "../CAESAR/models/caesar_compress.h"
-#include "../CAESAR/models/caesar_decompress.h"
 
 bool save_encoded_streams(const std::vector<std::string> &streams,
                           const std::string &filename) {
