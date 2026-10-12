@@ -12,7 +12,12 @@ def build_dataset(dataset_args, syn_length=False):
     # Imported lazily because this module is also used by the model components.
     from pyCAESAR.dataset import ScientificDataset
 
-    datasets = [ScientificDataset(dataset_args[name]) for name in dataset_args]
+    # Training and its evaluation must visit every window, as in GenCompress.
+    # Constant-block filtering belongs to the inference compression path.
+    datasets = [
+        ScientificDataset({**dataset_args[name], "filter_constant_blocks": False})
+        for name in dataset_args
+    ]
     if syn_length:
         max_length = np.max([len(dataset) for dataset in datasets])
         for dataset in datasets:

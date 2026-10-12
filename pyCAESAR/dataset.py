@@ -166,6 +166,7 @@ class BaseDataset(Dataset):
         self.frame_range = args.get("frame_range")
 
         self.n_frame = args["n_frame"]
+        self.filter_constant_blocks = args.get("filter_constant_blocks", True)
 
         self.resolution = args.get("resolution", None)
 
@@ -292,7 +293,10 @@ class ScientificDataset(BaseDataset):
         if not self.train_mode:
             data, self.block_info = block_hw(data, self.test_size)
 
-        self.filtered_blocks, self.filtered_labels = data_filtering(data, self.delta_t)
+        if self.filter_constant_blocks:
+            self.filtered_blocks, self.filtered_labels = data_filtering(data, self.delta_t)
+        else:
+            self.filtered_blocks, self.filtered_labels = [], []
         self.shape = data.shape
         self.data_input = data
         self.visble_length = self.update_length()
@@ -442,13 +446,7 @@ class ScientificDataset(BaseDataset):
     def post_processing(self, data, var_idx, is_training):
         if is_training:
             data = self.apply_augments(data)
-            source = data
-            for _ in range(20):
-                data = self.apply_padding_or_crop(source)
-                if data.max() != data.min():
-                    break
-            else:
-                raise RuntimeError("Could not find a nonconstant training crop")
+            data = self.apply_padding_or_crop(data)
 
         if self.inst_norm:
             data, offset, scale = self.apply_inst_norm(data, True)
