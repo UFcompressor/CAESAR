@@ -63,13 +63,19 @@ def relative_rmse_error_ornl(original, reconstructed, device=None):
     original = torch.as_tensor(original, dtype=torch.float64, device=device)
     reconstructed = torch.as_tensor(reconstructed, dtype=torch.float64, device=device)
 
+    if original.shape != reconstructed.shape:
+        raise ValueError("Original and reconstructed shapes must match.")
+
     rmse = torch.sqrt(torch.mean((original - reconstructed) ** 2))
+
     data_range = torch.max(original) - torch.min(original)
 
-    relative_rmse = torch.where(
-        data_range != 0, rmse / data_range, torch.tensor(0.0, device=device)
-    )
-    return relative_rmse
+    if data_range == 0:
+        return (
+            torch.zeros_like(rmse) if rmse == 0 else torch.full_like(rmse, float("inf"))
+        )
+
+    return rmse / data_range
 
 
 def exists(x):

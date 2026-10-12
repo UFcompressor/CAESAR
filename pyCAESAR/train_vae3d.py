@@ -184,7 +184,7 @@ def get_argument():
     parser.add_argument("--init_beta", type=float, default=1e-5, help="loss beta")
     parser.add_argument("--end_beta", type=float, default=2e-5, help="loss beta")
 
-    parser.add_argument("--beta_start", type=float, default=0.75, help="loss beta")
+    parser.add_argument("--beta_start", type=float, default=0.5, help="loss beta")
     parser.add_argument("--model_dim", type=int, default=16, help="loss beta")
     parser.add_argument("--pretrain", type=str, default="", help="pretrain path")
 
@@ -362,7 +362,7 @@ if __name__ == "__main__":
                     model, test_loader, criterion, device
                 )
                 recons_data = cur_dataset.deblocking_hw(recons_data)
-                # this should all be fp32 not fp64
+
                 bpp = float(bit_count / recons_data.numel())
 
                 nrmse = relative_rmse_error_ornl(original_data, recons_data)
@@ -382,3 +382,4 @@ if __name__ == "__main__":
             print()
 
     print("Training complete.")
+

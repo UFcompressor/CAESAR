@@ -335,23 +335,89 @@ class ScientificDataset(BaseDataset):
         if data_path.rstrip("/").endswith(".bp"):
             from adios2 import FileReader
 
+            # Keep the V axis even when variable_idx is an int
+            if variable_idx is None:
+                selected = None
+            elif isinstance(variable_idx, int):
+                selected = [variable_idx]
+            else:
+                selected = list(variable_idx)
+
             fields = []
             with FileReader(data_path) as reader:
-                for name, info in sorted(reader.available_variables().items()):
-                    if info["Type"] not in ("float", "double"):
+                avail = reader.available_variables()
+                var_names = [
+                    name
+                    for name, info in sorted(avail.items())
+                    if info["Type"] in ("float", "double")
+                ]
+
+                for v, name in enumerate(var_names):
+                    if selected is not None and v not in selected:
                         continue
-                    field = np.asarray(reader.read(name, step_selection=[0, 1]))
-                    if field.ndim == 3:  # [time, height, width]
-                        field = field[None, None]
-                    elif field.ndim == 4:  # [section, time, height, width]
-                        field = field[None]
-                    elif field.ndim != 5:
-                        continue
-                    print(f"ADIOS: loaded whole variable {name}: {field.shape}", flush=True)
-                    fields.append(field.astype(np.float32, copy=False))
+
+                    n_steps = int(avail[name].get("AvailableStepsCount", 1))
+
+                    if n_steps > 1:
+                        # Each ADIOS step becomes one section: [1, S, T, H, W]
+                        step_ids = range(n_steps)[section_range]
+                        if len(step_ids) == 0:
+                            raise RuntimeError(
+                                f"section_range selects no steps for {name} "
+                                f"(n_steps={n_steps})"
+                            )
+
+                        out = None
+                        for i, s in enumerate(step_ids):
+                            arr = np.asarray(
+                                reader.read(name, step_selection=[s, 1])
+                            )
+                            if arr.ndim == 4 and arr.shape[0] == 1:
+                                arr = arr[0]
+                            if arr.ndim != 3:
+                                raise RuntimeError(
+                                    f"Unexpected shape {arr.shape} reading "
+                                    f"{name} step {s}"
+                                )
+                            arr = arr[frame_range]
+                            if out is None:
+                                out = np.empty(
+                                    (len(step_ids),) + arr.shape, dtype=np.float32
+                                )
+                            out[i] = arr  # cast to float32 on assignment
+
+                        field = out[None]
+                    else:
+                        field = np.asarray(
+                            reader.read(name, step_selection=[0, 1])
+                        )
+                        if field.ndim == 3:    # [time, height, width]
+                            field = field[None, None]
+                        elif field.ndim == 4:  # [section, time, height, width]
+                            field = field[None]
+                        elif field.ndim != 5:
+                            raise RuntimeError(
+                                f"Unexpected shape {field.shape} for {name}"
+                            )
+                        field = field[:, section_range, frame_range]
+                        field = field.astype(np.float32, copy=False)
+
+                    print(
+                        f"ADIOS: loaded {name} (idx {v}): steps={n_steps}, "
+                        f"shape={field.shape}",
+                        flush=True,
+                    )
+                    fields.append(field)
+
+            if not fields:
+                raise RuntimeError(
+                    f"No variables loaded from {data_path}. "
+                    f"float/double variables: {var_names}, "
+                    f"variable_idx={variable_idx}"
+                )
+
+            # Output order follows sorted variable names, not variable_idx order
             data = np.concatenate(fields, axis=0)
-            variables = slice(None) if variable_idx is None else variable_idx
-            data = data[variables, section_range, frame_range]
         else:
             with np.load(data_path) as npzfile:
                 data = npzfile["data"][variable_idx, section_range, frame_range]
@@ -359,7 +425,7 @@ class ScientificDataset(BaseDataset):
         if self.resolution is not None:
             data = center_crop(data, self.resolution)
         self.dtype = data.dtype
-        data = data.astype(np.float32)
+        data = data.astype(np.float32, copy=False)
 
         return data
 
