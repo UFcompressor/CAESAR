@@ -279,14 +279,13 @@ class ScientificDataset(BaseDataset):
             tail_frames = data[:, :, -pad_T:]
             tail_frames = tail_frames[:, :, ::-1]
             data = np.concatenate([data, tail_frames], axis=2)
-        # self.shape = data.shape
-
-        # print("self.inst_norm:", self.inst_norm)
-        # if not self.inst_norm:
-        #     print("not self.inst_norm")
-        #     assert(self.norm_type != "mean_range_hw")
-        #     data, var_offset, var_scale = normalize_data(data, self.norm_type, axis=(1, 2, 3, 4))
-        #     self.var_offset, self.var_scale = torch.FloatTensor(var_offset), torch.FloatTensor(var_scale)
+        if not self.inst_norm:
+            assert self.norm_type != "mean_range_hw"
+            data, var_offset, var_scale = normalize_data(
+                data, self.norm_type, axis=(1, 2, 3, 4)
+            )
+            self.var_offset = torch.FloatTensor(var_offset)
+            self.var_scale = torch.FloatTensor(var_scale)
 
         data = torch.FloatTensor(data)
 
@@ -336,7 +335,7 @@ class ScientificDataset(BaseDataset):
             else slice(section_range[0], section_range[1])
         )
 
-        if data_path.rstrip("/").endswith(".bp"):
+        if data_path.rstrip("/").endswith((".bp", ".bp4", ".bp5")):
             from adios2 import FileReader
 
             # Keep the V axis even when variable_idx is an int
