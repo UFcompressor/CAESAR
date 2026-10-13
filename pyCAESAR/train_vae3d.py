@@ -378,8 +378,8 @@ if __name__ == "__main__":
                     nrmse,
                     f"BPP: {bpp:.6f} CR: {32/bpp:.6f}",
                 )
+                del original_data, recons_data
 
             print()
 
     print("Training complete.")
-

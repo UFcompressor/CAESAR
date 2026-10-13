@@ -293,7 +293,9 @@ class ScientificDataset(BaseDataset):
             data, self.block_info = block_hw(data, self.test_size)
 
         if self.filter_constant_blocks:
-            self.filtered_blocks, self.filtered_labels = data_filtering(data, self.delta_t)
+            self.filtered_blocks, self.filtered_labels = data_filtering(
+                data, self.delta_t
+            )
         else:
             self.filtered_blocks, self.filtered_labels = [], []
         self.shape = data.shape
@@ -372,9 +374,7 @@ class ScientificDataset(BaseDataset):
 
                         out = None
                         for i, s in enumerate(step_ids):
-                            arr = np.asarray(
-                                reader.read(name, step_selection=[s, 1])
-                            )
+                            arr = np.asarray(reader.read(name, step_selection=[s, 1]))
                             if arr.ndim == 4 and arr.shape[0] == 1:
                                 arr = arr[0]
                             if arr.ndim != 3:
@@ -391,10 +391,8 @@ class ScientificDataset(BaseDataset):
 
                         field = out[None]
                     else:
-                        field = np.asarray(
-                            reader.read(name, step_selection=[0, 1])
-                        )
-                        if field.ndim == 3:    # [time, height, width]
+                        field = np.asarray(reader.read(name, step_selection=[0, 1]))
+                        if field.ndim == 3:  # [time, height, width]
                             field = field[None, None]
                         elif field.ndim == 4:  # [section, time, height, width]
                             field = field[None]
