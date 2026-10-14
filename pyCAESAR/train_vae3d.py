@@ -31,6 +31,32 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
+def check_finite(name, tensor, iteration, data_dict):
+    """Stop at the first nonfinite tensor and report the affected batch."""
+    with torch.no_grad():
+        values = tensor.detach()
+        finite_mask = torch.isfinite(values)
+        if finite_mask.all().item():
+            return
+        finite = values[finite_mask]
+        finite_range = (
+            (finite.min().item(), finite.max().item())
+            if finite.numel() else None
+        )
+        print(
+            f"[NONFINITE] iteration={iteration}, tensor={name}, "
+            f"shape={tuple(values.shape)}, dtype={values.dtype}, "
+            f"device={values.device}, finite_range={finite_range}, "
+            f"nan={torch.isnan(values).sum().item()}, "
+            f"inf={torch.isinf(values).sum().item()}",
+            flush=True,
+        )
+        print("Dataset indices:", data_dict["index"], flush=True)
+        print("Normalization offsets:", data_dict["offset"], flush=True)
+        print("Normalization scales:", data_dict["scale"], flush=True)
+        raise RuntimeError(f"Nonfinite values in {name} at iteration {iteration}")
+
+
 def train_epoch_vae(
     model, loader, optimizer, scheduler, criterion, loss_beta, device, iteration=0
 ):
@@ -49,17 +75,32 @@ def train_epoch_vae(
         )
         targets = inputs
 
+        check_finite("input", inputs, iteration + 1, data_dict)
+        check_finite("normalization offset", data_dict["offset"], iteration + 1, data_dict)
+        check_finite("normalization scale", data_dict["scale"], iteration + 1, data_dict)
+
         optimizer.zero_grad(set_to_none=True)
 
         results = model(inputs)
         outputs = results["output"]
+        check_finite("model output", outputs, iteration + 1, data_dict)
+        check_finite("bpp", results["bpp"], iteration + 1, data_dict)
 
         loss_mse = criterion(outputs, targets)
         loss_bpp = results["bpp"].mean() * loss_beta
         loss = (loss_mse + loss_bpp) if loss_beta > 0.0 else loss_mse
 
+        check_finite("MSE loss", loss_mse, iteration + 1, data_dict)
+        check_finite("entropy loss", loss_bpp, iteration + 1, data_dict)
+        check_finite("total loss", loss, iteration + 1, data_dict)
+
         loss.backward()
+        for name, parameter in model.named_parameters():
+            if parameter.grad is not None:
+                check_finite(f"gradient: {name}", parameter.grad, iteration + 1, data_dict)
         optimizer.step()
+        for name, parameter in model.named_parameters():
+            check_finite(f"parameter after update: {name}", parameter, iteration + 1, data_dict)
         scheduler.step()
 
         running_loss1 += loss_mse.detach() * inputs.size(0)
