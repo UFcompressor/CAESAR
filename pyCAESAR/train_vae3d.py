@@ -40,8 +40,7 @@ def check_finite(name, tensor, iteration, data_dict):
             return
         finite = values[finite_mask]
         finite_range = (
-            (finite.min().item(), finite.max().item())
-            if finite.numel() else None
+            (finite.min().item(), finite.max().item()) if finite.numel() else None
         )
         print(
             f"[NONFINITE] iteration={iteration}, tensor={name}, "
@@ -55,6 +54,71 @@ def check_finite(name, tensor, iteration, data_dict):
         print("Normalization offsets:", data_dict["offset"], flush=True)
         print("Normalization scales:", data_dict["scale"], flush=True)
         raise RuntimeError(f"Nonfinite values in {name} at iteration {iteration}")
+
+
+def debug_backward_failure(
+    model,
+    inputs,
+    data_dict,
+    criterion,
+    loss_beta,
+    iteration,
+    rng_state,
+    cuda_rng_state,
+    buffers,
+):
+    """Save a reproducible batch and isolate each loss without updating weights."""
+    path = os.path.join(args.save_path, f"debug_iteration_{iteration}.pt")
+    torch.save(
+        {
+            "iteration": iteration,
+            "model": {
+                name: value.detach().cpu().clone()
+                for name, value in model.state_dict().items()
+            },
+            "buffers_before_forward": buffers,
+            "batch": {
+                name: value.detach().cpu().clone() if torch.is_tensor(value) else value
+                for name, value in data_dict.items()
+            },
+            "rng_state": rng_state,
+            "cuda_rng_state": cuda_rng_state,
+            "loss_beta": loss_beta,
+            "arguments": vars(args),
+        },
+        path,
+    )
+    print(f"[DEBUG] Saved failing batch and pre-update weights: {path}", flush=True)
+    for branch in ("MSE", "entropy"):
+        model.zero_grad(set_to_none=True)
+        torch.set_rng_state(rng_state)
+        torch.cuda.set_rng_state_all(cuda_rng_state)
+        with torch.no_grad():
+            for name, buffer in model.named_buffers():
+                buffer.copy_(buffers[name])
+        try:
+            with torch.autograd.detect_anomaly(check_nan=True):
+                result = model(inputs)
+                branch_loss = (
+                    criterion(result["output"], inputs)
+                    if branch == "MSE"
+                    else result["bpp"].mean() * loss_beta
+                )
+                check_finite(f"{branch} replay loss", branch_loss, iteration, data_dict)
+                branch_loss.backward()
+                for name, parameter in model.named_parameters():
+                    if parameter.grad is not None:
+                        check_finite(
+                            f"{branch} replay gradient: {name}",
+                            parameter.grad,
+                            iteration,
+                            data_dict,
+                        )
+            print(f"[DEBUG] {branch} backward: finite", flush=True)
+        except RuntimeError as error:
+            print(f"[DEBUG] {branch} backward FAILED: {error}", flush=True)
+        finally:
+            model.zero_grad(set_to_none=True)
 
 
 def train_epoch_vae(
@@ -76,31 +140,68 @@ def train_epoch_vae(
         targets = inputs
 
         check_finite("input", inputs, iteration + 1, data_dict)
-        check_finite("normalization offset", data_dict["offset"], iteration + 1, data_dict)
-        check_finite("normalization scale", data_dict["scale"], iteration + 1, data_dict)
+        check_finite(
+            "normalization offset", data_dict["offset"], iteration + 1, data_dict
+        )
+        check_finite(
+            "normalization scale", data_dict["scale"], iteration + 1, data_dict
+        )
 
         optimizer.zero_grad(set_to_none=True)
 
-        results = model(inputs)
-        outputs = results["output"]
-        check_finite("model output", outputs, iteration + 1, data_dict)
-        check_finite("bpp", results["bpp"], iteration + 1, data_dict)
+        rng_state = torch.get_rng_state()
+        cuda_rng_state = torch.cuda.get_rng_state_all()
+        buffers = {
+            name: buffer.detach().cpu().clone()
+            for name, buffer in model.named_buffers()
+        }
+        try:
+            with torch.autograd.detect_anomaly(check_nan=True):
+                results = model(inputs)
+                outputs = results["output"]
+                check_finite("model output", outputs, iteration + 1, data_dict)
+                check_finite("bpp", results["bpp"], iteration + 1, data_dict)
 
-        loss_mse = criterion(outputs, targets)
-        loss_bpp = results["bpp"].mean() * loss_beta
-        loss = (loss_mse + loss_bpp) if loss_beta > 0.0 else loss_mse
+                loss_mse = criterion(outputs, targets)
+                loss_bpp = results["bpp"].mean() * loss_beta
+                loss = (loss_mse + loss_bpp) if loss_beta > 0.0 else loss_mse
 
-        check_finite("MSE loss", loss_mse, iteration + 1, data_dict)
-        check_finite("entropy loss", loss_bpp, iteration + 1, data_dict)
-        check_finite("total loss", loss, iteration + 1, data_dict)
+                check_finite("MSE loss", loss_mse, iteration + 1, data_dict)
+                check_finite("entropy loss", loss_bpp, iteration + 1, data_dict)
 
-        loss.backward()
-        for name, parameter in model.named_parameters():
-            if parameter.grad is not None:
-                check_finite(f"gradient: {name}", parameter.grad, iteration + 1, data_dict)
+                loss.backward()
+                for name, parameter in model.named_parameters():
+                    if parameter.grad is not None:
+                        check_finite(
+                            f"gradient: {name}",
+                            parameter.grad,
+                            iteration + 1,
+                            data_dict,
+                        )
+        except RuntimeError:
+            try:
+                debug_backward_failure(
+                    model,
+                    inputs,
+                    data_dict,
+                    criterion,
+                    loss_beta,
+                    iteration + 1,
+                    rng_state,
+                    cuda_rng_state,
+                    buffers,
+                )
+            except Exception as debug_error:
+                print(
+                    f"[DEBUG] Failure diagnostics could not complete: {debug_error}",
+                    flush=True,
+                )
+            raise
         optimizer.step()
         for name, parameter in model.named_parameters():
-            check_finite(f"parameter after update: {name}", parameter, iteration + 1, data_dict)
+            check_finite(
+                f"parameter after update: {name}", parameter, iteration + 1, data_dict
+            )
         scheduler.step()
 
         running_loss1 += loss_mse.detach() * inputs.size(0)
