@@ -31,6 +31,13 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
+# To disable diagnostics for a future run (editing does not affect a running job):
+# 1. Add an immediate `return` inside check_finite to skip tensor scans and GPU syncs.
+# 2. Replace both detect_anomaly contexts with set_detect_anomaly(False).
+# 3. In train_epoch_vae, remove the pre-forward RNG/buffer snapshots and the
+#    debug_backward_failure call in the exception handler; keep the final `raise`.
+#    These snapshots are only for reproducing a failure and add per-batch overhead.
+# Leave optimizer.step(), scheduler.step(), and the loss calculations unchanged.
 def check_finite(name, tensor, iteration, data_dict):
     """Stop at the first nonfinite tensor and report the affected batch."""
     with torch.no_grad():
