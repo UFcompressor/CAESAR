@@ -12,7 +12,12 @@ def build_dataset(dataset_args, syn_length=False):
     # Imported lazily because this module is also used by the model components.
     from pyCAESAR.dataset import ScientificDataset
 
-    datasets = [ScientificDataset(dataset_args[name]) for name in dataset_args]
+    # Training and its evaluation must visit every window, as in GenCompress.
+    # Constant-block filtering belongs to the inference compression path.
+    datasets = [
+        ScientificDataset({**dataset_args[name], "filter_constant_blocks": False})
+        for name in dataset_args
+    ]
     if syn_length:
         max_length = np.max([len(dataset) for dataset in datasets])
         for dataset in datasets:
@@ -63,13 +68,19 @@ def relative_rmse_error_ornl(original, reconstructed, device=None):
     original = torch.as_tensor(original, dtype=torch.float64, device=device)
     reconstructed = torch.as_tensor(reconstructed, dtype=torch.float64, device=device)
 
+    if original.shape != reconstructed.shape:
+        raise ValueError("Original and reconstructed shapes must match.")
+
     rmse = torch.sqrt(torch.mean((original - reconstructed) ** 2))
+
     data_range = torch.max(original) - torch.min(original)
 
-    relative_rmse = torch.where(
-        data_range != 0, rmse / data_range, torch.tensor(0.0, device=device)
-    )
-    return relative_rmse
+    if data_range == 0:
+        return (
+            torch.zeros_like(rmse) if rmse == 0 else torch.full_like(rmse, float("inf"))
+        )
+
+    return rmse / data_range
 
 
 def exists(x):

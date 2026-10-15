@@ -166,6 +166,7 @@ class BaseDataset(Dataset):
         self.frame_range = args.get("frame_range")
 
         self.n_frame = args["n_frame"]
+        self.filter_constant_blocks = args.get("filter_constant_blocks", True)
 
         self.resolution = args.get("resolution", None)
 
@@ -278,21 +279,25 @@ class ScientificDataset(BaseDataset):
             tail_frames = data[:, :, -pad_T:]
             tail_frames = tail_frames[:, :, ::-1]
             data = np.concatenate([data, tail_frames], axis=2)
-        # self.shape = data.shape
-
-        # print("self.inst_norm:", self.inst_norm)
-        # if not self.inst_norm:
-        #     print("not self.inst_norm")
-        #     assert(self.norm_type != "mean_range_hw")
-        #     data, var_offset, var_scale = normalize_data(data, self.norm_type, axis=(1, 2, 3, 4))
-        #     self.var_offset, self.var_scale = torch.FloatTensor(var_offset), torch.FloatTensor(var_scale)
+        if not self.inst_norm:
+            assert self.norm_type != "mean_range_hw"
+            data, var_offset, var_scale = normalize_data(
+                data, self.norm_type, axis=(1, 2, 3, 4)
+            )
+            self.var_offset = torch.FloatTensor(var_offset)
+            self.var_scale = torch.FloatTensor(var_scale)
 
         data = torch.FloatTensor(data)
 
         if not self.train_mode:
             data, self.block_info = block_hw(data, self.test_size)
 
-        self.filtered_blocks, self.filtered_labels = data_filtering(data, self.delta_t)
+        if self.filter_constant_blocks:
+            self.filtered_blocks, self.filtered_labels = data_filtering(
+                data, self.delta_t
+            )
+        else:
+            self.filtered_blocks, self.filtered_labels = [], []
         self.shape = data.shape
         self.data_input = data
         self.visble_length = self.update_length()
@@ -332,13 +337,96 @@ class ScientificDataset(BaseDataset):
             else slice(section_range[0], section_range[1])
         )
 
-        with np.load(data_path) as npzfile:
-            data = npzfile["data"][variable_idx, section_range, frame_range]
+        if data_path.rstrip("/").endswith((".bp", ".bp4", ".bp5")):
+            from adios2 import FileReader
+
+            # Keep the V axis even when variable_idx is an int
+            if variable_idx is None:
+                selected = None
+            elif isinstance(variable_idx, int):
+                selected = [variable_idx]
+            else:
+                selected = list(variable_idx)
+
+            fields = []
+            with FileReader(data_path) as reader:
+                avail = reader.available_variables()
+                var_names = [
+                    name
+                    for name, info in sorted(avail.items())
+                    if info["Type"] in ("float", "double")
+                ]
+
+                for v, name in enumerate(var_names):
+                    if selected is not None and v not in selected:
+                        continue
+
+                    n_steps = int(avail[name].get("AvailableStepsCount", 1))
+
+                    if n_steps > 1:
+                        # Each ADIOS step becomes one section: [1, S, T, H, W]
+                        step_ids = range(n_steps)[section_range]
+                        if len(step_ids) == 0:
+                            raise RuntimeError(
+                                f"section_range selects no steps for {name} "
+                                f"(n_steps={n_steps})"
+                            )
+
+                        out = None
+                        for i, s in enumerate(step_ids):
+                            arr = np.asarray(reader.read(name, step_selection=[s, 1]))
+                            if arr.ndim == 4 and arr.shape[0] == 1:
+                                arr = arr[0]
+                            if arr.ndim != 3:
+                                raise RuntimeError(
+                                    f"Unexpected shape {arr.shape} reading "
+                                    f"{name} step {s}"
+                                )
+                            arr = arr[frame_range]
+                            if out is None:
+                                out = np.empty(
+                                    (len(step_ids),) + arr.shape, dtype=np.float32
+                                )
+                            out[i] = arr  # cast to float32 on assignment
+
+                        field = out[None]
+                    else:
+                        field = np.asarray(reader.read(name, step_selection=[0, 1]))
+                        if field.ndim == 3:  # [time, height, width]
+                            field = field[None, None]
+                        elif field.ndim == 4:  # [section, time, height, width]
+                            field = field[None]
+                        elif field.ndim != 5:
+                            raise RuntimeError(
+                                f"Unexpected shape {field.shape} for {name}"
+                            )
+                        field = field[:, section_range, frame_range]
+                        field = field.astype(np.float32, copy=False)
+
+                    print(
+                        f"ADIOS: loaded {name} (idx {v}): steps={n_steps}, "
+                        f"shape={field.shape}",
+                        flush=True,
+                    )
+                    fields.append(field)
+
+            if not fields:
+                raise RuntimeError(
+                    f"No variables loaded from {data_path}. "
+                    f"float/double variables: {var_names}, "
+                    f"variable_idx={variable_idx}"
+                )
+
+            # Output order follows sorted variable names, not variable_idx order
+            data = np.concatenate(fields, axis=0)
+        else:
+            with np.load(data_path) as npzfile:
+                data = npzfile["data"][variable_idx, section_range, frame_range]
 
         if self.resolution is not None:
             data = center_crop(data, self.resolution)
         self.dtype = data.dtype
-        data = data.astype(np.float32)
+        data = data.astype(np.float32, copy=False)
 
         return data
 
