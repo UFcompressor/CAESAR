@@ -1,16 +1,8 @@
-example_train:
-  data_path: /path/to/train.npz
-  train_subset:
-    variable_idx: [0]
-    section_range: [0, 1]
-    frame_range: [0, 128]
-  test_subset:
-    variable_idx: [0]
-    section_range: [0, 1]
-    frame_range: [0, 128]
-
-example_test:
-  data_path: /path/to/test.npz
+# NPZ files must contain a data array shaped [variable, section, frame, height, width].
+# Ranges are zero-based with an exclusive end; variable_idx is a list of indices.
+example_npz:
+  data_path: /path/to/dataset.npz
+  # First variable and section, using all 128 frames of this example array.
   train_subset:
     variable_idx: [0]
     section_range: [0, 1]

@@ -7,18 +7,18 @@ The training entry point uses
 counterpart of `compress_modules3d_mid_SR`; the latter is the deployment model
 used for the three AOTI-compiled components and is not modified by training.
 
-1. Copy `config_vae3d.example.yaml` and replace the two example `data_path`
-   values with your NPZ files. Each file must contain a `data` array arranged as
+1. Copy [config_npz.example.yaml](config_npz.example.yaml) and replace its
+   `data_path` with your NPZ file. The file must contain a `data` array arranged as
    `[variable, section, time, height, width]`.
 2. Select the dataset names using `--train_set` and `--test_set`.
 3. Run the module from the repository root:
 
 ```bash
 python3 -m pyCAESAR.train_vae3d \
-  --config examples/config_vae3d.example.yaml \
+  --config examples/config_npz.example.yaml \
   --save_path snapshots/example-vae \
-  --train_set example_train \
-  --test_set example_test \
+  --train_set example_npz \
+  --test_set example_npz \
   --batch_size 8 \
   --iterations 100 \
   --model_dim 16 \
@@ -31,6 +31,49 @@ above requests 100,000 steps. To load an existing checkpoint, add
 
 The repository-level `train.sh` contains the same launcher pattern for a real
 multi-dataset training run.
+
+### ADIOS input
+
+Use [config_adios.example.yaml](config_adios.example.yaml) for `.bp`, `.bp4`,
+or `.bp5` input. Activate your training virtual environment and make sure its
+Python can import `adios2` (`python -c 'from adios2 import FileReader'`). Replace
+the example path and ranges with values for your file, then run from the
+repository root:
+
+```bash
+python -m pyCAESAR.train_vae3d \
+  --config examples/config_adios.example.yaml \
+  --train_set example_adios --test_set example_adios \
+  --save_path snapshots/example-adios \
+  --batch_size 8 --iterations 100 --model_dim 16 --sr_dim 16
+```
+
+For multi-step ADIOS files containing 3D float/double fields, each selected
+step becomes a section. The first spatial axis becomes the frame axis; a
+16-frame window therefore contains spatial slices from one ADIOS step.
+Variables are sorted by name before selection and converted to float32.
+
+| Option | ADIOS multi-step 3D fields | NPZ `data` array |
+| --- | --- | --- |
+| `variable_idx` | Indices in sorted float/double variable names; `null` loads all | List of indices on the variable axis |
+| `section_range` | ADIOS steps | Sections on the second axis |
+| `frame_range` | Slices on the first spatial axis | Frames on the third axis |
+
+Ranges use an exclusive end: `[8, 9]` selects only the last step of a
+nine-step file. `[0, 1025]` selects all 1,025 slices of a 3D field.
+For a single-step ADIOS file, section and frame ranges select axes of the
+loaded array instead; use `[0, 1]` for the section of a single 3D field.
+
+Training `n_overlap: 15` with `n_frame: 16` advances one slice/frame per sample.
+Testing `n_overlap: 0` advances 16. Incomplete final windows are padded by
+reversing tail slices. Training and evaluation keep all windows, without
+constant-block filtering. Instance normalization requires nonconstant crops.
+
+Both formats are loaded into CPU RAM, and training and evaluation retain
+separate datasets. Evaluation also allocates full reconstruction buffers;
+select fewer variables if these exceed available memory. The example evaluates
+the same ADIOS selection used for training; choose a separate step or subset
+when you need held-out evaluation.
 
 ## In-memory C++ round trip
 
