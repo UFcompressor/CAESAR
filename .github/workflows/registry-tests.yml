@@ -1,0 +1,10 @@
+name: Registry ownership tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_registration_requests.py -v
