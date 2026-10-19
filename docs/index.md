@@ -5,10 +5,14 @@ export code. This documentation describes the repository and the constraints
 that matter when changing it. The public API and CPU validation workflow are described below; ADIOS buffer
 serialization remains separate.
 
+See the [CAESAR workflow figure](caesar_workflow.pdf) for an overview of the
+compression and reconstruction pipeline.
+
 ```{toctree}
 :maxdepth: 2
 
 codebase
 public_api
 models
+model_registration
 ```
