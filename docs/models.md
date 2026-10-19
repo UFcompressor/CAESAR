@@ -54,16 +54,19 @@ when it is another version of the same model family. Names and descriptions help
 users choose; the registration plus hash is what compressed data must record.
 The device is installation-specific and is not part of checkpoint identity.
 
-To register a model, submit a catalog entry in UFL_MODELS with a new positive
-number, name, display name, description, SHA-256, immutable checkpoint URL,
-filename, supported input rank range, and architecture. After approval, synchronize
-CAESAR's catalog snapshot and run the registry tests. Unregistered architectures
-also require implementation support; catalog registration does not make an
-incompatible state_dict loadable. The compiler uses strict state_dict loading. UFL_MODELS includes
-`register_model.py` to assign the next unused number and validate registrations;
-its `--previous` check rejects removal or modification of existing identities.
-This is a repository-controlled contract, not a licensing/security boundary
-against someone modifying CAESAR's code or catalog.
+Registration commands now live in CAESAR; UFL_MODELS remains the authoritative
+catalog database. Run `python3 register_model.py add --help` to submit a checkpoint
+or `python3 register_model.py remove MODEL_NAME` to request retirement. The trusted
+UFL_MODELS workflow derives ownership from the authenticated GitHub issue author's
+stable account ID, validates requests, and commits accepted changes automatically.
+Users may retire only their own models; administrator E53klasky may retire any
+model. Retirement preserves the full record and reserves its identity.
+
+See [Automated model registration](model_registration.md) for commands, validation,
+one-time GitHub setup, admin rules, and catalog snapshot synchronization. Local
+scripts do not enforce repository permissions; restrict direct catalog and workflow
+writes to trusted administrators and automation. CAESAR compilation continues to
+validate the bundled catalog snapshot and strictly load compatible state_dicts.
 
 ## Local metadata and cache
 
