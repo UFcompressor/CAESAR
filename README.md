@@ -179,6 +179,69 @@ For debug builds, replace `-DCMAKE_BUILD_TYPE=Release` with `-DCMAKE_BUILD_TYPE=
 
 ---
 
+## Quick start: compress and reconstruct
+
+After building, run from the repository root with a matching compiled model:
+
+```bash
+export CAESAR_MODEL_DIR="$PWD/exported_model"
+# input.bin contains contiguous float32 values in the specified axis order.
+build/CAESAR/caesar compress input.bin --shape 1,1,20,256,256 \
+  --n-frame 8 --error-bound 0.001 --correction gae --output sample.cae
+build/CAESAR/caesar decompress sample.cae --output restored.bin \
+  --verify --original input.bin
+```
+
+The CLI writes `sample.cae.latents`, `sample.cae.hyper`, and `sample.cae.meta`;
+keep all three. `restored.bin` contains raw float32 values. The C++ `caesar::save`
+API instead writes one complete versioned file; these formats are different.
+
+For in-memory use, no intermediate files are required:
+
+```cpp
+#include <caesar/models/caesar_compress.h>
+#include <caesar/models/caesar_decompress.h>
+
+// field is a nonempty floating-point torch::Tensor in [T,H,W] order.
+CompressionConfig config;
+config.memory_data = field;
+config.n_frame = 8; // Required; current compiled architecture supports only 8.
+Compressor compressor;
+CompressionResult result = compressor.compress(config, 0.001f);
+Decompressor decompressor;
+torch::Tensor restored = decompressor.decompress(result);
+auto cpu_values = restored.cpu().contiguous();
+```
+
+`CompressionResult` owns binary latent streams, normalization and shape metadata,
+and correction payloads. See the [complete field/type reference](docs/public_api.md#compressionresult-field-reference)
+for every member and nested structure, plus buffer serialization for applications
+that transport results without writing files. Binary strings can contain zero
+bytes: use `.data()` and `.size()`, never `strlen()`.
+
+### Input and runtime constraints
+
+- Accepted shapes are `[T,H,W]`, `[S,T,H,W]`, and `[V,S,T,H,W]`
+  (variable, section, time, height, width). **5D input encodes variable 0 only**
+  and returns `[1,S,T,H,W]`; compress other variables separately.
+- Padding, blocking, and shape restoration are internal. Output is float32 on
+  the installed model's device; CPU float64 input is converted internally.
+- GAE is the default correction; LBRC and NGLR are alternatives. The relative
+  error bound is a target: validate reconstructed error for your data. See
+  [API constraints](docs/public_api.md) and [known limitations](docs/TODO.txt).
+- Decoding requires the matching model installation, including its probability
+  tables. Results record checkpoint identity but do not embed model packages.
+  GPU-to-CPU entropy-decoding portability is still pending.
+- Set `CAESAR_MODEL_DIR` before first use. Models and tables are cached per thread;
+  reuse objects on their creating thread, and restart to switch installations.
+  See [cache behavior and clearing](docs/models.md#runtime-cache-lifetime-and-clearing).
+
+For a runnable C++ example, configure with `-DBUILD_EXAMPLES=ON`, build, and run
+`build/examples/hello_caesar gae`. See [examples](examples/README.md),
+[model installation](docs/models.md), and the [documentation index](docs/index.md).
+
+---
+
 ## GPU Support (NVIDIA)
 
 GPU support requires CUDA and nvCOMP.
