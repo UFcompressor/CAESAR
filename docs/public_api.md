@@ -69,6 +69,125 @@ hyper-decoder and are not yet serialized. This API change does not resolve or
 validate that portability issue. ADIOS integration and its buffer format are
 unchanged and still need migration to the new API.
 
+## CompressionResult field reference
+
+These are C++ member types, not a packed memory layout. The declarations live in
+`CAESAR/models/caesar_compress.h`, `CAESAR/data_utils.h`, `lbrc.h`, and `nglr.h`.
+All result fields are owned standard-library values, with no borrowed tensor
+storage or model handles. Copies copy their containers; use `std::move` to transfer
+large results. Keep the complete result for decoding, including metadata for the
+selected correction method. Unused correction fields can be empty/default;
+empty latent streams are valid for all-filtered constant data.
+
+| Member | C++ type | Meaning |
+| --- | --- | --- |
+| `original_shape` | `std::vector<int64_t>` | Full caller shape, including all original variables. |
+| `shape_info` | `PaddingInfo` | Shape conversion/restoration metadata for the selected variable. |
+| `n_frame` | `int` | Model window length, currently 8. |
+| `model_id` | `std::string` | Exact registered checkpoint identity required for decoding. |
+| `encoded_latents` | `std::vector<std::string>` | Binary entropy-coded main latent streams, in encoded sample order. |
+| `encoded_hyper_latents` | `std::vector<std::string>` | Corresponding binary hyper-latent streams. |
+| `compressionMetaData` | `CompressionMetaData` | Normalization, sample placement, filtering, and padding metadata. |
+| `correction_method` | `caesar::CorrectionMethod` | Enum with `uint8_t` underlying type: `GAE=0`, `LBRC=1`, `NGLR=2`. |
+| `gaeMetaData` | `GAEMetaData` | GAE correction decoding parameters. |
+| `gae_comp_data` | `std::vector<uint8_t>` | GAE binary correction payload. |
+| `lbrcMetaData` | `LBRCMetaData` | LBRC correction decoding parameters. |
+| `lbrc_blocks` | `std::vector<LBRCBlock>` | LBRC correction blocks in codec order. |
+| `nglrMetaData` | `nglr::NGLRMetaData` | NGLR codec parameters and trained correction-network weights. |
+| `nglr_comp_data` | `std::vector<uint8_t>` | NGLR binary correction payload. |
+
+### Shape and foundation metadata
+
+| `PaddingInfo` member | C++ type | Meaning |
+| --- | --- | --- |
+| `original_shape` | `std::vector<int64_t>` | Selected variable's shape to restore. |
+| `original_length` | `int64_t` | Selected variable's element count, checked on restoration. |
+| `padded_shape` | `std::vector<int64_t>` | Internal five-axis conversion shape. |
+| `H`, `W` | `int64_t` each | Legacy fields, currently initialized to zero. |
+| `was_padded` | `bool` | Legacy flag, currently false; actual padding is recorded below. |
+
+| `CompressionMetaData` member | C++ type | Meaning |
+| --- | --- | --- |
+| `offsets`, `scales` | `std::vector<float>` each | Per-sample normalization parameters, where used by the model. |
+| `indexes` | `std::vector<std::vector<int32_t>>` | Sample placement tuples `[variable, blocked_section, start_t, end_t]`; end is exclusive. These are not entropy-decoder latent indexes. |
+| `block_info` | `std::tuple<int32_t, int32_t, std::vector<int32_t>>` | Spatial block counts `(nH,nW)` and padding `[top,down,left,right]`. |
+| `data_input_shape` | `std::vector<int32_t>` | Internal blocked input shape used during reconstruction. |
+| `filtered_blocks` | `std::vector<std::pair<int32_t, float>>` | Filtered block index and its constant reconstruction value. |
+| `global_scale` | `float` | Global range used for GAE normalization. |
+| `global_offset` | `float` | Global mean used for GAE normalization. |
+| `pad_T` | `int64_t` | Number of appended temporal padding frames. |
+| `all_filtered` | `bool` | All blocks were filtered; reconstruction can omit latent decoding. |
+
+### GAE metadata
+
+| `GAEMetaData` member | C++ type | Meaning |
+| --- | --- | --- |
+| `GAE_correction_occur` | `bool` | Whether GAE correction was needed. |
+| `padding_recon_info` | `std::vector<int>` | Padding applied when preparing reconstruction for GAE. |
+| `pcaBasis` | `std::vector<std::vector<float>>` | PCA correction basis matrix. |
+| `uniqueVals` | `std::vector<float>` | Unique quantized coefficient values used to recover coefficients. |
+| `quanBin` | `double` | Coefficient quantization bin width. |
+| `nVec` | `int64_t` | Process-mask length used by the GAE decoder. |
+| `prefixLength` | `int64_t` | Prefix-mask length used by the GAE decoder. |
+| `dataBytes` | `int64_t` | Compressed GAE data byte count recorded by the codec. |
+| `coeffIntBytes` | `size_t` | Uncompressed coefficient-index byte count needed by lossless decoding. |
+
+### LBRC metadata and blocks
+
+| Structure/member | C++ type | Meaning |
+| --- | --- | --- |
+| `LBRCMetaData::lbrc_correction_occur` | `bool` | Whether LBRC correction was needed. |
+| `LBRCMetaData::x_mean`, `scale` | `float` each | Correction normalization mean and scale. |
+| `LBRCMetaData::block_size` | `std::array<int64_t, 3>` | Correction block dimensions `(T,H,W)`. |
+| `LBRCBlock::step` | `double` | Block quantization step. |
+| `LBRCBlock::bit_count` | `uint32_t` | Number of encoded bitplanes. |
+| `LBRCBlock::streams` | `std::vector<std::vector<uint8_t>>` | Compressed binary bitplane streams. |
+
+### NGLR metadata and weights
+
+| `nglr::NGLRMetaData` member | C++ type | Meaning |
+| --- | --- | --- |
+| `schema_version` | `uint32_t` | Correction metadata schema, currently 1. |
+| `correction_occurred` | `bool` | Whether NGLR correction was needed. |
+| `constant_input` | `bool` | Constant-input reconstruction path flag. |
+| `quantization` | `nglr::NGLRMeta` | Normalization, quantization, and block settings below. |
+| `hidden`, `q_hidden`, `model_blocks` | `int32_t` each | Correction network architecture dimensions and block count. |
+| `shape` | `std::vector<int64_t>` | Correction tensor shape. |
+| `weights` | `std::vector<nglr::NGLRWeight>` | Trained correction network parameters carried with this result. |
+
+`nglr::NGLRMeta` contains `double` members `x_mean` (normalization mean),
+`scale` (normalization scale), `step` (quantization step), `q_context_scale`
+(context scaling), and `delta_scale` (residual scaling); `block_t`, `block_h`,
+and `block_w` are `int64_t` correction block dimensions.
+Each `nglr::NGLRWeight` has `name` (`std::string`, parameter name), `shape`
+(`std::vector<int64_t>`, parameter dimensions), and `values`
+(`std::vector<float>`, flattened parameter values). See [NGLR](nglr.md).
+
+### Working with binary data in memory
+
+```cpp
+// Streams are binary strings: embedded zero bytes are valid.
+for (const std::string &stream : compressed.encoded_latents) {
+  const char *data = stream.data();
+  size_t length = stream.size();
+  // Pass data + length to your binary consumer; valid while stream is unchanged.
+  (void)data;
+  (void)length;
+}
+
+// Transport the entire result, including every metadata/correction field.
+// Requires <caesar/models/serialization.h>.
+std::vector<uint8_t> buffer = caesar::serialize(compressed);
+CompressionResult received = caesar::deserialize(buffer);
+torch::Tensor reconstructed = decompressor.decompress(received);
+```
+
+Do not `memcpy` the struct itself: strings and vectors contain process-local
+pointers. Summing latent sizes alone omits metadata and correction overhead;
+`caesar::serialize(compressed).size()` measures the complete serialized result
+(excluding the separately installed model). The returned tensor is reconstructed
+scientific data; the latent byte streams are encoded data, not float arrays.
+
 ## Saving complete results
 
 ```cpp

@@ -93,11 +93,45 @@ explicit directory fail rather than falling back to another installation. All
 artifacts are loaded from the metadata's directory, never combined across paths.
 The runtime device must match the compilation target and be available.
 
+### Runtime cache lifetime and clearing
+
+`ModelCache` is an in-memory runtime cache, separate from downloaded checkpoints
+in `pretrained/` and compiled artifacts in `exported_model/`. It does not cache
+input tensors, compressed results, or reconstructed fields. Each thread lazily
+loads and reuses its own compressor, hyper-decompressor, decoder, and six
+probability tables. AOTI package-loader construction is serialized across threads;
+that does not make a compressor/decompressor object callable from another thread.
+
+Reuse objects on their creating thread for repeated fields. The first operation
+that needs a package/table pays its load cost; warm runs reuse it. Each additional
+worker thread or MPI rank can add model/table memory. There is no automatic LRU,
+capacity setting, or cross-thread/rank model sharing. Compressor/decompressor
+objects also hold copies of probability tables and shared runner handles.
+
+Advanced callers can clear the cache of the **calling thread**:
+
+```cpp
+#include <caesar/models/model_cache.h>
+
+// First destroy compressor/decompressor objects in this thread if the aim is
+// to release their model handles as well.
+ModelCache::instance().clear();
+```
+
+`clear()` resets the cached three runner handles and six probability tables.
+Existing objects retain their runner handles and table copies and remain usable;
+subsequent cache getters reload artifacts. Clearing does not reset process-wide
+model metadata, select another model/device, delete files, or clear another
+thread's cache. It does not guarantee an immediate drop in GPU/process memory,
+since live handles and backend allocators may retain allocations. On Windows,
+the thread-local registry is intentionally retained at teardown to avoid unsafe
+AOTI destruction; explicit clearing still resets its entries' loaded resources.
+
 ## ADIOS integration contract (next step)
 
 Compression must store `get_model_id()` in the ADIOS buffer. Decompression reads
 that identity and calls `require_model(required_id)` before decoding, or supplies
-it to `Decompressor(device, required_id)`. A mismatch or missing installation
+it to `Decompressor(required_id)`. A mismatch or missing installation
 throws an error naming the required model. ADIOS should surface that error.
 `get_model_metadata().require_dims(rank)` checks the supported original input rank.
 
