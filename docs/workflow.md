@@ -1,8 +1,6 @@
+:orphan:
+
 # CAESAR workflow
 
-The figure follows scientific data through preparation, learned compression,
-error correction, storage, and reconstruction.
-
-![CAESAR compression and decompression workflow](caesar_workflow.png)
-
-{download}`Download the workflow figure as a PDF <caesar_workflow.pdf>`
+The expanded [CAESAR software architecture](architecture.md) replaces the earlier
+workflow figure and shows the compression and decompression paths in detail.

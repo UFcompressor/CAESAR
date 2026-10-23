@@ -2,18 +2,20 @@
 
 CAESAR combines a C++17 compression library with Python model training and
 export code. This documentation describes the repository and the constraints
-that matter when changing it. The public API and CPU validation workflow are described below; ADIOS buffer
-serialization remains separate.
+that matter when changing it. The core provides versioned buffer serialization
+and single-file save/load; external ADIOS2 integration is documented separately.
 
-See the [CAESAR workflow figure](workflow.md) for an overview of the
-compression and reconstruction pipeline.
+See the [CAESAR architecture figure](architecture.md) for model installation,
+compression, local reconstruction, correction, metadata, and decompression.
 
 ```{toctree}
 :maxdepth: 2
 
 codebase
-workflow
+architecture
 public_api
+adios_serialization
+nglr
 models
 model_registration
 ```
