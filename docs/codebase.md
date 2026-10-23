@@ -1,9 +1,8 @@
 # Things to know about the codebase
 
 This page is a map for contributors. It describes where work belongs and which
-parts need to stay in agreement. It intentionally avoids documenting the
-compression API and the compressed-buffer metadata layout while those are
-changing.
+parts need to stay in agreement. See [the public API](public_api.md) for
+compression interfaces, result fields, and the implemented version-1 buffer and file serialization API.
 
 ## Repository map
 
@@ -11,7 +10,7 @@ changing.
 | --- | --- |
 | `CAESAR/` | C++17 library, CLI, data preparation, compression, and decompression. |
 | `CAESAR/dataset/` | Blocking, normalization, filtering, and dataset preparation. |
-| `CAESAR/models/` | Model execution, entropy coding, GAE and LBRC correction, model loading, and runtime helpers. |
+| `CAESAR/models/` | Model execution, entropy coding, GAE, LBRC, and NGLR correction, model loading, and runtime helpers. |
 | `pyCAESAR/` | Python model definitions, data loading, and training. |
 | Root Python scripts | Model registry, checkpoint selection, and AOTI export. |
 | `tests/` | Python and C++ checks. C++ test targets are registered in `tests/CMakeLists.txt`. |
@@ -30,9 +29,10 @@ artifact validation are handled by `model_registry.py`, `compile_model.py`,
 
 Input preparation and restoration live in the C++ dataset and data utility
 code. The compressor produces learned latents, uses the entropy coder, and may
-apply correction paths such as GAE or LBRC. The decompressor reverses these
-steps. See the source in `CAESAR/models/` for the current call sequence; the
-configuration and serialized format are under active change.
+apply GAE, LBRC, or NGLR correction. The decompressor reverses these
+steps. `models/serialization.h` exposes `serialize`/`deserialize` for complete
+results in a versioned buffer and `save`/`load` for single-file storage. The
+[architecture figure](architecture.md) shows these component relationships.
 
 The runtime keeps model metadata once per process and caches model runners and
 probability tables by model identity per thread. A compressor or decompressor
@@ -54,8 +54,10 @@ new process so that cached runners and tables stay consistent.
 - **Platform support:** Local CPU tests do not establish GPU or cross-platform
   behavior. Apple GPU double-precision data is unsupported in this path.
 - **ADIOS integration:** Preserve the information needed to identify the model
-  and decode a buffer. The serialization contract is being revised; avoid
-  relying on an undocumented layout.
+  and decode a buffer. Use the implemented `caesar::serialize` and
+  `caesar::deserialize` API rather than duplicating the result field layout.
+  The external operator migration is tracked separately; see
+  [the integration notes](adios_serialization.md).
 
 ## Development checks
 

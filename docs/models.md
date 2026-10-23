@@ -127,25 +127,31 @@ since live handles and backend allocators may retain allocations. On Windows,
 the thread-local registry is intentionally retained at teardown to avoid unsafe
 AOTI destruction; explicit clearing still resets its entries' loaded resources.
 
-## ADIOS integration contract (next step)
+## Serialized model identity and external integration
 
-Compression must store `get_model_id()` in the ADIOS buffer. Decompression reads
-that identity and calls `require_model(required_id)` before decoding, or supplies
-it to `Decompressor(required_id)`. A mismatch or missing installation
-throws an error naming the required model. ADIOS should surface that error.
-`get_model_metadata().require_dims(rank)` checks the supported original input rank.
+The version-1 CAESAR serializer stores `CompressionResult.model_id` with every
+result, together with shape, normalization, padding, encoded streams, and
+correction metadata/payloads. `caesar::serialize`/`deserialize` handle buffers;
+`caesar::save`/`load` handle single-file storage. Decompression checks the saved
+identity against the installed model before decoding and rejects a mismatch.
+The model packages and probability tables remain in the matching installation.
+See [the public API](public_api.md#saving-complete-results).
 
-This change does not modify the ADIOS operator or existing compressed-buffer
-serialization. Existing name-only files cannot establish an exact checkpoint
-identity; their compatibility policy belongs to that later integration.
+The separately maintained ADIOS2 operator can wrap this buffer with a length
+prefix and pass the deserialized result to `Decompressor::decompress`.
+[ADIOS2 migration notes](adios_serialization.md) describe that integration;
+its external source and validation are outside this checkout. Existing name-only
+files cannot establish an exact checkpoint identity, and the version-1 serializer
+does not read legacy ADIOS2 buffers or the CLI's three-file layout.
 
 ## Input preparation
 
 Padding and conversion to the model's 5D input are internal CAESAR responsibilities.
 The 3D–5D catalog range describes user input ranks handled through CAESAR's internal
 preparation; it is not an assertion that the exported network accepts arbitrary
-shapes directly. Deferred removal of `PaddingInfo.H/W/was_padded` belongs to the
-serialization cleanup, not model installation.
+shapes directly. The version-1 serializer preserves every `PaddingInfo` field,
+including `H`, `W`, and `was_padded`; changing these fields requires considering
+the serialized format as well as input preparation.
 
 ## Verification
 

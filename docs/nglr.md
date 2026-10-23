@@ -60,8 +60,9 @@ finite weights. No model-directory path is required at decode time.
 The existing CLI and C/D test metadata writers now carry these fields for NGLR.
 Their one-byte correction tags retain the old GAE/LBRC values. New NGLR files
 require updated readers. Compression ratios in C/CD include NGLR model and
-correction bytes. This extends the current writers; it does not introduce the
-planned CAESAR serialization API.
+correction bytes. The implemented version-1 CAESAR serializer also preserves all NGLR metadata,
+weights, and correction bytes through `serialize`/`deserialize` and `save`/`load`;
+see [saving complete results](public_api.md#saving-complete-results).
 
 ADIOS operator changes are deferred. The NGLR fields above are available for
 that later integration.
