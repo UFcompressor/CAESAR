@@ -38,6 +38,9 @@ CAESAR runs on CPU by default, and supports GPU acceleration on both NVIDIA (CUD
 
 ## Build Instructions
 
+CAESAR requires a C++17 compiler. When using GCC, use GCC 9 or newer;
+GCC versions older than 9 (including 7.5) are unsupported.
+
 ### 1. Clone the Repository
 
 ```bash
@@ -65,6 +68,9 @@ used by the CAESAR model and training configuration code.
 ```bash
 sudo apt-get update
 sudo apt-get install -y cmake g++ zstd libzstd-dev
+
+# Verify that the installed GCC version is 9 or newer.
+g++ --version
 
 source venv/bin/activate
 
@@ -348,6 +354,7 @@ export CAESAR_MODEL_DIR=/path/to/your/models
 
 | Dependency                 | Minimum Version |
 | -------------------------- | --------------- |
+| GCC (when using GCC)       | 9 (C++17)       |
 | LibTorch (PyTorch C++ API) | 2.8             |
 | CMake                      | 3.10            |
 | Zstandard (zstd)           | 1.5 (required)  |

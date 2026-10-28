@@ -36,27 +36,6 @@ The generator writes PDF, SVG, and an 18.5 × 10.5 inch PNG at 300 dpi
 (5550 × 3150 pixels). All labels are bold; `font_scale` controls their sizes.
 It checks box text for horizontal overflow and title/detail overlap.
 
-## Include in the paper
-
-Copy the PDF into the paper's `figures/` directory. With `graphicx` loaded,
-use the full text width across both columns:
-
-```latex
-\begin{figure*}[t]
-  \centering
-  \includegraphics[width=\textwidth]{figures/caesar_architecture.pdf}
-  \caption{CAESAR software architecture and workflow. Compression preprocesses
-  the input tensor, performs neural encoding and rANS entropy coding, and uses
-  a local reconstruction branch to generate residual corrections. Encoded
-  streams, reconstruction metadata, and correction data form the compressed
-  representation. Decompression verifies the model identity, decodes the
-  streams, reconstructs the tensor, and applies the selected correction. Both
-  paths reuse the installed model components and probability tables. Solid
-  arrows show data and metadata; dashed arrows show installed dependencies.}
-  \label{fig:caesar-architecture}
-\end{figure*}
-```
-
 The figure summarizes component relationships rather than every execution branch.
 Constant/filtered blocks can bypass neural coding. Input conversion currently
 selects variable 0 for 5D tensors. The entropy-decoding block includes the
