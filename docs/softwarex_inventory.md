@@ -1,6 +1,6 @@
-# CAESAR software inventory for the SoftwareX manuscript
+# CAESAR software inventory
 
-Prepared 28 September 2026 from repository commit `14e1e72ebaa9238c0ec0a1da7a6c3b70ec73ac4f`. This is an implementation inventory, not manuscript prose. Paths below are relative to the repository root; named classes and functions provide source evidence. API details are deliberately brief.
+Prepared 28 September 2026 from repository commit `14e1e72ebaa9238c0ec0a1da7a6c3b70ec73ac4f`. This is an implementation inventory. Paths below are relative to the repository root; named classes and functions provide source evidence. API details are deliberately brief.
 
 **Scope:** The author confirms that ADIOS2 integration code is maintained elsewhere. This inventory describes the integration-facing facilities visible here, but does not assess that external implementation. Absence from this checkout must not be represented as absence of an ADIOS2 integration.
 
@@ -182,7 +182,7 @@ The foundation weights, compiled packages, and probability tables remain externa
 
 ### Platform evidence
 
-**Author-reported platform status:** Linux, macOS, and Windows builds/tests are reported as passing. Suitable wording for the manuscript is: “CAESAR has passed build and test workflows on Linux, macOS, and Windows.” Cite the corresponding run records and identify their release/configuration when assembling the paper. This host-operating-system result does not establish that every GPU backend or the separately maintained ADIOS2 integration passed. The repository's `.github/workflows/cross-platform-test.yml` provides the workflow definition; the passing status here comes from the author, not independent inspection of remote CI results.
+**Author-reported platform status:** Linux, macOS, and Windows builds/tests are reported as passing. The corresponding run records and their release/configuration are needed to substantiate this status. This host-operating-system result does not establish that every GPU backend or the separately maintained ADIOS2 integration passed. The repository's `.github/workflows/cross-platform-test.yml` provides the workflow definition; the passing status here comes from the author, not independent inspection of remote CI results.
 
 | Platform/backend | What the source supports | What remains unverified here |
 | --- | --- | --- |
@@ -207,17 +207,17 @@ Native execution calls compiled AOTI packages through C++/LibTorch and contains 
 
 ### External applications and ADIOS2
 
-An external C++ application links the library, provides a tensor, retains/transports the compression result, and calls reconstruction. `examples/hello_caesar.cpp` demonstrates an in-memory round trip of a synthetic time-varying field. Public tensor arguments/results use LibTorch; the visible interface is not a standalone C byte-buffer API. These details need only a sentence in the paper.
+An external C++ application links the library, provides a tensor, retains/transports the compression result, and calls reconstruction. `examples/hello_caesar.cpp` demonstrates an in-memory round trip of a synthetic time-varying field. Public tensor arguments/results use LibTorch; the visible interface is not a standalone C byte-buffer API.
 
 **Author-provided context:** ADIOS2 integration exists in a separate code location. Its operator code, parameters, buffer format, and tests were not available in this checkout, so they remain outside this review.
 
 The core implements `caesar::serialize`/`deserialize` for all result fields and `save`/`load` for single-file storage, including model identity, original/converted shapes, frame count, latent streams, and all correction metadata/payloads. `Decompressor::decompress` checks model identity before decoding. `docs/adios_serialization.md` describes migration of the separately maintained operator to a length-prefixed CAESAR buffer. External operator migration and end-to-end validation remain outside this checkout.
 
-For the paper, retain a substantive ADIOS2 paragraph once the external code can establish: the operator entry points; variable/type/shape mapping; exposed parameters; which fields travel in each compressed block; model compatibility checks; and a write/read round-trip example. Do not equate the CLI's three-file format with ADIOS2 serialization.
+External ADIOS2 documentation still needs to establish: the operator entry points; variable/type/shape mapping; exposed parameters; which fields travel in each compressed block; model compatibility checks; and a write/read round-trip example. Do not equate the CLI's three-file format with ADIOS2 serialization.
 
 There are no MPI communicator operations in the inspected core sources. `ModelCache` documents independent process state and per-thread runners; this supports describing local process isolation, not distributed compression, collective I/O behavior, rank-to-GPU mapping, or multi-GPU scalability. Those claims require the external ADIOS2/MPI implementation and tests. Evidence: `model_cache.h`, inspected source/build references to MPI, external-integration scope above.
 
-## Validation record and publication TODOs
+## Validation record and outstanding work
 
 ### Verified during this review
 
@@ -229,7 +229,7 @@ No full neural round trip, hardware benchmark, external checkpoint download, GPU
 
 ### Existing evidence that should be preserved separately
 
-`docs/TODO.txt` reports previous CPU library/CLI/example success; a 20-by-256-by-256 round trip with NRMSE `9.75445e-05` at target `1e-4`; and CLI GAE/LBRC tests on a 100-by-500-by-500 float32 file at target `0.001`, with reported NRMSE `6.994591e-04` and `9.999986e-04`, respectively. These are historical repository reports, not fresh measurements here. The same document records failures at tighter targets. Preserve their datasets, logs, software versions, and tolerances before using them as publication evidence.
+`docs/TODO.txt` reports previous CPU library/CLI/example success; a 20-by-256-by-256 round trip with NRMSE `9.75445e-05` at target `1e-4`; and CLI GAE/LBRC tests on a 100-by-500-by-500 float32 file at target `0.001`, with reported NRMSE `6.994591e-04` and `9.999986e-04`, respectively. These are historical repository reports, not fresh measurements here. The same document records failures at tighter targets. Preserve their datasets, logs, software versions, and tolerances before using them as validation evidence.
 
 Available tests include `test_caesarC.cpp`, `test_caesarD.cpp`, `test_caesarCD.cpp`, `test_CLI.sh`, `test_padding.cpp`, `testRunGaeCuda.cpp`, `testLBRC.cpp`, `test_NGLR.cpp`, `test_model_cache.cpp`, `test_model_metadata.cpp`, `test_model_registry.py`, `check_registered_checkpoints.py`, `test_rans_kernels.cpp`, and `test_rans_cuda.cpp`. The quick CLI script checks GAE/LBRC NRMSE and output size and intentionally excludes NGLR. `test_caesarCD.cpp` permits a float-epsilon tolerance. Tests using C/C++ `assert` need an assertion-enabled build; the local existing build is Release. `tests/CMakeLists.txt` builds executable tests but does not register them using `add_test()`, so a generic CTest invocation is not evidence that they ran.
 
@@ -243,43 +243,3 @@ Available tests include `test_caesarC.cpp`, `test_caesarD.cpp`, `test_caesarCD.c
 6. **ADIOS2/MPI:** review the separate integration, its compatibility with this core revision, variable/type handling, operator options, buffer serialization, error propagation, rank/thread behavior, and end-to-end tests.
 7. **Reproducibility:** establish a tested dependency lock/environment and retain current hardware/compiler/LibTorch/CUDA/ROCm details. Do not infer passing CI from workflow presence.
 8. **Measurements:** include correction bytes and all required per-dataset metadata in compression ratios; distinguish reusable model storage, loading/warm-up, per-field NGLR training, transfers, and file I/O. The example's reported latent bytes alone are not total compressed size (`examples/hello_caesar.cpp`).
-
-### Blue LaTeX TODOs for Overleaf
-
-These require `\usepackage{xcolor}`. Keep benchmark tasks outside Software Description.
-
-```latex
-\textcolor{blue}{TODO: Review the separately maintained ADIOS2 operator and
-document its parameters, compressed-buffer metadata, model-identity checks,
-MPI behavior, and end-to-end write/read validation against the current CAESAR release.}
-
-\textcolor{blue}{TODO: Re-test CAESAR model export, inference, compression,
-and decompression on NVIDIA CUDA, AMD ROCm, and Apple MPS. Test Intel XPU
-where appropriate hardware and software are available; distinguish tested
-configurations from implementation paths.}
-
-\textcolor{blue}{TODO: Define the supported NRMSE-target semantics and
-investigate documented target violations, including filtering, padding,
-small residual sets, and float32 precision limitations.}
-
-\textcolor{blue}{TODO: Validate GPU-to-CPU reconstruction and document
-the model artifacts, probability tables, and latent-index information
-required for portable decompression.}
-
-\textcolor{blue}{TODO: Validate native deployment without a Python
-interpreter after model export and document the tested dependency versions.}
-
-\textcolor{blue}{TODO: Evaluate CAESAR on five representative scientific datasets.}
-
-\textcolor{blue}{TODO: Determine and document a recommended fine-tuning
-procedure, including training-data requirements, iteration count,
-validation criteria, model selection, registration, and export.}
-
-\textcolor{blue}{TODO: Benchmark total compression ratio, reconstruction
-error, compression/decompression throughput, and CPU/GPU memory consumption;
-separate startup and model-loading costs from repeated operation.}
-
-\textcolor{blue}{TODO: Compare against ZFP, SZ3, and MGARD using clearly
-defined and comparable error criteria. Evaluate Python-versus-C++ execution,
-correction overhead, and multi-GPU workflows where implemented.}
-```

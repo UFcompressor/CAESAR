@@ -1,4 +1,4 @@
-"""Generate a compact SoftwareX architecture figure (Matplotlib required).
+"""Generate a compact CAESAR architecture figure (Matplotlib required).
 
 Run: python3 docs/generate_architecture.py
 Outputs: vector PDF/SVG and a 300 dpi PNG beside this script.
