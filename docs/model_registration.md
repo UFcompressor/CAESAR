@@ -8,7 +8,9 @@ check passes. CAESAR's `register_model.py` prepares and opens these pull request
 
 ## Submit a model
 
-Install GitHub CLI and run `gh auth login` once. Contributors need a GitHub
+Install Git 2.38 or newer and GitHub CLI, then run `gh auth login` once.
+The registration checker requires `git merge-tree --write-tree`.
+Contributors need a GitHub
 account, not write access to UFL_MODELS. From CAESAR:
 
 ```sh
