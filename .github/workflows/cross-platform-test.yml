@@ -86,11 +86,14 @@ jobs:
             grep -v "^--extra-index-url" | \
             grep -v "^cupy" | \
             grep -v "^nvidia" | \
+            grep -v "^compressai" | \
             grep -v "^$" > temp_requirements.txt
 
+          pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/cpu
           pip install --no-cache-dir -r temp_requirements.txt
-          pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install compressai==1.2.6 
+          # Reuse the selected torch instead of downloading it in an isolated build.
+          pip install 'pybind11>=2.6.0'
+          pip install --no-build-isolation compressai==1.2.6
           rm temp_requirements.txt
 
       - name: Install macOS deps (inside venv)
@@ -106,11 +109,13 @@ jobs:
             grep -v "^--extra-index-url" | \
             grep -v "^cupy" | \
             grep -v "^nvidia" | \
+            grep -v "^compressai" | \
             grep -v "^$" > temp_requirements.txt
 
+          pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
           pip install -r temp_requirements.txt
-          pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install compressai==1.2.6 
+          pip install 'pybind11>=2.6.0'
+          CC=clang CXX=clang++ pip install --no-build-isolation compressai==1.2.6
           rm temp_requirements.txt
 
       - name: Download pretrained models
