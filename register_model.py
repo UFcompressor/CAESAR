@@ -1,25 +1,28 @@
-"""Submit model requests, or process trusted GitHub issue events for UFL_MODELS.
+"""Submit model registrations to UFL_MODELS as pull requests, or check its catalog.
 
-No checkpoint code is loaded by the registration service. Publication validates
-metadata and checkpoint bytes; CAESAR's compiler checks network compatibility.
+`add` and `remove` clone UFL_MODELS, commit the change on a branch, push it to the
+submitter's fork, and open a pull request. UFL_MODELS's workflow checks the pull
+request with its test/check_registration.py and merges it. This command imports
+that same module from the clone to prepare and pre-check the change, so local
+and workflow checks agree. Trusted automation, not this command, enforces access.
 """
 
 import argparse
-import copy
 import hashlib
+import importlib.util
 import json
-import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
-from urllib.request import urlopen
+import tempfile
+import time
 
 from model_registry import validate_model
 from registry_catalog import render_readme
 
 DATABASE = "UFcompressor/UFL_MODELS"
 LOGIN = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
-MAX_CHECKPOINT_BYTES = 512 * 1024 * 1024
 
 
 def validate_catalog(catalog):
@@ -42,220 +45,237 @@ def validate_catalog(catalog):
         raise ValueError("Default must be an active model")
 
 
-def checkpoint_url(request, actor, admin):
-    repository = request["repository"]
-    revision = request["revision"]
-    filename = request["filename"]
-    if not re.fullmatch(LOGIN + r"/[A-Za-z0-9_.-]+", repository):
-        raise ValueError("Invalid checkpoint repository")
-    if not admin and repository.split("/")[0].casefold() != actor.casefold():
-        raise ValueError("Checkpoint repository must belong to the submitter")
-    if not re.fullmatch(r"[0-9a-f]{40}", revision):
-        raise ValueError("Checkpoint revision must be a full 40-character commit SHA")
-    if not re.fullmatch(r"[A-Za-z0-9_-]+\.pt", filename):
-        raise ValueError("Checkpoint must be a .pt file at the repository root")
-    return f"https://raw.githubusercontent.com/{repository}/{revision}/{filename}"
+def run(*args, cwd=None):
+    # Structured argv: request contents are never shell commands.
+    return subprocess.run(
+        args, cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
-def verify_download(url, expected):
-    digest = hashlib.sha256()
-    total = 0
-    with urlopen(url, timeout=60) as response:
-        if response.geturl() != url:
-            raise ValueError("Checkpoint redirects are not accepted")
-        for block in iter(lambda: response.read(1024 * 1024), b""):
-            total += len(block)
-            if total > MAX_CHECKPOINT_BYTES:
-                raise ValueError("Checkpoint exceeds the 512 MiB registration limit")
-            digest.update(block)
-    if not total or digest.hexdigest() != expected:
-        raise ValueError("Empty checkpoint or SHA-256 mismatch")
+def load_checker(clone):
+    """Import UFL_MODELS's test/check_registration.py from a clone."""
+    path = Path(clone) / "test" / "check_registration.py"
+    if not path.is_file():
+        raise ValueError(
+            "this UFL_MODELS branch has no test/check_registration.py; "
+            "it does not accept registration pull requests"
+        )
+    spec = importlib.util.spec_from_file_location("check_registration", path)
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    return checker
 
 
-def apply_request(
-    catalog, request, actor, policy, issue_number, verify=None, *, actor_id
-):
-    """Pure catalog transition except for the injected checkpoint verifier.
+def prepare(clone, args, login, user_id, database):
+    """Commit the request on a new branch of a UFL_MODELS clone.
 
-    actor MUST come from the trusted issue event, never from request JSON.
+    A registration takes two commits: the checkpoint, then the catalog entry whose
+    URL names the first commit. The workflow merges without squashing, so that
+    commit becomes part of UFL_MODELS and the URL stays valid.
     """
-    validate_catalog(catalog)
-    if not re.fullmatch(LOGIN, actor):
-        raise ValueError("Invalid authenticated GitHub login")
-    if type(actor_id) is not int or actor_id <= 0:
-        raise ValueError("Invalid authenticated GitHub user ID")
-    if policy.get("schema_version") != 1:
-        raise ValueError("Unsupported administrator policy schema")
-    admins = policy["admins"]
-    if not admins or any(
-        type(value.get("id")) is not int or value["id"] <= 0 for value in admins
-    ):
-        raise ValueError("Invalid administrator policy")
-    admin = actor_id in {value["id"] for value in admins}
-    if type(issue_number) is not int or issue_number <= 0:
-        raise ValueError("Invalid issue number")
-    result = copy.deepcopy(catalog)
-    # Re-running a successful workflow is harmless, even after model retirement.
-    for model in result["models"] + result.get("retired_models", []):
-        if (
-            model.get("registration_issue") == issue_number
-            or model.get("retirement_issue") == issue_number
-        ):
-            return result
-    action = request.get("action")
-    common = {"schema_version", "action", "name"}
-    if request.get("schema_version") != 1:
-        raise ValueError("Unsupported request schema")
+    checker = load_checker(clone)
+    identity = [
+        "-c",
+        f"user.name={login}",
+        "-c",
+        f"user.email={user_id}+{login}@users.noreply.github.com",
+    ]
+
+    def commit(message, *paths):
+        run("git", "add", "--", *paths, cwd=clone)
+        run("git", *identity, "commit", "--quiet", "-m", message, cwd=clone)
+        return run("git", "rev-parse", "HEAD", cwd=clone)
+
+    action = "register" if args.command == "add" else "retire"
+    branch = f"registry/{action}-{args.name}"
+    run("git", "switch", "--quiet", "-c", branch, cwd=clone)
+    catalog_path, readme = clone / "model_catalog.json", clone / "README.md"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     if action == "register":
-        allowed = common | {
-            "display_name",
-            "description",
-            "repository",
-            "revision",
-            "filename",
-            "sha256",
-            "min_dims",
-            "max_dims",
-        }
-        if set(request) != allowed:
-            raise ValueError(
-                "Registration has missing or unexpected fields (owner is assigned automatically)"
-            )
-        number = (
-            max(
-                (
-                    m["registration_id"]
-                    for m in result["models"] + result.get("retired_models", [])
-                ),
-                default=0,
-            )
-            + 1
+        filename = args.checkpoint.name
+        if (clone / filename).exists():
+            raise ValueError(f"{filename} already exists in {database}; rename it")
+        shutil.copyfile(args.checkpoint, clone / filename)
+        added = commit(f"Add {filename}", filename)
+        updated = checker.register(
+            catalog,
+            name=args.name,
+            display_name=args.display_name,
+            description=args.description,
+            filename=filename,
+            sha256=hashlib.sha256((clone / filename).read_bytes()).hexdigest(),
+            min_dims=args.min_dims,
+            max_dims=args.max_dims,
+            owner=login,
+            owner_id=user_id,
+            url=f"https://raw.githubusercontent.com/{database}/{added}/{filename}",
         )
-        model = {
-            key: request[key]
-            for key in (
-                "name",
-                "display_name",
-                "description",
-                "filename",
-                "sha256",
-                "min_dims",
-                "max_dims",
-            )
-        }
-        for field, limit in (("display_name", 120), ("description", 4000)):
-            if (
-                not isinstance(model[field], str)
-                or not model[field].strip()
-                or len(model[field]) > limit
-            ):
-                raise ValueError(f"Invalid {field}")
-        model.update(
-            registration_id=number,
-            id=f"ufl:{number}@sha256:{model['sha256']}",
-            architecture="caesar-bcrn-v1",
-            owner=actor,
-            owner_id=actor_id,
-            registration_issue=issue_number,
-            url=checkpoint_url(request, actor, admin),
-        )
-        result["models"].append(model)
-        validate_catalog(result)
-        (verify or verify_download)(model["url"], model["sha256"])
-    elif action == "retire":
-        if set(request) - (common | {"default_model"}) or not common <= set(request):
-            raise ValueError("Retirement has missing or unexpected fields")
-        model = next(
-            (m for m in result["models"] if m["name"] == request["name"]), None
-        )
-        if model is None:
-            raise ValueError("No active model with that name")
-        if not admin and model["owner_id"] != actor_id:
-            raise ValueError("Only the model owner or an administrator may retire it")
-        replacement = request.get("default_model")
-        if replacement is not None and not admin:
-            raise ValueError("Only an administrator may change the default model")
-        if result["default_model"] == model["name"] and not replacement:
-            raise ValueError(
-                "Retiring the default requires an administrator and a replacement default"
-            )
-        if replacement is not None:
-            result["default_model"] = replacement
-        result["models"].remove(model)
-        model["retirement_issue"] = issue_number
-        result.setdefault("retired_models", []).append(model)
-        validate_catalog(result)
     else:
-        raise ValueError("Unknown request action")
-    return result
-
-
-def process_event(root, event):
-    if event.get("action") != "opened" or event["repository"]["full_name"] != DATABASE:
-        raise ValueError("Expected an opened issue in UFcompressor/UFL_MODELS")
-    issue = event["issue"]
-    if "pull_request" in issue or issue["user"].get("type") != "User":
-        raise ValueError("Requests must be issues opened by a GitHub user")
-    request = json.loads(issue["body"])
-    if not isinstance(request, dict):
-        raise ValueError("Issue body must be a JSON object")
-    path = root / "model_catalog.json"
-    catalog = json.loads(path.read_text(encoding="utf-8"))
-    policy = json.loads((root / "registry_policy.json").read_text(encoding="utf-8"))
-    updated = apply_request(
-        catalog,
-        request,
-        issue["user"]["login"],
-        policy,
-        issue["number"],
-        actor_id=issue["user"]["id"],
+        updated = checker.retire(catalog, args.name, args.default_model)
+    catalog_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+    readme.write_text(
+        checker.render_readme(updated, readme.read_text(encoding="utf-8")),
+        encoding="utf-8",
     )
-    readme = root / "README.md"
-    text = render_readme(updated, readme.read_text(encoding="utf-8"))
-    path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
-    readme.write_text(text, encoding="utf-8")
+    commit(f"{action.capitalize()} {args.name}", "model_catalog.json", "README.md")
+    return branch, f"[model-registry] {action}: {args.name}"
+
+
+def submit(args):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
+        raise ValueError("Model names may only use letters, digits, '_' and '-'")
+    login, user_id = run("gh", "api", "user", "--jq", ".login, .id").split()
+    user_id = int(user_id)
+    with tempfile.TemporaryDirectory() as directory:
+        clone = Path(directory) / "UFL_MODELS"
+        run(
+            "git",
+            "clone",
+            "--quiet",
+            "--branch",
+            args.base,
+            f"https://github.com/{args.database}.git",
+            str(clone),
+        )
+        branch, title = prepare(clone, args, login, user_id, args.database)
+        try:
+            summary = load_checker(clone).check_pull_request(
+                clone, f"origin/{args.base}", "HEAD", login, user_id, args.database
+            )
+            print(f"Local check passed: {summary}")
+        except ValueError as error:
+            if not args.skip_local_check:
+                raise ValueError(f"local check failed, nothing submitted: {error}")
+            summary = f"skipped; it failed with: {error}"
+            print(f"Local check failed; submitting anyway: {error}")
+        print(
+            run(
+                "git",
+                "log",
+                "--stat",
+                "--format=%h %s",
+                f"origin/{args.base}..",
+                cwd=clone,
+            )
+        )
+        if args.dry_run:
+            print("Dry run: nothing was pushed")
+            return
+        # Users who can push to the database use a branch there; others use a fork.
+        if (
+            run("gh", "api", f"repos/{args.database}", "--jq", ".permissions.push")
+            == "true"
+        ):
+            target = args.database
+        else:
+            target = run(
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                f"repos/{args.database}/forks",
+                "--jq",
+                ".full_name",
+            )
+        for attempt in range(10):  # a new fork takes a few seconds to appear
+            try:
+                run(
+                    "git",
+                    "-c",
+                    "credential.helper=",
+                    "-c",
+                    "credential.helper=!gh auth git-credential",
+                    "push",
+                    "--quiet",
+                    "--force",
+                    f"https://github.com/{target}.git",
+                    f"HEAD:refs/heads/{branch}",
+                    cwd=clone,
+                )
+                break
+            except subprocess.CalledProcessError:
+                if attempt == 9:
+                    raise
+                time.sleep(5)
+    existing = run(
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        args.database,
+        "--head",
+        branch,
+        "--author",
+        login,
+        "--state",
+        "open",
+        "--json",
+        "url",
+        "--jq",
+        ".[0].url",
+    )
+    if existing:
+        print(f"Updated pull request {existing}; the workflow checks it again")
+        return
+    print(
+        run(
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            args.database,
+            "--base",
+            args.base,
+            "--head",
+            f"{target.split('/')[0]}:{branch}",
+            "--title",
+            title,
+            "--body",
+            "Opened by CAESAR `register_model.py`. The UFL_MODELS workflow checks "
+            f"this request and merges it.\n\nLocal check: {summary}",
+        )
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    add = commands.add_parser("add", help="Submit a checkpoint registration issue")
+    add = commands.add_parser(
+        "add", help="Open a pull request registering a checkpoint"
+    )
     add.add_argument("--name", required=True)
     add.add_argument("--display-name", required=True)
     add.add_argument("--description", required=True)
     add.add_argument(
-        "--repository",
-        required=True,
-        help="Public OWNER/REPO containing the checkpoint",
-    )
-    add.add_argument("--revision", required=True)
-    add.add_argument(
         "--checkpoint",
         type=Path,
         required=True,
-        help="Local copy used to compute SHA-256",
+        help="state_dict .pt file; its file name is kept in UFL_MODELS",
     )
     add.add_argument("--min-dims", type=int, default=3)
     add.add_argument("--max-dims", type=int, default=5)
-    retire = commands.add_parser("remove", help="Request retirement of your model")
+    retire = commands.add_parser(
+        "remove", help="Open a pull request retiring your model"
+    )
     retire.add_argument("name")
     retire.add_argument("--default-model", help="Administrator only")
     for command in (add, retire):
         command.add_argument(
             "--dry-run",
             action="store_true",
-            help="Print request without opening an issue",
+            help="Prepare and check the change locally without pushing",
         )
-    process = commands.add_parser(
-        "process-event",
-        help="Trusted GitHub Actions entrypoint; not a local authorization boundary",
-    )
-    process.add_argument("--database", type=Path, required=True)
-    process.add_argument(
-        "--event",
-        type=Path,
-        default=Path(os.environ.get("GITHUB_EVENT_PATH", "event.json")),
-    )
+        command.add_argument(
+            "--skip-local-check",
+            action="store_true",
+            help="Submit even if the local check fails (to test the workflow)",
+        )
+        command.add_argument(
+            "--base", default="main", help="UFL_MODELS branch to target"
+        )
+        command.add_argument(
+            "--database", default=DATABASE, help="UFL_MODELS repository (for testing)"
+        )
     check = commands.add_parser(
         "check", help="Validate catalog ownership and generated README"
     )
@@ -266,9 +286,6 @@ def main():
     )
     sync.add_argument("--database", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "process-event":
-        process_event(args.database, json.loads(args.event.read_text(encoding="utf-8")))
-        return
     if args.command in ("check", "sync"):
         catalog = json.loads(
             (args.database / "model_catalog.json").read_text(encoding="utf-8")
@@ -287,59 +304,7 @@ def main():
             return
         print("Catalog and README validated")
         return
-    if args.command == "add":
-        digest = hashlib.sha256()
-        with args.checkpoint.open("rb") as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(block)
-        request = dict(
-            schema_version=1,
-            action="register",
-            name=args.name,
-            display_name=args.display_name,
-            description=args.description,
-            repository=args.repository,
-            revision=args.revision,
-            filename=args.checkpoint.name,
-            sha256=digest.hexdigest(),
-            min_dims=args.min_dims,
-            max_dims=args.max_dims,
-        )
-        checkpoint_url(request, args.repository.split("/")[0], False)
-        validate_model(
-            dict(
-                request,
-                id="ufl:1@sha256:" + request["sha256"],
-                registration_id=1,
-                architecture="caesar-bcrn-v1",
-                url=checkpoint_url(request, args.repository.split("/")[0], False),
-            )
-        )
-    else:
-        request = dict(schema_version=1, action="retire", name=args.name)
-        if args.default_model:
-            request["default_model"] = args.default_model
-    body = json.dumps(request, indent=2)
-    if args.dry_run:
-        print(body)
-    else:
-        # Structured argv and stdin: request contents are never shell commands.
-        subprocess.run(
-            [
-                "gh",
-                "issue",
-                "create",
-                "--repo",
-                DATABASE,
-                "--title",
-                f"[model-registry] {request['action']}: {args.name}",
-                "--body-file",
-                "-",
-            ],
-            input=body,
-            text=True,
-            check=True,
-        )
+    submit(args)
 
 
 if __name__ == "__main__":
@@ -352,4 +317,5 @@ if __name__ == "__main__":
         TypeError,
         subprocess.CalledProcessError,
     ) as error:
-        raise SystemExit(f"Error: {error}") from error
+        detail = getattr(error, "stderr", None)
+        raise SystemExit(f"Error: {error}" + (f"\n{detail.strip()}" if detail else ""))
