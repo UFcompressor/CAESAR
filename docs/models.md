@@ -54,13 +54,15 @@ when it is another version of the same model family. Names and descriptions help
 users choose; the registration plus hash is what compressed data must record.
 The device is installation-specific and is not part of checkpoint identity.
 
-Registration commands now live in CAESAR; UFL_MODELS remains the authoritative
-catalog database. Run `python3 register_model.py add --help` to submit a checkpoint
-or `python3 register_model.py remove MODEL_NAME` to request retirement. The trusted
-UFL_MODELS workflow derives ownership from the authenticated GitHub issue author's
-stable account ID, validates requests, and commits accepted changes automatically.
-Users may retire only their own models; administrator E53klasky may retire any
-model. Retirement preserves the full record and reserves its identity.
+Registration commands live in CAESAR; UFL_MODELS is the authoritative catalog
+database and stores registered checkpoints. Run `python3 register_model.py add --help`
+to submit a checkpoint or `python3 register_model.py remove MODEL_NAME` to request
+retirement. Both open a pull request to UFL_MODELS from your fork. Its workflow checks
+that ownership comes from the pull request author's stable account ID, that the
+checkpoint is a state_dict matching the CAESAR network, and that nothing else changed,
+then merges it automatically. Users may retire only their own models; administrator
+E53klasky may retire any model. Retirement preserves the full record and reserves its
+identity.
 
 See [Automated model registration](model_registration.md) for commands, validation,
 one-time GitHub setup, admin rules, and catalog snapshot synchronization. Local

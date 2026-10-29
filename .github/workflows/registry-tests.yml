@@ -7,4 +7,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The client imports UFL_MODELS's registration checks; its tests skip without them.
+      - uses: actions/checkout@v4
+        with:
+          repository: UFcompressor/UFL_MODELS
+          ref: main
+          path: UFL_MODELS
+          persist-credentials: false
       - run: python3 -m unittest discover -s tests -p test_registration_requests.py -v
+        env:
+          UFL_MODELS_DIR: UFL_MODELS
