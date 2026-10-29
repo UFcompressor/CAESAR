@@ -54,9 +54,13 @@ def run(*args, cwd=None):
 
 def load_checker(clone):
     """Import UFL_MODELS's test/check_registration.py from a clone."""
-    spec = importlib.util.spec_from_file_location(
-        "check_registration", Path(clone) / "test" / "check_registration.py"
-    )
+    path = Path(clone) / "test" / "check_registration.py"
+    if not path.is_file():
+        raise ValueError(
+            "this UFL_MODELS branch has no test/check_registration.py; "
+            "it does not accept registration pull requests"
+        )
+    spec = importlib.util.spec_from_file_location("check_registration", path)
     checker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checker)
     return checker
