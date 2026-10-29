@@ -61,6 +61,11 @@ pushed after the checks. If a check fails, the workflow comments the reason on
 the pull request. Passing checks do not establish model quality; CAESAR
 compilation strictly loads the checkpoint later.
 
+Each pull request is checked independently. When two requests are checked at the
+same time, GitHub refuses to merge the second if both edit the same catalog lines,
+as any two registrations or retirements do; its author reruns `register_model.py`,
+which rebuilds the request on the updated database.
+
 ## Remove your model
 
 ```sh
