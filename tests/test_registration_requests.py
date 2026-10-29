@@ -71,12 +71,16 @@ class FakeGitHub:
         return [call for call in self.calls if call[: len(prefix)] == prefix]
 
 
-@unittest.skipUnless(HAS_DATABASE, "needs a UFL_MODELS checkout with registration checks")
+@unittest.skipUnless(
+    HAS_DATABASE, "needs a UFL_MODELS checkout with registration checks"
+)
 class PullRequestClientTests(unittest.TestCase):
     def setUp(self):
         self.base = subprocess.run(
             ["git", "-C", str(UFL_MODELS), "rev-parse", "--abbrev-ref", "HEAD"],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         catalog = json.loads((UFL_MODELS / "model_catalog.json").read_text())
         default = next(
@@ -91,17 +95,27 @@ class PullRequestClientTests(unittest.TestCase):
 
     def main(self, *argv, github=None):
         github = github or FakeGitHub()
-        with patch.object(sys, "argv", ["register_model.py", *argv, "--base", self.base]), \
-                patch.object(service, "run", github), \
-                contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch.object(
+            sys, "argv", ["register_model.py", *argv, "--base", self.base]
+        ), patch.object(service, "run", github), contextlib.redirect_stdout(
+            io.StringIO()
+        ) as output:
             service.main()
         return github, output.getvalue()
 
     def add(self, *extra, github=None):
         return self.main(
-            "add", "--name", "alice_model", "--display-name", "Alice's model",
-            "--description", "Test fine-tune", "--checkpoint", str(self.checkpoint),
-            *extra, github=github,
+            "add",
+            "--name",
+            "alice_model",
+            "--display-name",
+            "Alice's model",
+            "--description",
+            "Test fine-tune",
+            "--checkpoint",
+            str(self.checkpoint),
+            *extra,
+            github=github,
         )
 
     def test_add_opens_pull_request_from_the_submitters_fork(self):
@@ -116,7 +130,8 @@ class PullRequestClientTests(unittest.TestCase):
             create[create.index("--head") + 1], "Alice:registry/register-alice_model"
         )
         self.assertEqual(
-            create[create.index("--title") + 1], "[model-registry] register: alice_model"
+            create[create.index("--title") + 1],
+            "[model-registry] register: alice_model",
         )
         self.assertEqual(create[create.index("--base") + 1], self.base)
         self.assertIn("pull/7", output)
@@ -139,7 +154,9 @@ class PullRequestClientTests(unittest.TestCase):
         self.assertIn("Updated pull request https://x/pull/7", output)
 
     def test_local_check_stops_requests_the_workflow_would_reject(self):
-        with self.assertRaisesRegex(ValueError, "local check failed.*Only the model owner"):
+        with self.assertRaisesRegex(
+            ValueError, "local check failed.*Only the model owner"
+        ):
             self.main("remove", "eelsM1")
         github, output = self.main("remove", "eelsM1", "--skip-local-check")
         self.assertIn("submitting anyway", output)
@@ -167,7 +184,13 @@ class CatalogTests(unittest.TestCase):
             root = Path(directory)
             (root / "model_catalog.json").write_text(json.dumps(self.catalog))
             (root / "README.md").write_text(render_readme(self.catalog, "# Models\n"))
-            command = [sys.executable, service.__file__, "check", "--database", directory]
+            command = [
+                sys.executable,
+                service.__file__,
+                "check",
+                "--database",
+                directory,
+            ]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             (root / "README.md").write_text("# Models\n")

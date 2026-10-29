@@ -144,25 +144,48 @@ def submit(args):
                 raise ValueError(f"local check failed, nothing submitted: {error}")
             summary = f"skipped; it failed with: {error}"
             print(f"Local check failed; submitting anyway: {error}")
-        print(run("git", "log", "--stat", "--format=%h %s", f"origin/{args.base}..", cwd=clone))
+        print(
+            run(
+                "git",
+                "log",
+                "--stat",
+                "--format=%h %s",
+                f"origin/{args.base}..",
+                cwd=clone,
+            )
+        )
         if args.dry_run:
             print("Dry run: nothing was pushed")
             return
         # Users who can push to the database use a branch there; others use a fork.
-        if run("gh", "api", f"repos/{args.database}", "--jq", ".permissions.push") == "true":
+        if (
+            run("gh", "api", f"repos/{args.database}", "--jq", ".permissions.push")
+            == "true"
+        ):
             target = args.database
         else:
             target = run(
-                "gh", "api", "--method", "POST", f"repos/{args.database}/forks",
-                "--jq", ".full_name",
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                f"repos/{args.database}/forks",
+                "--jq",
+                ".full_name",
             )
         for attempt in range(10):  # a new fork takes a few seconds to appear
             try:
                 run(
-                    "git", "-c", "credential.helper=",
-                    "-c", "credential.helper=!gh auth git-credential",
-                    "push", "--quiet", "--force",
-                    f"https://github.com/{target}.git", f"HEAD:refs/heads/{branch}",
+                    "git",
+                    "-c",
+                    "credential.helper=",
+                    "-c",
+                    "credential.helper=!gh auth git-credential",
+                    "push",
+                    "--quiet",
+                    "--force",
+                    f"https://github.com/{target}.git",
+                    f"HEAD:refs/heads/{branch}",
                     cwd=clone,
                 )
                 break
@@ -171,16 +194,38 @@ def submit(args):
                     raise
                 time.sleep(5)
     existing = run(
-        "gh", "pr", "list", "--repo", args.database, "--head", branch,
-        "--author", login, "--state", "open", "--json", "url", "--jq", ".[0].url",
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        args.database,
+        "--head",
+        branch,
+        "--author",
+        login,
+        "--state",
+        "open",
+        "--json",
+        "url",
+        "--jq",
+        ".[0].url",
     )
     if existing:
         print(f"Updated pull request {existing}; the workflow checks it again")
         return
     print(
         run(
-            "gh", "pr", "create", "--repo", args.database, "--base", args.base,
-            "--head", f"{target.split('/')[0]}:{branch}", "--title", title,
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            args.database,
+            "--base",
+            args.base,
+            "--head",
+            f"{target.split('/')[0]}:{branch}",
+            "--title",
+            title,
             "--body",
             "Opened by CAESAR `register_model.py`. The UFL_MODELS workflow checks "
             f"this request and merges it.\n\nLocal check: {summary}",
@@ -191,7 +236,9 @@ def submit(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    add = commands.add_parser("add", help="Open a pull request registering a checkpoint")
+    add = commands.add_parser(
+        "add", help="Open a pull request registering a checkpoint"
+    )
     add.add_argument("--name", required=True)
     add.add_argument("--display-name", required=True)
     add.add_argument("--description", required=True)
