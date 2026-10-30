@@ -1,3 +1,4 @@
+#include "models/model_utils.h"
 #include "cli_result_header.h"
 #include "data_utils.h"
 #include "dataset/dataset.h"
@@ -844,8 +845,10 @@ int main(int argc, char *argv[]) {
         return 1;
       }
 
-      if (n_frame != 8)
-        throw std::invalid_argument("Compression requires --n-frame 8");
+      const auto dimensions = get_model_dimensions();
+      if (n_frame != dimensions.input_frames)
+        throw std::invalid_argument("Compression requires --n-frame " +
+                                    std::to_string(dimensions.input_frames));
 
       if (output_file.empty()) {
         output_file = input_file + ".cae";

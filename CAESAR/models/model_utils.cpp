@@ -209,3 +209,16 @@ torch::Device select_model_device() {
   }();
   return device;
 }
+
+ModelDimensions get_model_dimensions() {
+  const auto &architecture = get_model_metadata().architecture;
+  if (architecture == "caesar-bcrn-v1")
+    return {8, 2, 16, 4};
+  if (architecture == "caesar-depth32-t16-v1")
+    return {16, 8, 32, 8};
+  if (architecture == "caesar-depth16-t16-v1")
+    return {16, 4, 16, 4};
+  if (architecture == "caesar-depth8-t16-v1")
+    return {16, 2, 8, 2};
+  throw std::runtime_error("Unsupported model architecture: " + architecture);
+}

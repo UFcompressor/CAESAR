@@ -46,6 +46,27 @@ class ModelRegistryTests(unittest.TestCase):
             "model_bs64_ep100k.pt",
         )
 
+    def test_architecture_dimensions_and_unknown_rejection(self):
+        cases = {
+            registry.ARCHITECTURE: (8, 2, 16, 4),
+            "caesar-depth32-t16-v1": (16, 8, 32, 8),
+            "caesar-depth16-t16-v1": (16, 4, 16, 4),
+            "caesar-depth8-t16-v1": (16, 2, 8, 2),
+        }
+        for architecture, dimensions in cases.items():
+            with self.subTest(architecture=architecture):
+                model = dict(self.model, architecture=architecture)
+                registry.validate_model(model)
+                encoder, decoder, *actual = registry.export_architecture(model)
+                self.assertEqual(tuple(actual), dimensions)
+                self.assertEqual(encoder[-1], 4)
+                self.assertEqual(len(decoder), len(encoder) - 1)
+        model = dict(self.model, architecture="unverified-custom-strides")
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            registry.validate_model(model)
+        with self.assertRaisesRegex(ValueError, "Unsupported architecture"):
+            registry.export_architecture(model)
+
     def test_duplicate_registration_rejected(self):
         self.catalog["models"][1]["registration_id"] = self.model["registration_id"]
         m = self.catalog["models"][1]

@@ -107,9 +107,10 @@ torch::Tensor Decompressor::reshape_batch_2d_3d(const torch::Tensor &batch_data,
 
 torch::Tensor Decompressor::decompress(const CompressionResult &comp_result) {
   require_model(comp_result.model_id);
-  if (comp_result.n_frame != 8)
+  const auto dimensions = get_model_dimensions();
+  if (comp_result.n_frame != dimensions.input_frames)
     throw std::invalid_argument(
-        "Compressed n_frame must be 8 for this architecture");
+        "Compressed n_frame does not match the installed architecture");
   const auto &shape = comp_result.original_shape;
   if (shape.size() < 3 || shape.size() > 5 ||
       std::any_of(shape.begin(), shape.end(), [](int64_t d) { return d <= 0; }))
@@ -140,6 +141,10 @@ torch::Tensor Decompressor::decompress(const CompressionResult &comp_result) {
 
 torch::Tensor
 Decompressor::decompress_internal(const CompressionResult &comp_result) {
+  const auto dimensions = get_model_dimensions();
+  const int64_t K = dimensions.latent_frames;
+  const int64_t L = dimensions.latent_size;
+  const int64_t Q = dimensions.hyper_size;
   constexpr unsigned int batch_size = 128;
   const auto n_frame = comp_result.n_frame;
   if (std::this_thread::get_id() != owner_thread_)
@@ -185,26 +190,29 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
         vbr_quantized_cdf_, vbr_cdf_length_, vbr_offset_, device_);
     latent_codec = std::make_unique<caesar::rans_cuda::Codec>(
         gs_quantized_cdf_, gs_cdf_length_, gs_offset_, device_);
-    hyper_indexes_gpu = build_indexes_tensor({1, 64, 4, 4}).to(device_);
+    hyper_indexes_gpu = build_indexes_tensor({1, 64, static_cast<int>(Q), static_cast<int>(Q)}).to(device_);
   }
 
   // All hyper streams use the same channel indexes. Build them once.
   const std::vector<int32_t> hyper_index_vec = tensor_to_vector<int32_t>(
-      build_indexes_tensor({1, 64, 4, 4}).contiguous().reshape(-1));
+      build_indexes_tensor({1, 64, static_cast<int>(Q), static_cast<int>(Q)}).contiguous().reshape(-1));
   const auto cpu_float_opts =
       torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
 
   const int workers = std::max(1, std::min(8, at::get_num_threads()));
   c10::ThreadPool decode_pool(workers);
 
+  TORCH_CHECK(batch_size > 0, "batch_size must be positive");
+  TORCH_CHECK(comp_result.encoded_latents.size() % K == 0,
+              "Incomplete latent frame group in compressed input");
   for (size_t lat_start = 0; lat_start < comp_result.encoded_latents.size();
-       lat_start += (size_t)batch_size * 2) {
-    size_t lat_end = std::min(lat_start + (size_t)batch_size * 2,
+       lat_start += (size_t)batch_size * K) {
+    size_t lat_end = std::min(lat_start + (size_t)batch_size * K,
                               comp_result.encoded_latents.size());
     size_t cur_latents = lat_end - lat_start;
-    TORCH_CHECK(cur_latents % 2 == 0, "cur_latents must be even.");
-    size_t cur_samples = cur_latents / 2;
-    size_t sample_start = lat_start / 2;
+    TORCH_CHECK(cur_latents % K == 0, "Incomplete latent frame group");
+    size_t cur_samples = cur_latents / K;
+    size_t sample_start = lat_start / K;
 
     // Workers touch only CPU data and disjoint output rows. Decode straight
     // into float staging storage, avoiding a temporary tensor per stream.
@@ -215,12 +223,12 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
           hyper_codec
               ->decode(
                   comp_result.encoded_hyper_latents, lat_start,
-                  hyper_indexes_gpu.expand({(int64_t)cur_latents, 64, 4, 4}))
+                  hyper_indexes_gpu.expand({(int64_t)cur_latents, 64, Q, Q}))
               .to(torch::kFloat32);
     } else {
       // NOTE AMD goes this path for now
       decoded_hyper_latents =
-          torch::empty({(long)cur_latents, 64, 4, 4}, cpu_float_opts);
+          torch::empty({(long)cur_latents, 64, Q, Q}, cpu_float_opts);
       float *hyper_data = decoded_hyper_latents.data_ptr<float>();
       decode_parallel(decode_pool, (int64_t)cur_latents,
                       [&](int64_t begin, int64_t end) {
@@ -231,7 +239,7 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
                               hyper_index_vec, vbr_quantized_cdf_,
                               vbr_cdf_length_, vbr_offset_);
                           std::copy(decoded.begin(), decoded.end(),
-                                    hyper_data + i * 64 * 4 * 4);
+                                    hyper_data + i * 64 * Q * Q);
                         }
                       });
     }
@@ -247,7 +255,7 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
             .to(gpu_rans ? device_ : torch::Device(torch::kCPU))
             .contiguous();
 
-    constexpr int64_t latent_elements = 64 * 16 * 16;
+    const int64_t latent_elements = 64 * L * L;
     TORCH_CHECK(latent_indexes_recon.numel() ==
                     (int64_t)cur_latents * latent_elements,
                 "Unexpected latent index shape");
@@ -257,11 +265,11 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
           latent_codec
               ->decode(comp_result.encoded_latents, lat_start,
                        latent_indexes_recon.reshape(
-                           {(int64_t)cur_latents, 64, 16, 16}))
+                           {(int64_t)cur_latents, 64, L, L}))
               .to(torch::kFloat32);
     } else {
       decoded_latents_before_offset =
-          torch::empty({(long)cur_latents, 64, 16, 16}, cpu_float_opts);
+          torch::empty({(long)cur_latents, 64, L, L}, cpu_float_opts);
       const int32_t *index_data = latent_indexes_recon.data_ptr<int32_t>();
       float *latent_data = decoded_latents_before_offset.data_ptr<float>();
       decode_parallel(
@@ -284,7 +292,7 @@ Decompressor::decompress_internal(const CompressionResult &comp_result) {
         decoded_latents_before_offset.to(device_) + mean;
 
     auto decoded_latents_sizes = q_latent_with_offset.sizes();
-    std::vector<int64_t> new_shape = {-1, 2};
+    std::vector<int64_t> new_shape = {-1, K};
     new_shape.insert(new_shape.end(), decoded_latents_sizes.begin() + 1,
                      decoded_latents_sizes.end());
     torch::Tensor reshaped_latents = q_latent_with_offset.reshape(new_shape);

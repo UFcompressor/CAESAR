@@ -189,9 +189,11 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   const auto correction_method = config.correction_method;
   const auto &nglr_options = config.nglr_options;
 
-  if (config.n_frame != 8)
+  const auto dimensions = get_model_dimensions();
+  if (config.n_frame != dimensions.input_frames)
     throw std::invalid_argument(
-        "n_frame is required and must be 8 for the installed architecture");
+        "n_frame must be " + std::to_string(dimensions.input_frames) +
+        " for the installed architecture");
   if (!config.memory_data.defined() || config.memory_data.numel() == 0)
     throw std::invalid_argument("memory_data must be a nonempty tensor");
   get_model_metadata().require_dims(config.memory_data.dim());
@@ -390,7 +392,7 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
       torch::Tensor q_latent_with_offset = q_latent.to(torch::kFloat32) + mean;
 
       auto decoded_sizes = q_latent_with_offset.sizes();
-      std::vector<int64_t> new_shape = {-1, 2};
+      std::vector<int64_t> new_shape = {-1, dimensions.latent_frames};
       new_shape.insert(new_shape.end(), decoded_sizes.begin() + 1,
                        decoded_sizes.end());
 

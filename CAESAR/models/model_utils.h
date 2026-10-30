@@ -70,3 +70,12 @@ void require_model(const std::string &required_id);
 std::string get_model_name();
 std::string get_model_device();
 torch::Device select_model_device();
+
+struct ModelDimensions {
+  int64_t input_frames;
+  int64_t latent_frames;
+  int64_t latent_size;
+  int64_t hyper_size;
+};
+
+ModelDimensions get_model_dimensions();

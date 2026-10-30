@@ -1,4 +1,4 @@
-from model_registry import export_context
+from model_registry import export_context, export_architecture
 import sys
 import torch
 from pyCAESAR.models.network_components import (
@@ -138,7 +138,7 @@ class Compressor(nn.Module):
                 # x = x.reshape(-1, self.t_dim//4, *x.shape[1:])
                 x = x.permute(0, 2, 1, 3, 4)  # [b, c, t, h, w]
 
-            if i == 2:
+            if i == self.n_3d_stages:
                 x = x.permute(0, 2, 1, 3, 4)
                 x = x.reshape(-1, *x.shape[2:])  # [b*t, 1, 256, 256]
 
@@ -281,6 +281,7 @@ class ResnetCompressor(Compressor):
         self.conv_layer = nn.Conv3d if d3 else nn.Conv2d
         self.deconv_layer = nn.ConvTranspose3d if d3 else nn.ConvTranspose2d
 
+        self.n_3d_stages = len(self.in_out) - 2
         self.build_network()
 
     def build_network(self):
@@ -306,7 +307,7 @@ class ResnetCompressor(Compressor):
 
         for ind, (dim_in, dim_out) in enumerate(self.reversed_in_out):
             is_last = ind >= (len(self.reversed_in_out) - 1)
-            d3 = self.d3 if ind < 2 else False
+            d3 = self.d3 if ind < self.n_3d_stages else False
 
             self.dec.append(
                 nn.ModuleList(
@@ -441,13 +442,16 @@ if device not in {"cpu", "cuda", "mps", "xpu"}:
         "  xpu  - Intel GPU"
     )
 selected_model, checkpoint_path, export_dir = export_context()
+dim_mults, reverse_dim_mults, input_frames, latent_frames, latent_size, hyper_size = (
+    export_architecture(selected_model)
+)
 
 model_name = f"caesar_decompressor"
 
 model = CompressorMix(
     dim=16,
-    dim_mults=[1, 2, 3, 4],
-    reverse_dim_mults=[4, 3, 2],
+    dim_mults=dim_mults,
+    reverse_dim_mults=reverse_dim_mults,
     hyper_dims_mults=[4, 4, 4],
     channels=1,
     out_channels=1,
@@ -505,7 +509,7 @@ model.eval()
 with torch.no_grad():
     print("device: ", device)
     model = model.to(device)
-    example_inputs = (torch.randn(10, 2, 64, 16, 16, device=device).float(),)
+    example_inputs = (torch.randn(10, latent_frames, 64, latent_size, latent_size, device=device).float(),)
     batch_dim = torch.export.Dim("batch", min=1, max=512)
     exported = torch.export.export(
         model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}

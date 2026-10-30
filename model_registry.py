@@ -12,6 +12,24 @@ from urllib.request import urlopen
 
 DEFAULT_CATALOG = Path(__file__).with_name("model_catalog.json")
 ARCHITECTURE = "caesar-bcrn-v1"
+DEPTH_ARCHITECTURES = {
+    "caesar-depth32-t16-v1": ([1, 2, 4], [4, 2], 16, 8, 32, 8),
+    "caesar-depth16-t16-v1": ([1, 2, 3, 4], [4, 3, 2], 16, 4, 16, 4),
+    "caesar-depth8-t16-v1": ([1, 2, 3, 4, 4], [4, 4, 3, 2], 16, 2, 8, 2),
+}
+
+
+def export_architecture(model):
+    """Return stage multipliers and T/K/L/Q for a supported architecture."""
+    architecture = model["architecture"]
+    if architecture == ARCHITECTURE:
+        return [1, 2, 3, 4], [4, 3, 2], 8, 2, 16, 4
+    try:
+        return DEPTH_ARCHITECTURES[architecture]
+    except KeyError as error:
+        raise ValueError(f"Unsupported architecture: {architecture}") from error
+
+
 COMPONENTS = ("caesar_compressor", "caesar_hyper_decompressor", "caesar_decompressor")
 TABLES = tuple(
     f"{kind}_{table}.bin"
@@ -47,7 +65,9 @@ def validate_model(model):
         and 2 <= model["min_dims"] <= model["max_dims"] <= 5
     ):
         raise ValueError("Supported dimensions must be within 2D–5D")
-    if not model.get("description") or model.get("architecture") != ARCHITECTURE:
+    if not model.get("description") or model.get("architecture") not in (
+        ARCHITECTURE, *DEPTH_ARCHITECTURES
+    ):
         raise ValueError("Missing description or unsupported model architecture")
     if not model["url"].startswith("https://"):
         raise ValueError("Checkpoint URL must use HTTPS")

@@ -89,7 +89,10 @@ inline ModelMetadata read_model_metadata(const std::filesystem::path &path) {
           std::string::npos ||
       metadata.id != "ufl:" + metadata.registration_id +
                          "@sha256:" + metadata.checkpoint_sha256 ||
-      metadata.architecture != "caesar-bcrn-v1")
+      (metadata.architecture != "caesar-bcrn-v1" &&
+       metadata.architecture != "caesar-depth32-t16-v1" &&
+       metadata.architecture != "caesar-depth16-t16-v1" &&
+       metadata.architecture != "caesar-depth8-t16-v1"))
     throw std::runtime_error("Invalid CAESAR model identity or architecture");
   auto min_dims = field("min_dims"), max_dims = field("max_dims");
   if (min_dims.size() != 1 || max_dims.size() != 1 || min_dims[0] < '2' ||

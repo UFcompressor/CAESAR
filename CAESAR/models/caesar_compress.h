@@ -19,7 +19,7 @@
 // For 5D input only variable 0 is encoded; decoding returns [1,S,T,H,W].
 struct CompressionConfig {
   torch::Tensor memory_data;
-  // Required. The current compiled architecture supports eight-frame windows.
+  // Required. The installed architecture determines the required frame window.
   int n_frame = 0;
   caesar::CorrectionMethod correction_method = caesar::CorrectionMethod::GAE;
   nglr::NGLRTrainOptions nglr_options;
