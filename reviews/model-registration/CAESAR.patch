@@ -1,0 +1,27 @@
+From 3719703a1b49b34ef7b5f242bf63300dfdd2b982 Mon Sep 17 00:00:00 2001
+From: Codex Review <codex-review@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 23:01:34 -0400
+Subject: [PATCH] Document Git version required by model registration
+
+---
+ docs/model_registration.md | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/docs/model_registration.md b/docs/model_registration.md
+index ed422ae..66671de 100644
+--- a/docs/model_registration.md
++++ b/docs/model_registration.md
+@@ -8,7 +8,9 @@ check passes. CAESAR's `register_model.py` prepares and opens these pull request
+ 
+ ## Submit a model
+ 
+-Install GitHub CLI and run `gh auth login` once. Contributors need a GitHub
++Install Git 2.38 or newer and GitHub CLI, then run `gh auth login` once.
++The registration checker requires `git merge-tree --write-tree`.
++Contributors need a GitHub
+ account, not write access to UFL_MODELS. From CAESAR:
+ 
+ ```sh
+-- 
+2.34.1
+

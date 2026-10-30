@@ -47,6 +47,17 @@ int main() {
     must_fail([&] { metadata.require("ufl:2@sha256:" + hash); },
               "Required CAESAR model: ufl:2");
     must_fail([&] { metadata.require_dims(6); }, "supports 2D through 5D");
+    auto local = valid;
+    local.replace(local.find("registration_id=1"), 17, "registration_id=0");
+    local.replace(local.find(id), id.size(),
+                  "local:caesar-bcrn-v1@sha256:" + hash);
+    write(local);
+    read_model_metadata(path).require("local:caesar-bcrn-v1@sha256:" + hash);
+    auto mismatched_local = local;
+    mismatched_local.replace(mismatched_local.find("local:caesar-bcrn-v1"),
+                             20, "local:unknown-model");
+    write(mismatched_local);
+    must_fail([&] { read_model_metadata(path); }, "identity");
     write(valid + "device=cuda\n");
     must_fail([&] { read_model_metadata(path); }, "Malformed");
     auto malformed = valid;

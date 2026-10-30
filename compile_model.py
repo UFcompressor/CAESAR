@@ -8,7 +8,10 @@ import subprocess
 import sys
 import tempfile
 
-from model_registry import COMPONENTS, read_selection, write_installation
+from model_registry import (
+    ARCHITECTURE, DEPTH_ARCHITECTURES, COMPONENTS, atomic_json,
+    read_selection, sha256, validate_model, write_installation,
+)
 
 
 def compile_installation(device, selection, output):
@@ -68,13 +71,41 @@ def compile_installation(device, selection, output):
         lock.rmdir()
 
 
+def compile_local_checkpoint(device, checkpoint, architecture, output):
+    """Export experiment weights directly, without a catalog or registration."""
+    checkpoint = Path(checkpoint).resolve()
+    digest = sha256(checkpoint)
+    model = validate_model(dict(
+        name=checkpoint.stem, filename=checkpoint.name, sha256=digest,
+        id=f"local:{architecture}@sha256:{digest}", registration_id=0,
+        architecture=architecture, min_dims=3, max_dims=5,
+        description="Local experiment checkpoint", url="",
+    ))
+    with tempfile.TemporaryDirectory(prefix="caesar-local-") as temporary:
+        root = Path(temporary)
+        shutil.copyfile(checkpoint, root / model["filename"])
+        selection = root / "selected_model.json"
+        atomic_json(selection, {"schema_version": 1, "model": model})
+        compile_installation(device, selection, output)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("device", choices=("cpu", "cuda", "mps", "xpu"))
-    parser.add_argument("--selection", default="pretrained/selected_model.json")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--selection", default="pretrained/selected_model.json")
+    source.add_argument("--checkpoint", type=Path, help="Export local weights without UFL registration")
+    parser.add_argument("--architecture", choices=[ARCHITECTURE, *DEPTH_ARCHITECTURES])
     parser.add_argument("--output", default="exported_model")
     args = parser.parse_args()
-    compile_installation(args.device, args.selection, args.output)
+    if args.checkpoint:
+        if not args.architecture:
+            parser.error("--checkpoint requires --architecture matching the training code")
+        compile_local_checkpoint(args.device, args.checkpoint, args.architecture, args.output)
+    else:
+        if args.architecture:
+            parser.error("--architecture is only used with --checkpoint")
+        compile_installation(args.device, args.selection, args.output)
 
 
 if __name__ == "__main__":

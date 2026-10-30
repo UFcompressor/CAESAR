@@ -33,6 +33,8 @@ def validate_catalog(catalog):
     }
     for model in catalog["models"] + catalog.get("retired_models", []):
         validate_model(model)
+        if model["registration_id"] == 0:
+            raise ValueError("Local experiments cannot be submitted as registered models")
         if not re.fullmatch(LOGIN, model.get("owner", "")):
             raise ValueError("Every registration requires a GitHub owner")
         if type(model.get("owner_id")) is not int or model["owner_id"] <= 0:

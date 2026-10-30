@@ -1,0 +1,152 @@
+From 1e99378ad07c208aee7b15be8bd1582e8ab3e7dc Mon Sep 17 00:00:00 2001
+From: Codex Review <codex-review@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 23:01:34 -0400
+Subject: [PATCH] Preserve registration check failures and reject invalid
+ tensor layouts
+
+---
+ .github/workflows/model-registry.yml |  5 +-
+ test/check_registration.py           | 18 +++++++-
+ test/test_validation_regressions.py  | 68 ++++++++++++++++++++++++++++
+ 3 files changed, 87 insertions(+), 4 deletions(-)
+ create mode 100644 test/test_validation_regressions.py
+
+diff --git a/.github/workflows/model-registry.yml b/.github/workflows/model-registry.yml
+index 1c6d7fd..3aa907e 100644
+--- a/.github/workflows/model-registry.yml
++++ b/.github/workflows/model-registry.yml
+@@ -47,17 +47,18 @@ jobs:
+           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+           REPOSITORY: ${{ github.repository }}
+         run: |
++          status=1
+           if [[ "$AUTHOR_TYPE" != User ]]; then
+             echo "Rejected: requests must be opened by a GitHub user" > result.txt
+           else
+             python3 test/check_registration.py --base HEAD --head "$HEAD_SHA" \
+               --author "$AUTHOR" --author-id "$AUTHOR_ID" --repository "$REPOSITORY" \
+-              > result.txt 2>&1 || true
++              > result.txt 2>&1 && status=0 || status=$?
+           fi
+           cat result.txt
+           delimiter="RESULT_$(openssl rand -hex 16)"
+           { echo "result<<$delimiter"; cat result.txt; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+-          grep -q '^Accepted: ' result.txt
++          exit "$status"
+ 
+   merge:
+     needs: check
+diff --git a/test/check_registration.py b/test/check_registration.py
+index 82c1b30..20efe5a 100644
+--- a/test/check_registration.py
++++ b/test/check_registration.py
+@@ -282,6 +282,15 @@ def read_checkpoint(data):
+             if type(name) is not str or not isinstance(tensor, _Tensor):
+                 raise ValueError("Checkpoint must map parameter names to tensors")
+             key, numel = tensor.storage
++            if (
++                type(tensor.offset) is not int
++                or tensor.offset < 0
++                or numel < 0
++                or len(tensor.shape) != len(tensor.stride)
++                or any(type(size) is not int or size < 0 for size in tensor.shape)
++                or any(type(step) is not int or step < 0 for step in tensor.stride)
++            ):
++                raise ValueError(f"{name}: invalid tensor layout")
+             if key not in checked:
+                 values = array.array("f")
+                 values.frombytes(archive.read(f"{root}data/{key}"))
+@@ -352,9 +361,14 @@ def check_pull_request(repo, base, head, author, author_id, repository):
+         text=True,
+     )
+     if merged.returncode:
++        if merged.returncode == 1:
++            raise ValueError(
++                "The pull request conflicts with the current database; "
++                "rerun register_model.py to rebuild it"
++            )
+         raise ValueError(
+-            "The pull request conflicts with the current database; "
+-            "rerun register_model.py to rebuild it"
++            "git merge-tree failed (Git 2.38 or newer is required): "
++            + merged.stderr.strip()
+         )
+     tree = merged.stdout.split()[0]
+     changes = {}
+diff --git a/test/test_validation_regressions.py b/test/test_validation_regressions.py
+new file mode 100644
+index 0000000..e975672
+--- /dev/null
++++ b/test/test_validation_regressions.py
+@@ -0,0 +1,68 @@
++"""Regression checks for rejection handling and malformed tensor metadata."""
++
++import io
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest.mock import patch
++import zipfile
++
++import check_registration as checker
++
++
++class ValidationRegressions(unittest.TestCase):
++    def test_workflow_preserves_checker_failure_despite_forged_success_line(self):
++        workflow = (
++            Path(__file__).resolve().parents[1] / ".github/workflows/model-registry.yml"
++        ).read_text()
++        step = workflow.split("      - name: Check the request\n", 1)[1]
++        script = step.split("        run: |\n", 1)[1].split("\n  merge:", 1)[0]
++        script = "\n".join(line[10:] for line in script.splitlines())
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            (root / "test").mkdir()
++            (root / "test/check_registration.py").write_text(
++                "print('Rejected: invalid checkpoint')\n"
++                "print('Accepted: forged success')\n"
++                "raise SystemExit(1)\n"
++            )
++            result = subprocess.run(
++                ["bash", "-e", "-c", script],
++                cwd=root,
++                env={
++                    "PATH": "/usr/bin:/bin",
++                    "AUTHOR_TYPE": "User",
++                    "HEAD_SHA": "unused",
++                    "AUTHOR": "Alice",
++                    "AUTHOR_ID": "101",
++                    "REPOSITORY": "UFcompressor/UFL_MODELS",
++                    "GITHUB_OUTPUT": str(root / "outputs"),
++                },
++                capture_output=True,
++                text=True,
++            )
++            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
++
++    def test_invalid_tensor_layouts_are_rejected(self):
++        out = io.BytesIO()
++        with zipfile.ZipFile(out, "w") as archive:
++            archive.writestr("archive/data.pkl", b"unused")
++            archive.writestr("archive/data/0", b"\0" * 4)
++        for offset, shape, stride in (
++            (-1, (1,), (1,)),
++            (0, (-1,), (1,)),
++            (0, (1,), (-1,)),
++            (0, (1,), ()),
++            (0.5, (1,), (1,)),
++        ):
++            tensor = checker._Tensor(("0", 1), offset, shape, stride)
++            with self.subTest(offset=offset, shape=shape, stride=stride):
++                with patch.object(checker, "_Unpickler") as unpickler:
++                    unpickler.return_value.load.return_value = {"x": tensor}
++                    with self.assertRaisesRegex(ValueError, "invalid tensor layout"):
++                        checker.read_checkpoint(out.getvalue())
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.34.1
+

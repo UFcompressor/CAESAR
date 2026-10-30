@@ -7,6 +7,39 @@ The custom [64,4,32,32] checkpoint still requires its exact training architectur
 and checkpoint file before registration, AOTI export, and runtime validation.
 No AOTI export or round-trip test of that custom checkpoint has been performed.
 
+## Direct local testing (no registration)
+
+The current branch also accepts a local checkpoint directly:
+
+```bash
+python3 compile_model.py cuda \
+  --checkpoint snapshots/xcompact3d-latet-size-64-4-32-32/Xcompact3d_latent_32_32.pt \
+  --architecture caesar-depth32-t16-v1 \
+  --output exported_experiments/xcompact3d-depth32
+python3 model_registry.py --validate-installation exported_experiments/xcompact3d-depth32
+cmake --build build -j2
+export CAESAR_MODEL_DIR="$PWD/exported_experiments/xcompact3d-depth32"
+```
+
+This is an explicit trial of the documented depth32 architecture, which produces
+[64,8,32,32], not proof that it matches the training run. A [64,4,32,32] stride
+experiment still needs its exact training implementation. Strict loading catches
+tensor mismatches, but cannot establish the training strides.
+
+Local exports are admin-only: `gh api user` must authenticate GitHub account ID
+173562962 (E53klasky), matching the current UFL administrator policy. Run
+`gh auth login` with that account first. This is a local CLI permission check;
+users who edit their own source can change it. Published artifact loading does
+not require GitHub authentication.
+
+Local exports bypass UFL, checkpoint-size comparisons, and catalog selection.
+They retain strict weight loading and identify themselves as
+`local:<architecture>@sha256:<checkpoint hash>` (registration_id=0).
+All components and probability tables are staged before publishing the output.
+The C++ metadata reader and Python installation validator accept this identity.
+The checkpoint is never registered, uploaded, or added to the public catalog.
+Rebuild C++ before using a local export; use `--n-frame 16` for the depth variants.
+
 ## 0. Resolve the shape before exporting
 
 The COMPLETE-STAGE experiment you pasted produces:

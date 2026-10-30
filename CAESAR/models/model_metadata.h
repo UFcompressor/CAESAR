@@ -84,11 +84,15 @@ inline ModelMetadata read_model_metadata(const std::filesystem::path &path) {
       metadata.checkpoint_sha256.size() != 64 ||
       metadata.checkpoint_sha256.find_first_not_of("0123456789abcdef") !=
           std::string::npos ||
-      metadata.registration_id.empty() || metadata.registration_id[0] == '0' ||
-      metadata.registration_id.find_first_not_of("0123456789") !=
-          std::string::npos ||
-      metadata.id != "ufl:" + metadata.registration_id +
-                         "@sha256:" + metadata.checkpoint_sha256 ||
+      (metadata.registration_id == "0"
+           ? metadata.id != "local:" + metadata.architecture + "@sha256:" +
+                                metadata.checkpoint_sha256
+           : (metadata.registration_id.empty() ||
+              metadata.registration_id[0] == '0' ||
+              metadata.registration_id.find_first_not_of("0123456789") !=
+                  std::string::npos ||
+              metadata.id != "ufl:" + metadata.registration_id + "@sha256:" +
+                                 metadata.checkpoint_sha256)) ||
       (metadata.architecture != "caesar-bcrn-v1" &&
        metadata.architecture != "caesar-depth32-t16-v1" &&
        metadata.architecture != "caesar-depth16-t16-v1" &&

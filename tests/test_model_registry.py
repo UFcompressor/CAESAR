@@ -67,6 +67,51 @@ class ModelRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported architecture"):
             registry.export_architecture(model)
 
+    def test_local_export_admin_authentication(self):
+        with patch.object(registry.subprocess, "check_output", return_value='{"id": 173562962}'):
+            registry.require_local_export_admin()
+        for response in ('{"id": 101}', '{"id": "173562962"}', '{}', 'invalid json'):
+            with self.subTest(response=response), patch.object(
+                registry.subprocess, "check_output", return_value=response
+            ), self.assertRaises(PermissionError):
+                registry.require_local_export_admin()
+        with patch.object(registry.subprocess, "check_output", side_effect=FileNotFoundError), self.assertRaises(PermissionError):
+            registry.require_local_export_admin()
+
+    def test_local_selection_rejects_non_admin_before_export(self):
+        model = dict(self.model, registration_id=0)
+        model["id"] = f'local:{model["architecture"]}@sha256:{model["sha256"]}'
+        selection = self.root / "selected_model.json"
+        registry.atomic_json(selection, {"schema_version": 1, "model": model})
+        with patch.object(registry, "require_local_export_admin", side_effect=PermissionError("admin-only")):
+            with self.assertRaisesRegex(PermissionError, "admin-only"):
+                registry.read_selection(selection)
+
+    def test_local_export_needs_no_catalog_and_keeps_its_own_identity(self):
+        checkpoint = self.source / "experiment.pt"
+        checkpoint.write_bytes(b"local checkpoint fixture")
+        output = self.root / "local-installation"
+        architecture = "caesar-depth32-t16-v1"
+
+        def export_component(argv, env, check):
+            model, frozen = registry.read_selection(env["CAESAR_MODEL_SELECTION"])
+            self.assertEqual(frozen.read_bytes(), checkpoint.read_bytes())
+            self.assertEqual(model["architecture"], architecture)
+            for name in (*[f"{c}.pt2" for c in registry.COMPONENTS], *registry.TABLES):
+                (Path(env["CAESAR_EXPORT_DIR"]) / name).write_bytes(b"artifact")
+
+        with patch.object(registry, "require_local_export_admin"), patch.object(registry, "load_catalog", side_effect=AssertionError("No registration needed")), patch.object(
+            compile_model.subprocess, "run", side_effect=export_component
+        ):
+            compile_model.compile_local_checkpoint("cpu", checkpoint, architecture, output)
+            model = registry.validate_installation(output)
+        self.assertEqual(model["registration_id"], 0)
+        self.assertEqual(model["id"], f"local:{architecture}@sha256:{registry.sha256(checkpoint)}")
+        metadata = output / "model_metadata.txt"
+        metadata.write_text(metadata.read_text().replace(architecture, "unknown-architecture"))
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            registry.validate_installation(output)
+
     def test_duplicate_registration_rejected(self):
         self.catalog["models"][1]["registration_id"] = self.model["registration_id"]
         m = self.catalog["models"][1]

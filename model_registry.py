@@ -7,11 +7,14 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 from urllib.request import urlopen
 
 DEFAULT_CATALOG = Path(__file__).with_name("model_catalog.json")
 ARCHITECTURE = "caesar-bcrn-v1"
+# Stable GitHub account ID from UFL_MODELS/registry_policy.json.
+LOCAL_EXPORT_ADMIN_IDS = frozenset({173562962})
 DEPTH_ARCHITECTURES = {
     "caesar-depth32-t16-v1": ([1, 2, 4], [4, 2], 16, 8, 32, 8),
     "caesar-depth16-t16-v1": ([1, 2, 3, 4], [4, 3, 2], 16, 4, 16, 4),
@@ -51,9 +54,14 @@ def validate_model(model):
         raise ValueError("Invalid model name")
     if not re.fullmatch(r"[0-9a-f]{64}", model["sha256"]):
         raise ValueError("Invalid checkpoint SHA-256")
-    if type(model.get("registration_id")) is not int or model["registration_id"] <= 0:
+    local = model.get("registration_id") == 0 and type(model.get("registration_id")) is int
+    if not local and (type(model.get("registration_id")) is not int or model["registration_id"] <= 0):
         raise ValueError("A positive UFL registration number is required")
-    if model["id"] != f'ufl:{model["registration_id"]}@sha256:{model["sha256"]}':
+    expected_id = (
+        f'local:{model["architecture"]}@sha256:{model["sha256"]}'
+        if local else f'ufl:{model["registration_id"]}@sha256:{model["sha256"]}'
+    )
+    if model["id"] != expected_id:
         raise ValueError(
             "Model identity does not match registration number and checkpoint hash"
         )
@@ -69,7 +77,7 @@ def validate_model(model):
         ARCHITECTURE, *DEPTH_ARCHITECTURES
     ):
         raise ValueError("Missing description or unsupported model architecture")
-    if not model["url"].startswith("https://"):
+    if not local and not model["url"].startswith("https://"):
         raise ValueError("Checkpoint URL must use HTTPS")
     return model
 
@@ -86,6 +94,8 @@ def load_catalog(path=DEFAULT_CATALOG):
     names, identities, numbers, hashes = set(), set(), set(), set()
     for model in catalog["models"]:
         validate_model(model)
+        if model["registration_id"] == 0:
+            raise ValueError("Local experiments do not belong in the registered catalog")
         if (
             model["name"] in names
             or model["id"] in identities
@@ -162,24 +172,42 @@ def download(model, destination, source_dir=None):
     return target
 
 
+def require_local_export_admin():
+    """Only authenticated UFL administrators may export unregistered weights."""
+    try:
+        account = json.loads(subprocess.check_output(
+            ["gh", "api", "user"], text=True, stderr=subprocess.PIPE
+        ))
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        raise PermissionError(
+            "Local checkpoint export is admin-only. Authenticate the admin account "
+            "with gh auth login, then retry."
+        ) from error
+    if type(account.get("id")) is not int or account["id"] not in LOCAL_EXPORT_ADMIN_IDS:
+        raise PermissionError("Local checkpoint export is restricted to UFL administrators")
+
+
 def read_selection(path):
     path = Path(path).resolve()
     selected = json.loads(path.read_text(encoding="utf-8"))
     if selected["schema_version"] != 1:
         raise ValueError("Unsupported selection schema")
     model = validate_model(selected["model"])
-    # A selection file is not a registration: independently consult our catalog.
-    registered = select_model(load_catalog(), model["id"])
-    if model != registered:
-        differences = {
-            key: (repr(model.get(key)), repr(registered.get(key)))
-            for key in sorted(set(model) | set(registered))
-            if model.get(key) != registered.get(key)
-        }
-        raise ValueError(
-            "Selection does not match its registered UFL catalog entry: "
-            + repr(differences)
-        )
+    if model["registration_id"] == 0:
+        require_local_export_admin()
+    else:
+        # A selection file is not a registration: independently consult our catalog.
+        registered = select_model(load_catalog(), model["id"])
+        if model != registered:
+            differences = {
+                key: (repr(model.get(key)), repr(registered.get(key)))
+                for key in sorted(set(model) | set(registered))
+                if model.get(key) != registered.get(key)
+            }
+            raise ValueError(
+                "Selection does not match its registered UFL catalog entry: "
+                + repr(differences)
+            )
     checkpoint = path.parent / model["filename"]
     verify_checkpoint(checkpoint, model)
     return model, checkpoint
@@ -231,7 +259,16 @@ def validate_installation(directory):
         if not separator or not value or key in fields:
             raise ValueError("Malformed installation metadata")
         fields[key] = value
-    model = select_model(load_catalog(), fields.get("model_id", "unregistered"))
+    if fields.get("registration_id") == "0":
+        model = validate_model(dict(
+            name=fields["model_name"], id=fields["model_id"],
+            sha256=fields["checkpoint_sha256"], filename=fields["checkpoint_file"],
+            architecture=fields["architecture"], registration_id=0,
+            min_dims=int(fields["min_dims"]), max_dims=int(fields["max_dims"]),
+            description="Local experiment checkpoint", url="",
+        ))
+    else:
+        model = select_model(load_catalog(), fields.get("model_id", "unregistered"))
     expected = dict(
         schema_version="1",
         registration_id=str(model["registration_id"]),
@@ -270,7 +307,7 @@ def main():
     args = parser.parse_args()
     if args.validate_installation:
         model = validate_installation(args.validate_installation)
-        print(f"Registered installation: {model['id']}")
+        print(f"Validated installation: {model['id']}")
         return
     catalog = load_catalog(args.catalog)
     if args.list:
