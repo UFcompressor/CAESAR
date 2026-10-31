@@ -113,11 +113,6 @@ if(NVCOMP_FOUND)
     message(STATUS "Build defined with ENABLE_NVCOMP")
 endif()
 
-# todo: fix this to read in the file and set it to just some model name
-# it needs to read the unqiue number then after that we say built for model name
-# this can be done at run time compile time for the code think of it like compiling a file 
-# this file will have information on the dimenctions it supports and who it is unqiue
-# example name: caesar_v  unqiue_identifer: 0X1F48AQ9%*_D DIMS: 3-5 
 
 target_compile_definitions(caesar_objs PRIVATE MODEL_CAESAR_V_ONLY)
 message(STATUS "Build configured for CAESAR-V only ")
