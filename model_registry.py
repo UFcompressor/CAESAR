@@ -10,7 +10,10 @@ import shutil
 import tempfile
 from urllib.request import urlopen
 
+# this is bad needs to look in it ##################################
 DEFAULT_CATALOG = Path(__file__).with_name("model_catalog.json")
+################3 bad fix ===============================
+
 ARCHITECTURE = "caesar-bcrn-v1"
 COMPONENTS = ("caesar_compressor", "caesar_hyper_decompressor", "caesar_decompressor")
 TABLES = tuple(
