@@ -110,18 +110,18 @@ the fork's default, and submit with `--database OWNER/UFL_MODELS --base BRANCH`.
 
 ## Consume the updated database
 
-CAESAR releases deliberately retain a local catalog snapshot. Merges into
-UFL_MODELS do not silently modify an installed CAESAR release. After updating
-and reviewing your local UFL_MODELS checkout, synchronize and compile:
+CAESAR reads the catalog directly from UFL_MODELS/main. Once a registration is
+merged there, download and compile it without updating files in CAESAR:
 
 ```sh
-python3 register_model.py check --database ../UFL_MODELS
-python3 register_model.py sync --database ../UFL_MODELS
 python3 model_registry.py my_model
 python3 compile_model.py cpu
 ```
 
-Review and commit CAESAR's changed `model_catalog.json` for the next release.
+For offline use, set `CAESAR_MODEL_CATALOG` to the absolute path of
+`model_catalog.json` in a local UFL_MODELS checkout before downloading, compiling,
+or configuring CMake. Use `--source-dir` to read checkpoint bytes from that checkout.
+`register_model.py check --database ../UFL_MODELS` validates its catalog and README.
 
 ## Tests
 
