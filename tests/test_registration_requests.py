@@ -1,4 +1,4 @@
-"""Registration pull requests from register_model.py, and catalog check/sync.
+"""Registration pull requests from register_model.py, and catalog checks.
 
 The add/remove tests need a UFL_MODELS checkout with test/check_registration.py,
 at ../UFL_MODELS or $UFL_MODELS_DIR. GitHub is faked; git runs for real.
@@ -170,11 +170,12 @@ class PullRequestClientTests(unittest.TestCase):
             self.main("remove", "x; rm -rf ~")
 
 
+from catalog_fixture import make_catalog
+
+
 class CatalogTests(unittest.TestCase):
     def setUp(self):
-        self.catalog = json.loads(
-            Path(service.__file__).with_name("model_catalog.json").read_text()
-        )
+        self.catalog = make_catalog()
         for model in self.catalog["models"]:
             model["owner"] = "E53Klasky"
             model["owner_id"] = 173562962

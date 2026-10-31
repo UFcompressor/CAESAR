@@ -1,12 +1,16 @@
 """Registry invariants and failure behavior, independent of torch/model inference."""
 
 import copy
+import io
+import os
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+
+from catalog_fixture import make_catalog
 
 import compile_model
 import model_registry as registry
@@ -17,7 +21,13 @@ class ModelRegistryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.catalog = registry.load_catalog()
+        self.catalog = make_catalog()
+        self.upstream = json.dumps(self.catalog).encode()
+        opener = patch.object(
+            registry, "urlopen", side_effect=lambda *a, **kw: io.BytesIO(self.upstream)
+        )
+        self.urlopen = opener.start()
+        self.addCleanup(opener.stop)
         self.model = copy.deepcopy(self.catalog["models"][0])
         self.source = self.root / "source"
         self.source.mkdir()
@@ -36,7 +46,7 @@ class ModelRegistryTests(unittest.TestCase):
 
     def test_all_names_and_foundation_versions(self):
         catalog = registry.load_catalog()
-        self.assertEqual(len(catalog["models"]), 4)
+        self.assertEqual(len(catalog["models"]), 2)
         self.assertEqual(registry.select_model(catalog)["name"], "caesar_v2")
         self.assertEqual(
             registry.select_model(catalog, "caesar_v1")["filename"], "caesar_v.pt"
@@ -45,6 +55,19 @@ class ModelRegistryTests(unittest.TestCase):
             registry.select_model(catalog, "caesar_v2")["filename"],
             "model_bs64_ep100k.pt",
         )
+
+    def test_default_catalog_comes_from_ufl_models(self):
+        with patch.dict(os.environ, {}, clear=True):
+            registry.load_catalog()
+        self.urlopen.assert_called_once_with(
+            "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/main/model_catalog.json",
+            timeout=60,
+        )
+
+    def test_catalog_environment_override(self):
+        with patch.dict(os.environ, {"CAESAR_MODEL_CATALOG": str(self.catalog_file())}):
+            self.assertEqual(registry.load_catalog(), self.catalog)
+        self.urlopen.assert_not_called()
 
     def test_duplicate_registration_rejected(self):
         self.catalog["models"][1]["registration_id"] = self.model["registration_id"]

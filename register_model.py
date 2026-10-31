@@ -280,13 +280,8 @@ def main():
         "check", help="Validate catalog ownership and generated README"
     )
     check.add_argument("--database", type=Path, required=True)
-    sync = commands.add_parser(
-        "sync",
-        help="Update CAESAR's catalog snapshot from a reviewed UFL_MODELS checkout",
-    )
-    sync.add_argument("--database", type=Path, required=True)
     args = parser.parse_args()
-    if args.command in ("check", "sync"):
+    if args.command == "check":
         catalog = json.loads(
             (args.database / "model_catalog.json").read_text(encoding="utf-8")
         )
@@ -294,14 +289,6 @@ def main():
         text = (args.database / "README.md").read_text(encoding="utf-8")
         if render_readme(catalog, text) != text:
             raise ValueError("README model list is stale")
-        if args.command == "sync":
-            Path(__file__).with_name("model_catalog.json").write_text(
-                json.dumps(catalog, indent=2) + "\n", encoding="utf-8"
-            )
-            print(
-                "Updated CAESAR catalog snapshot; review and commit model_catalog.json"
-            )
-            return
         print("Catalog and README validated")
         return
     submit(args)

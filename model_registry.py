@@ -10,9 +10,9 @@ import shutil
 import tempfile
 from urllib.request import urlopen
 
-# this is bad needs to look in it ##################################
-DEFAULT_CATALOG = Path(__file__).with_name("model_catalog.json")
-################3 bad fix ===============================
+DEFAULT_CATALOG = (
+    "https://raw.githubusercontent.com/UFcompressor/UFL_MODELS/main/model_catalog.json"
+)
 
 ARCHITECTURE = "caesar-bcrn-v1"
 COMPONENTS = ("caesar_compressor", "caesar_hyper_decompressor", "caesar_decompressor")
@@ -57,7 +57,9 @@ def validate_model(model):
     return model
 
 
-def load_catalog(path=DEFAULT_CATALOG):
+def load_catalog(path=None):
+    if path is None:
+        path = os.environ.get("CAESAR_MODEL_CATALOG", DEFAULT_CATALOG)
     path = str(path)
     if path.startswith("https://"):
         with urlopen(path, timeout=60) as response:
@@ -243,7 +245,10 @@ def main():
     parser.add_argument(
         "model", nargs="?", help="Registered name or exact ufl:number@sha256:hash"
     )
-    parser.add_argument("--catalog", default=str(DEFAULT_CATALOG))
+    parser.add_argument(
+        "--catalog",
+        help="Catalog path or HTTPS URL (default: UFL_MODELS; override with CAESAR_MODEL_CATALOG)",
+    )
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--validate-installation", metavar="DIRECTORY")
     parser.add_argument("--output", default="pretrained")
@@ -251,6 +256,8 @@ def main():
         "--source-dir", help="Read checkpoints from a local UFL_MODELS checkout"
     )
     args = parser.parse_args()
+    if args.catalog:
+        os.environ["CAESAR_MODEL_CATALOG"] = args.catalog
     if args.validate_installation:
         model = validate_installation(args.validate_installation)
         print(f"Registered installation: {model['id']}")
