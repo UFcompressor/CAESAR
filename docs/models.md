@@ -1,8 +1,8 @@
 # Models and installation
 
-The UFL_MODELS repository owns `model_catalog.json`. CAESAR ships a synchronized
-snapshot so a release can download immutable checkpoint URLs and compile offline.
-All four currently registered checkpoints support 3D–5D inputs. CAESAR v1
+The UFL_MODELS repository owns `model_catalog.json`. CAESAR reads the catalog directly
+from UFL_MODELS/main by default. Checkpoint URLs remain pinned to immutable commits.
+The following foundation and domain checkpoints support 3D–5D inputs. CAESAR v1
 (registration 1) and CAESAR v2 (registration 2) are foundation models; v2 is the
 newer optimized release and remains the default. eelsM1 (registration 3) is a
 domain fine-tune trained and tested on one EELS dataset. microscopy (registration
@@ -21,12 +21,18 @@ The Python entrypoints also work on Windows. Use the same Python environment tha
 contains torch and CAESAR's dependencies. Choose `cpu`, `cuda` (including ROCm),
 `mps`, or `xpu`; the backend must support AOTI compilation on your platform.
 
-For a local checkpoint repository:
+For offline use with a local UFL_MODELS checkout, set the catalog path for
+downloading, compilation, and CMake validation:
 
 ```sh
+export CAESAR_MODEL_CATALOG="$PWD/../UFL_MODELS/model_catalog.json"
 python3 model_registry.py caesar_v2 --source-dir ../UFL_MODELS
 python3 compile_model.py cpu
 ```
+
+The default requires network access for catalog validation. `--catalog` overrides
+the catalog path or HTTPS URL for a registry command. `CAESAR_MODEL_CATALOG`
+sets it for registry, compilation, exporters, and CMake validation.
 
 Download accepts an exact `ufl:<number>@sha256:<hash>` identity as well as a
 registered name. `--output` selects the download directory; pass its
@@ -35,7 +41,7 @@ registered name. `--output` selects the download directory; pass its
 uses `exported_model/`. `CAESAR_MODEL_DIR` selects a compiled installation at runtime.
 
 Downloads preserve actual checkpoint filenames, verify SHA-256, and publish a
-selection only after verification. Compilation independently checks the bundled
+selection only after verification. Compilation independently checks the
 UFL catalog; a hand-written selection does not register a model. CMake also
 validates the compiled installation against that catalog before configuring. All three
 exporters use a frozen copy of the same verified checkpoint. A staged export is
@@ -65,10 +71,10 @@ E53klasky may retire any model. Retirement preserves the full record and reserve
 identity.
 
 See [Automated model registration](model_registration.md) for commands, validation,
-one-time GitHub setup, admin rules, and catalog snapshot synchronization. Local
+one-time GitHub setup, admin rules, and consuming catalog updates. Local
 scripts do not enforce repository permissions; restrict direct catalog and workflow
 writes to trusted administrators and automation. CAESAR compilation continues to
-validate the bundled catalog snapshot and strictly load compatible state_dicts.
+validate the UFL catalog and strictly load compatible state_dicts.
 
 ## Local metadata and cache
 
@@ -164,7 +170,7 @@ python3 tests/check_registered_checkpoints.py --source-dir ../UFL_MODELS
 CAESAR_MODEL_DIR="$PWD/exported_model" ./build/tests/test_model_cache
 ```
 
-The checkpoint check strictly loads all four registrations into each of the three
+The checkpoint check strictly loads all active registrations into each of the three
 export models. The CPU installation and `test_caesarCD` exercise actual compiled
 inference. Metadata tests cover missing/mismatched identities and malformed
 manifests; registry tests cover duplicates, unregistered selections, hash failures,

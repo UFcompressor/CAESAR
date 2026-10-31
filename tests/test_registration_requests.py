@@ -1,4 +1,4 @@
-"""Registration pull requests from register_model.py, and catalog check/sync.
+"""Registration pull requests from register_model.py, and catalog checks.
 
 The add/remove tests need a UFL_MODELS checkout with test/check_registration.py,
 at ../UFL_MODELS or $UFL_MODELS_DIR. GitHub is faked; git runs for real.
@@ -83,6 +83,10 @@ class PullRequestClientTests(unittest.TestCase):
             text=True,
         ).stdout.strip()
         catalog = json.loads((UFL_MODELS / "model_catalog.json").read_text())
+        self.next_registration_id = 1 + max(
+            model["registration_id"]
+            for model in catalog["models"] + catalog.get("retired_models", [])
+        )
         default = next(
             m for m in catalog["models"] if m["name"] == catalog["default_model"]
         )
@@ -120,7 +124,10 @@ class PullRequestClientTests(unittest.TestCase):
 
     def test_add_opens_pull_request_from_the_submitters_fork(self):
         github, output = self.add()
-        self.assertIn("Local check passed: register alice_model as ufl:6@", output)
+        self.assertIn(
+            f"Local check passed: register alice_model as ufl:{self.next_registration_id}@",
+            output,
+        )
         self.assertEqual(len(github.named("gh", "api", "--method", "POST")), 1)
         (push,) = [call for call in github.calls if "push" in call]
         self.assertIn("https://github.com/Alice/UFL_MODELS.git", push)
@@ -170,11 +177,12 @@ class PullRequestClientTests(unittest.TestCase):
             self.main("remove", "x; rm -rf ~")
 
 
+from catalog_fixture import make_catalog
+
+
 class CatalogTests(unittest.TestCase):
     def setUp(self):
-        self.catalog = json.loads(
-            Path(service.__file__).with_name("model_catalog.json").read_text()
-        )
+        self.catalog = make_catalog()
         for model in self.catalog["models"]:
             model["owner"] = "E53Klasky"
             model["owner_id"] = 173562962
