@@ -83,6 +83,10 @@ class PullRequestClientTests(unittest.TestCase):
             text=True,
         ).stdout.strip()
         catalog = json.loads((UFL_MODELS / "model_catalog.json").read_text())
+        self.next_registration_id = 1 + max(
+            model["registration_id"]
+            for model in catalog["models"] + catalog.get("retired_models", [])
+        )
         default = next(
             m for m in catalog["models"] if m["name"] == catalog["default_model"]
         )
@@ -120,7 +124,10 @@ class PullRequestClientTests(unittest.TestCase):
 
     def test_add_opens_pull_request_from_the_submitters_fork(self):
         github, output = self.add()
-        self.assertIn("Local check passed: register alice_model as ufl:6@", output)
+        self.assertIn(
+            f"Local check passed: register alice_model as ufl:{self.next_registration_id}@",
+            output,
+        )
         self.assertEqual(len(github.named("gh", "api", "--method", "POST")), 1)
         (push,) = [call for call in github.calls if "push" in call]
         self.assertIn("https://github.com/Alice/UFL_MODELS.git", push)
