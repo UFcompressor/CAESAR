@@ -264,10 +264,37 @@ def main():
         return
     catalog = load_catalog(args.catalog)
     if args.list:
-        for model in catalog["models"]:
-            print(
-                f"{model.get('display_name', model['name'])} [{model['name']}] ({model['min_dims']}D–{model['max_dims']}D): {model['description']}\n  {model['id']}"
+        headers = ("Reg.", "Name", "Display name", "Dimensions", "Default")
+        rows = [
+            (
+                str(model["registration_id"]),
+                model["name"],
+                model.get("display_name", model["name"]),
+                f"{model['min_dims']}D–{model['max_dims']}D",
+                "*" if model["name"] == catalog["default_model"] else "",
             )
+            for model in catalog["models"]
+        ]
+        widths = [
+            max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers))
+        ]
+
+        def table_row(row):
+            return "  ".join(
+                value.ljust(width) for value, width in zip(row, widths)
+            ).rstrip()
+
+        print("Available CAESAR models")
+        print("=======================")
+        print(table_row(headers))
+        print(table_row(tuple("-" * width for width in widths)))
+        for row in rows:
+            print(table_row(row))
+        print("\n* Catalog default (the executable uses its compiled installation).")
+        for model in catalog["models"]:
+            print(f"\n{model['name']}")
+            print(f"  Description : {model['description']}")
+            print(f"  Identity    : {model['id']}")
         return
     model = select_model(catalog, args.model)
     target = download(model, args.output, args.source_dir)

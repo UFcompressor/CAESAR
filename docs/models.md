@@ -51,6 +51,62 @@ process is using it. An interrupted installer may leave `exported_model.lock`;
 remove that directory only after confirming the installer is no longer running.
 Individual exporter scripts are internal to `compile_model.py`.
 
+## Inspect the selected model
+
+```sh
+./build/CAESAR/caesar --model-info
+```
+
+This prints the selected compiled installation's model, registration, checkpoint
+identity, dimensions, backend, and installation path. `CAESAR_MODEL_DIR` selects
+the installation using the normal runtime search rules.
+
+During export, `compile_model.py` writes the compilation hardware name to
+`model_device.txt` beside `model_metadata.txt`. The executable reads this file for
+`Build device`; it does not detect the current machine's hardware. For example,
+CUDA exports record the GPU name reported by PyTorch, such as NVIDIA B200, and
+CPU exports record the compiler machine's CPU model. Apple MPS exports
+(`python3 compile_model.py mps`) record the Apple chip name, for example
+`MPS: Apple M4 Max`; XPU exports record the device name reported by PyTorch. The file is packaged with
+the installation. Older exports without it show “Not recorded”; recompile the
+model to record the device. The `Device` field remains the compiled backend.
+
+Example from a CPU installation (names and paths depend on your machine):
+
+```text
+Built with CAESAR model
+======================
+  Name          : Xcompact3d_latent_16_16
+  Registration  : 5
+  Device        : cpu
+  Build device  : CPU: 12th Gen Intel(R) Core(TM) i7-1250U
+  Dimensions    : 3D–5D
+  Architecture  : caesar-bcrn-v1
+  Checkpoint    : Xcompact3d_latent_16_16.pt
+  Identity      : ufl:5@sha256:066b4e38c357e9506d2c123d3bc483fdecd796cf7a80183a2cd501dd7c6a38a4
+  Installation  : /path/to/CAESAR/exported_model
+```
+
+`python3 model_registry.py --list` displays an aligned catalog table, followed by
+labeled descriptions and full identities. For example, a catalog containing the
+two foundation releases displays:
+
+```text
+Available CAESAR models
+=======================
+Reg.  Name       Display name  Dimensions  Default
+----  ---------  ------------  ----------  -------
+1     caesar_v1  CAESAR v1     3D–5D
+2     caesar_v2  CAESAR v2     3D–5D       *
+
+* Catalog default (the executable uses its compiled installation).
+```
+
+The star marks the catalog download default. It does not mean that the executable
+uses that model. To change the runtime model, download and compile the desired
+checkpoint, then select that installation with `CAESAR_MODEL_DIR` before starting
+the executable.
+
 ## Registration and identity
 
 Identity is `ufl:<registration_id>@sha256:<checkpoint_sha256>`. Registration numbers,
@@ -83,7 +139,7 @@ identity, checkpoint hash and original filename, architecture, supported ranks,
 and compiled device. Runtime derives the artifact directory from that file's
 location, allowing installation relocation. The training checkpoint need not be
 deployed beside the compiled packages. Descriptions and download URLs remain in
-the catalog. Old `model_name.txt`/`model_device.txt` installations must be re-exported;
+the catalog. Old name-only installations must be re-exported;
 there is no name-only or implicit CPU fallback.
 
 Metadata initializes once per process using C++ static initialization. Each thread
