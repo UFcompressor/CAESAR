@@ -258,6 +258,8 @@ add_custom_target(caesar_validate_model
 )
 add_dependencies(caesar_objs caesar_validate_model)
 install(FILES "${CAESAR_METADATA}" DESTINATION share/caesar/models)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_device.txt"
+    DESTINATION share/caesar/models OPTIONAL)
 file(STRINGS "${CAESAR_METADATA}" CAESAR_MODEL_NAME REGEX "^model_name=")
 string(REPLACE "model_name=" "" CAESAR_MODEL_NAME "${CAESAR_MODEL_NAME}")
 

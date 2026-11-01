@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,6 +10,30 @@ import sys
 import tempfile
 
 from model_registry import COMPONENTS, read_selection, write_installation
+
+
+def compilation_device_name(device):
+    """Record hardware on the machine exporting the model, once at compilation."""
+    if device == "cpu":
+        cpuinfo = Path("/proc/cpuinfo")
+        if cpuinfo.is_file():
+            for line in cpuinfo.read_text().splitlines():
+                key, _, value = line.partition(":")
+                if key.strip() == "model name" and value.strip():
+                    return "CPU: " + value.strip()
+        return "CPU: " + (platform.processor() or "name unavailable")
+    import torch
+
+    if device == "cuda":
+        return "GPU: " + torch.cuda.get_device_name(torch.cuda.current_device())
+    if device == "xpu":
+        return "XPU: " + torch.xpu.get_device_name(torch.xpu.current_device())
+    if device == "mps":
+        chip = subprocess.check_output(
+            ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+        ).strip()
+        return "MPS: " + (chip or "Apple GPU (chip name unavailable)")
+    raise ValueError(f"Unsupported compilation device: {device}")
 
 
 def compile_installation(device, selection, output):
@@ -54,6 +79,9 @@ def compile_installation(device, selection, output):
                     [sys.executable, str(script), device], env=env, check=True
                 )
             write_installation(stage, model, device)
+            (stage / "model_device.txt").write_text(
+                compilation_device_name(device) + "\n", encoding="utf-8"
+            )
             backup = Path(temporary) / "previous"
             if output.exists():
                 output.rename(backup)
