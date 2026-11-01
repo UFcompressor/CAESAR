@@ -275,9 +275,14 @@ def main():
             )
             for model in catalog["models"]
         ]
-        widths = [max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers))]
+        widths = [
+            max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers))
+        ]
+
         def table_row(row):
-            return "  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip()
+            return "  ".join(
+                value.ljust(width) for value, width in zip(row, widths)
+            ).rstrip()
 
         print("Available CAESAR models")
         print("=======================")

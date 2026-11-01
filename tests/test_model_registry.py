@@ -168,12 +168,19 @@ class ModelRegistryTests(unittest.TestCase):
 
         def export(*args, env, **kwargs):
             stage = Path(env["CAESAR_EXPORT_DIR"])
-            for filename in (*[f"{c}.pt2" for c in registry.COMPONENTS], *registry.TABLES):
+            for filename in (
+                *[f"{c}.pt2" for c in registry.COMPONENTS],
+                *registry.TABLES,
+            ):
                 (stage / filename).write_bytes(b"artifact")
 
-        with patch.object(registry, "load_catalog", return_value=self.catalog), \
-             patch.object(compile_model.subprocess, "run", side_effect=export), \
-             patch.object(compile_model, "compilation_device_name", return_value="GPU: NVIDIA B200"):
+        with patch.object(
+            registry, "load_catalog", return_value=self.catalog
+        ), patch.object(
+            compile_model.subprocess, "run", side_effect=export
+        ), patch.object(
+            compile_model, "compilation_device_name", return_value="GPU: NVIDIA B200"
+        ):
             compile_model.compile_installation(
                 "cuda", self.root / "pretrained/selected_model.json", output
             )
@@ -181,7 +188,9 @@ class ModelRegistryTests(unittest.TestCase):
             (output / "model_device.txt").read_text(), "GPU: NVIDIA B200\n"
         )
         with patch.object(registry, "load_catalog", return_value=self.catalog):
-            self.assertEqual(registry.validate_installation(output)["id"], self.model["id"])
+            self.assertEqual(
+                registry.validate_installation(output)["id"], self.model["id"]
+            )
 
     def test_complete_installation_only(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):

@@ -475,7 +475,8 @@ void print_usage(const char *program_name) {
   std::cout << "  " << program_name << " compress <input> [options]\n";
   std::cout << "  " << program_name << " decompress <input> [options]\n\n";
   std::cout << "  " << program_name << " --model-info\n\n";
-  std::cout << "  --model-info             Show the selected compiled model and exit\n\n";
+  std::cout << "  --model-info             Show the selected compiled model "
+               "and exit\n\n";
   std::cout << "Common Options:\n";
   std::cout << "  -o, --output <file>      Output file path\n";
   std::cout << "  -s, --shape <shape>      Data shape (e.g., 1,24,256,256)\n";
@@ -782,7 +783,8 @@ int main(int argc, char *argv[]) {
 
     if (command == "--model-info") {
       if (argc != 2)
-        throw std::runtime_error("--model-info does not accept additional arguments");
+        throw std::runtime_error(
+            "--model-info does not accept additional arguments");
       const auto &model = get_model_metadata();
       std::ifstream device_file(model.directory / "model_device.txt");
       std::string build_device;
