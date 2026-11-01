@@ -64,8 +64,8 @@ correction bytes. The implemented version-1 CAESAR serializer also preserves all
 weights, and correction bytes through `serialize`/`deserialize` and `save`/`load`;
 see [saving complete results](public_api.md#saving-complete-results).
 
-ADIOS operator changes are deferred. The NGLR fields above are available for
-that later integration.
+External ADIOS2 integration is complete, as confirmed by the maintainer. The
+NGLR fields above are part of the serialized result used by that integration.
 
 ## Commands and verification
 
