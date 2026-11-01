@@ -474,6 +474,9 @@ void print_usage(const char *program_name) {
   std::cout << "Usage:\n";
   std::cout << "  " << program_name << " compress <input> [options]\n";
   std::cout << "  " << program_name << " decompress <input> [options]\n\n";
+  std::cout << "  " << program_name << " --model-info\n\n";
+  std::cout << "  --model-info             Show the selected compiled model "
+               "and exit\n\n";
   std::cout << "Common Options:\n";
   std::cout << "  -o, --output <file>      Output file path\n";
   std::cout << "  -s, --shape <shape>      Data shape (e.g., 1,24,256,256)\n";
@@ -584,7 +587,7 @@ int compress_file(const std::string &input_file, const std::string &output_file,
     std::cout << "=== CAESAR COMPRESSION ===\n";
     std::cout << "Input file: " << input_file << "\n";
     std::cout << "Output file: " << output_file << "\n";
-    std::cout << "Model: " << model_type << "\n";
+    std::cout << "Built with CAESAR model: " << model_type << "\n";
     std::cout << "Compression device: " << compress_device << "\n";
     std::cout << "Error bound: " << error_bound << "\n";
     std::cout << "N-frame: " << n_frame << "\n\n";
@@ -775,6 +778,30 @@ int main(int argc, char *argv[]) {
     std::string command = argv[1];
     if (command == "-h" || command == "--help") {
       print_usage(argv[0]);
+      return 0;
+    }
+
+    if (command == "--model-info") {
+      if (argc != 2)
+        throw std::runtime_error(
+            "--model-info does not accept additional arguments");
+      const auto &model = get_model_metadata();
+      std::ifstream device_file(model.directory / "model_device.txt");
+      std::string build_device;
+      if (!std::getline(device_file, build_device) || build_device.empty())
+        build_device = "Not recorded; recompile the model to record its device";
+      std::cout << "Built with CAESAR model\n"
+                << "======================\n"
+                << "  Name          : " << model.name << "\n"
+                << "  Registration  : " << model.registration_id << "\n"
+                << "  Device        : " << model.device << "\n"
+                << "  Build device  : " << build_device << "\n"
+                << "  Dimensions    : " << model.min_dims << "D–"
+                << model.max_dims << "D\n"
+                << "  Architecture  : " << model.architecture << "\n"
+                << "  Checkpoint    : " << model.checkpoint_file << "\n"
+                << "  Identity      : " << model.id << "\n"
+                << "  Installation  : " << model.directory.string() << "\n";
       return 0;
     }
 

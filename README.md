@@ -155,10 +155,19 @@ del temp_requirements.txt
 ### 4. Download and Prepare Pretrained Models
 
 ```bash
+# Aligned available-model table, descriptions, and checkpoint identities
 python3 model_registry.py --list
 python3 model_registry.py caesar_v2
 python3 compile_model.py cpu
 ```
+
+Inspect the executable's selected model, compiled backend, and recorded compilation CPU/GPU name:
+
+```sh
+./build/CAESAR/caesar --model-info
+```
+
+See [model inspection and output examples](docs/models.md#inspect-the-selected-model).
 
 CAESAR v1 is the original foundation model (`caesar_v.pt`); CAESAR v2 is
 its newer optimized foundation model (`model_bs64_ep100k.pt`) and the default.

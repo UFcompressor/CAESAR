@@ -151,6 +151,47 @@ class ModelRegistryTests(unittest.TestCase):
         )
         self.assertFalse(output.with_name("exported_model.lock").exists())
 
+    def test_mps_records_apple_chip_name(self):
+        with patch.dict("sys.modules", {"torch": object()}), patch.object(
+            compile_model.subprocess, "check_output", return_value="Apple M4 Max\n"
+        ) as query:
+            self.assertEqual(
+                compile_model.compilation_device_name("mps"), "MPS: Apple M4 Max"
+            )
+        query.assert_called_once_with(
+            ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+        )
+
+    def test_compile_publishes_recorded_device(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        output = self.root / "exported_model"
+
+        def export(*args, env, **kwargs):
+            stage = Path(env["CAESAR_EXPORT_DIR"])
+            for filename in (
+                *[f"{c}.pt2" for c in registry.COMPONENTS],
+                *registry.TABLES,
+            ):
+                (stage / filename).write_bytes(b"artifact")
+
+        with patch.object(
+            registry, "load_catalog", return_value=self.catalog
+        ), patch.object(
+            compile_model.subprocess, "run", side_effect=export
+        ), patch.object(
+            compile_model, "compilation_device_name", return_value="GPU: NVIDIA B200"
+        ):
+            compile_model.compile_installation(
+                "cuda", self.root / "pretrained/selected_model.json", output
+            )
+        self.assertEqual(
+            (output / "model_device.txt").read_text(), "GPU: NVIDIA B200\n"
+        )
+        with patch.object(registry, "load_catalog", return_value=self.catalog):
+            self.assertEqual(
+                registry.validate_installation(output)["id"], self.model["id"]
+            )
+
     def test_complete_installation_only(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             registry.write_installation(self.root, self.model, "cpu")
