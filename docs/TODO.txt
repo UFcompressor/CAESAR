@@ -25,31 +25,33 @@
   when NRMSE exceeds the target or file sizes differ.
 - The 11 model-registry tests and existing CPU unit binaries returned success;
   see docs/public_api.md for details and Release-build assertion limitations.
-- ADIOS was not changed or tested. Its API migration is the next integration
-  task. GPU testing, GPU-to-CPU portability, and NGLR full-pipeline validation
+- External ADIOS2 integration is complete, as confirmed by the maintainer.
+  GPU testing, GPU-to-CPU portability, and NGLR full-pipeline validation
   remain pending; CPU results do not establish a general error-bound guarantee.
 
 ## Serialization implemented
 
-- [x] Add version-1 buffer serialization and single-file save/load for all
-  CompressionResult fields, including model identity and NGLR weights.
 - The serializer uses little-endian scalars and uint64 lengths and rejects
   malformed/truncated buffers and unsupported versions. It requires 32-bit int
   and 64-bit size_t. See docs/public_api.md and tests/test_serialization.cpp.
-- This completes core result serialization. External ADIOS2 migration and
-  GPU-to-CPU entropy-decoding portability remain separate validation tasks.
+- This completes core result serialization. External ADIOS2 migration is also
+  complete; GPU-to-CPU entropy-decoding portability remains a separate task.
 
 ## Planned work
 
-- [ ] Migrate the external ADIOS2 operator to the implemented CAESAR buffer
-  serializer and validate its outer framing and round trips in that repository.
 - [ ] Make GPU-compressed data portable to CPU decompression by serializing latent indexes and ensuring the matching `*.bin` probability tables travel with the compressed data or its model artifact. Evaluate bit packing for indexes after checking their value range.
-- [ ] Document developer workflows, artifact contracts, and validation behavior.
 - [ ] Investigate filtering, padding, and error-bound failures with focused reproductions.
 - [ ] Expose the C++ implementation to Python through pybind11.
 - [ ] Improve model training with distributed learning.
 - [ ] Evaluate federated learning after the distributed training work.
 - [ ] Investigate decompression performance, including the cost of nvCOMP decompression calls.
 - [ ] Find ways to reduce LBRC memory use.
+- [ ] Validate input before casting to float32. Reject non-finite inputs and
+  finite values outside float32's finite range (approximately +/-3.4028235e38)
+  with a clear error before conversion; large float64 values can become infinity.
+  Also investigate tiny values becoming zero and precision loss within range.
+  Evaluate conversion error against the original input and requested error
+  target, since checking only the converted float32 data hides casting error.
+  Add focused boundary and float64 regression tests when implementing this.
 
 These are plans and known issues, not requirements for unrelated changes currently in progress.

@@ -1,5 +1,8 @@
 # Migrating CompressCAESAR to the CAESAR serializer
 
+Status: external ADIOS2 integration is complete, as confirmed by the maintainer.
+The following describes the migration contract for reference.
+
 Use `models/serialization.h` from the updated CAESAR installation in the
 external ADIOS2 operator. Keep the existing `CompressCAESAR.h` unchanged;
 any new decoding helper can be defined inside the `.cpp` file.
