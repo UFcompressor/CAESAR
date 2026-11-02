@@ -56,7 +56,9 @@ source venv/bin/activate
 pip install --upgrade pip wheel setuptools
 ```
 
-### 3. Install Platform Dependencies
+### 3. Install Dependencies and Compile a Model
+
+#### Install Platform Dependencies
 
 The Linux, macOS, and Windows instructions below all install
 `PyYAML>=6.0` from `requirements.txt`. PyYAML provides the Python `yaml` module
@@ -152,7 +154,10 @@ del temp_requirements.txt
 
 </details>
 
-### 4. Download and Prepare Pretrained Models
+#### Download and Compile a Pretrained Model
+
+After installing the dependencies, run these commands from the repository root.
+Compile a model before configuring and building CAESAR with CMake.
 
 ```bash
 # Aligned available-model table, descriptions, and checkpoint identities
@@ -161,21 +166,13 @@ python3 model_registry.py caesar_v2
 python3 compile_model.py cpu
 ```
 
-Inspect the executable's selected model, compiled backend, and recorded compilation CPU/GPU name:
-
-```sh
-./build/CAESAR/caesar --model-info
-```
-
-See [model inspection and output examples](docs/models.md#inspect-the-selected-model).
-
 CAESAR v1 is the original foundation model (`caesar_v.pt`); CAESAR v2 is
 its newer optimized foundation model (`model_bs64_ep100k.pt`) and the default.
 Checkpoints must be registered in the UFL catalog and match their registered
 SHA-256 before compilation. See [model installation and identity](docs/models.md)
 for offline downloads, registration, devices, caching, and the ADIOS contract.
 
-### 5. Configure and Build with CMake
+### 4. Configure and Build with CMake
 
 ```bash
 mkdir -p build && cd build
@@ -188,9 +185,19 @@ cmake .. \
   -DCMAKE_BUILD_TYPE=Release
 
 make -j6
+cd ..
 ```
 
 For debug builds, replace `-DCMAKE_BUILD_TYPE=Release` with `-DCMAKE_BUILD_TYPE=Debug`.
+
+After the build completes, inspect the executable's selected model, compiled
+backend, and recorded compilation CPU/GPU name from the repository root:
+
+```sh
+./build/CAESAR/caesar --model-info
+```
+
+See [model inspection and output examples](docs/models.md#inspect-the-selected-model).
 
 ---
 
