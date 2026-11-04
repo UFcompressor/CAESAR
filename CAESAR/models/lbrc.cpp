@@ -559,7 +559,7 @@ static std::vector<std::vector<uint8_t>> compress_planes(
   int64_t Nb = planes.size(0);
   std::vector<torch::Tensor> rows(Nb);
   for (int64_t i = 0; i < Nb; ++i)
-    rows[i] = planes[i];
+    rows[i] = planes[i].clone();
 
   auto results = nvcomp_batch_compress(rows); // one batched device call
 
