@@ -1,9 +1,11 @@
 #include "lbrc.h"
 
+#include <zstd.h>
+
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <thread>
-#include <zstd.h>
 /*
  * The LBRC algorithm implemented here is based on:
  * Zhu, L., Ranka, S., and Rangarajan, A.
@@ -446,34 +448,29 @@ static torch::Tensor from_blocks(const torch::Tensor &blocks_t, const Shape5 &S,
       .view({S.B, S.C, S.T, S.H, S.W});
 }
 
-// q: [Nblocks, bt,bh,bw] int32 -> mixed 3rd-difference (batched Lorenzo).
-static torch::Tensor lorenzo_3d(const torch::Tensor &q) {
-  auto shift1 = [](const torch::Tensor &t, int64_t dim) {
-    auto z = torch::zeros_like(t);
-    z.narrow(dim, 1, t.size(dim) - 1).copy_(t.narrow(dim, 0, t.size(dim) - 1));
-    return z;
-  };
-  auto t_ = shift1(q, 1), h_ = shift1(q, 2), w_ = shift1(q, 3);
-  auto th = shift1(t_, 2), tw = shift1(t_, 3), hw = shift1(h_, 3);
-  auto thw = shift1(th, 3);
-  return q - t_ - h_ - w_ + th + tw + hw - thw;
+static torch::Tensor lorenzo_3d(torch::Tensor q) {
+  for (int64_t dim = 1; dim <= 3; ++dim) {
+    auto out = q.clone();
+    out.narrow(dim, 1, q.size(dim) - 1).sub_(q.narrow(dim, 0, q.size(dim) - 1));
+    q = std::move(out);
+  }
+  return q;
 }
 
 static torch::Tensor inv_lorenzo_3d(torch::Tensor q) {
-  q = q.cumsum(3);
-  q = q.cumsum(2);
-  q = q.cumsum(1);
+  q = q.cumsum(3, torch::kInt32); // default cumsum promotes int32 to int64
+  q = q.cumsum(2, torch::kInt32);
+  q = q.cumsum(1, torch::kInt32);
   return q;
 }
 
 static torch::Tensor zigzag_encode(const torch::Tensor &d /*int32*/) {
-  auto d64 = d.to(torch::kInt64);
-  return torch::where(d64 >= 0, d64 * 2, -2 * d64 - 1);
+  return torch::bitwise_xor(torch::bitwise_left_shift(d, 1),
+                            torch::bitwise_right_shift(d, 31));
 }
-
-static torch::Tensor zigzag_decode(const torch::Tensor &zz /*int64, >=0*/) {
-  auto odd = (zz % 2) == 1;
-  return torch::where(odd, -(zz + 1) / 2, zz / 2).to(torch::kInt32);
+static torch::Tensor zigzag_decode(const torch::Tensor &zz /*int32, >=0*/) {
+  return torch::bitwise_xor(torch::bitwise_right_shift(zz, 1),
+                            -torch::bitwise_and(zz, 1));
 }
 
 static torch::Tensor pack_bits(const torch::Tensor &bits01) {
@@ -502,9 +499,10 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
                  const torch::Tensor &r, const torch::Tensor &valid,
                  double target_nrmse, int qiter, float mean, float scale) {
   int64_t Nb = x.size(0);
-  auto valid_count = valid.sum({1, 2, 3});
-  auto target_sse = valid_count * (target_nrmse * target_nrmse);
 
+  double vc = valid.sum().item<double>() * x.size(2) * x.size(3);
+  auto target_sse =
+      torch::full({Nb}, vc * target_nrmse * target_nrmse, x.options());
   // One lambda covers both sse0 (step so large q rounds to 0 everywhere,
   // i.e. the uncorrected base-recon error) and every bisection probe.
   auto sse_at = [&](const torch::Tensor &step4) {
@@ -544,9 +542,8 @@ quantize_batched(const torch::Tensor &x, const torch::Tensor &x0n,
 
   auto step4 = step.view({Nb, 1, 1, 1});
   auto q = torch::round(r / step4).to(torch::kInt32);
-  q = torch::where(zero_correction.view({Nb, 1, 1, 1}), torch::zeros_like(q),
-                   q);
-  q = torch::where(valid.to(torch::kBool), q, torch::zeros_like(q));
+  q.masked_fill_(zero_correction.view({Nb, 1, 1, 1}), 0);
+  q.masked_fill_(valid.eq(0), 0);
 
   return {step, q};
 }
@@ -562,7 +559,7 @@ static std::vector<std::vector<uint8_t>> compress_planes(
   int64_t Nb = planes.size(0);
   std::vector<torch::Tensor> rows(Nb);
   for (int64_t i = 0; i < Nb; ++i)
-    rows[i] = planes[i];
+    rows[i] = planes[i].clone();
 
   auto results = nvcomp_batch_compress(rows); // one batched device call
 
@@ -654,29 +651,25 @@ static void compress_gpu(const torch::Tensor &original,
   const float x_mean = stats[0].item<float>();
   const float scale = stats[1].item<float>() - stats[2].item<float>();
   TORCH_CHECK(scale > 0, "LBRC compress (gpu): zero data range");
-
-  auto x0n = (rec_c - x_mean) / scale;
-  auto r = (orig_c - x_mean) / scale - x0n;
-
-  auto x_blk = to_blocks(orig_c, meta.block_size);
-  auto x0n_blk = to_blocks(x0n, meta.block_size);
-  auto r_blk = to_blocks(r, meta.block_size);
-  auto valid =
-      (torch::arange(S.T, orig_c.options().dtype(torch::kInt64)) < valid_t)
-          .view({1, 1, S.T, 1, 1})
-          .expand_as(orig_c)
-          .to(orig_c.dtype());
-  auto valid_blk = to_blocks(valid, meta.block_size);
-
-  int qiter = 16;
-  auto [step, q] = quantize_batched(x_blk, x0n_blk, r_blk, valid_blk,
-                                    target_nrmse, qiter, x_mean, scale);
-
-  auto d = lorenzo_3d(q);
-  auto zz = zigzag_encode(d);                   // int64, >=0
-  auto mx = zz.amax({1, 2, 3}).to(torch::kCPU); // host sync, metadata only
+  torch::Tensor step, q;
+  {
+    auto x0n = (rec_c - x_mean) / scale;
+    auto r = (orig_c - x_mean) / scale - x0n;
+    auto x_blk = to_blocks(orig_c, meta.block_size);
+    auto x0n_blk = to_blocks(x0n, meta.block_size);
+    auto r_blk = to_blocks(r, meta.block_size);
+    auto valid_blk = (torch::arange(S.T, orig_c.options()) < valid_t)
+                         .view({1, S.T, 1, 1})
+                         .to(torch::kFloat32);
+    std::tie(step, q) = quantize_batched(x_blk, x0n_blk, r_blk, valid_blk,
+                                         target_nrmse, 16, x_mean, scale);
+  }
 
   int64_t Nb = q.size(0);
+  auto zz =
+      zigzag_encode(lorenzo_3d(std::move(q))); // q and d freed here, int32
+  auto mx = zz.amax({1, 2, 3}).to(torch::kInt64).to(torch::kCPU);
+
   int64_t bt = meta.block_size[0], bh = meta.block_size[1],
           bw = meta.block_size[2];
   int64_t N = bt * bh * bw;
@@ -711,10 +704,10 @@ static void compress_gpu(const torch::Tensor &original,
     // no Tensor>>scalar operator in LibTorch -- bit b of a nonnegative
     // int is (x / 2^b) % 2, same result via arithmetic.
     int64_t shift = static_cast<int64_t>(1) << bit;
-    auto bits01 = torch::remainder(torch::div(zz_flat, shift,
-                                              /*rounding_mode=*/"trunc"),
-                                   2)
-                      .to(torch::kUInt8);
+    auto bits01 =
+        torch::bitwise_and(
+            torch::bitwise_right_shift(zz_flat, static_cast<int64_t>(bit)), 1)
+            .to(torch::kUInt8);
     auto packed = pack_bits(bits01);
     auto planes = compress_planes(packed, zstd_level, workers);
     for (int64_t i = 0; i < Nb; ++i)
@@ -761,36 +754,42 @@ static torch::Tensor decompress_gpu(const torch::Tensor &recons,
 
   if (workers <= 0)
     workers = get_allocated_cores();
-  auto zz_flat = torch::zeros({Nb, N8}, x0n_blk.options().dtype(torch::kInt64));
-
-  for (uint32_t bit = 0; bit < max_bits; ++bit) {
-    std::vector<std::vector<uint8_t>> plane_bytes(Nb);
-    for (int64_t i = 0; i < Nb; ++i)
-      if (bit < blocks[i].bit_count)
-        plane_bytes[i] = blocks[i].streams[bit];
-
-    auto packed =
-        decompress_planes(plane_bytes, packed_bytes,
-                          x0n_blk.options().dtype(torch::kUInt8), workers);
-    auto bits01 = unpack_bits(packed, N8).to(torch::kInt64);
-    // bits are disjoint per plane, so += is equivalent to bitwise-OR
-    // and avoids relying on Tensor |= support.
-    zz_flat += bits01 * (static_cast<int64_t>(1) << bit);
-  }
-
-  auto zz = zz_flat.narrow(1, 0, N).view({Nb, bt, bh, bw});
-  auto d = zigzag_decode(zz);
-  auto q = inv_lorenzo_3d(d);
 
   std::vector<double> steps(Nb);
   for (int64_t i = 0; i < Nb; ++i)
     steps[i] = blocks[i].step;
   auto step_t = torch::from_blob(steps.data(), {Nb}, torch::kFloat64)
-                    .to(q.options().dtype(torch::kFloat32).device(q.device()))
+                    .to(x0n_blk.options().dtype(torch::kFloat32))
                     .view({Nb, 1, 1, 1});
 
-  auto out_blk =
-      (x0n_blk + q.to(torch::kFloat32) * step_t) * meta.scale + meta.x_mean;
+  torch::Tensor q;
+  {
+    auto zz_flat =
+        torch::zeros({Nb, N8}, x0n_blk.options().dtype(torch::kInt32));
+
+    for (uint32_t bit = 0; bit < max_bits; ++bit) {
+      std::vector<std::vector<uint8_t>> plane_bytes(Nb);
+      for (int64_t i = 0; i < Nb; ++i)
+        if (bit < blocks[i].bit_count)
+          plane_bytes[i] = blocks[i].streams[bit];
+
+      auto packed =
+          decompress_planes(plane_bytes, packed_bytes,
+                            x0n_blk.options().dtype(torch::kUInt8), workers);
+      auto bits01 = unpack_bits(packed, N8).to(torch::kInt32);
+      zz_flat.add_(bits01.mul_(1 << bit));
+    }
+
+    auto zz = zz_flat.narrow(1, 0, N).view({Nb, bt, bh, bw});
+    auto d = zigzag_decode(zz);
+    zz = torch::Tensor();
+    zz_flat = torch::Tensor(); // free before the cumsums
+    q = inv_lorenzo_3d(std::move(d));
+  }
+
+  auto out_blk = q.to(torch::kFloat32);
+  q = torch::Tensor();
+  out_blk.mul_(step_t).add_(x0n_blk).mul_(meta.scale).add_(meta.x_mean);
   return from_blocks(out_blk, S, meta.block_size);
 }
 
