@@ -123,8 +123,16 @@ def debug_backward_failure(
 
 
 def train_epoch_vae(
-    model, loader, optimizer, scheduler, criterion, loss_beta, device, iteration=0,
-    debug=False, max_iterations=None,
+    model,
+    loader,
+    optimizer,
+    scheduler,
+    criterion,
+    loss_beta,
+    device,
+    iteration=0,
+    debug=False,
+    max_iterations=None,
 ):
     """Train the model for one epoch."""
     model.train()
@@ -150,12 +158,8 @@ def train_epoch_vae(
         targets = inputs
 
         check("input", inputs, iteration + 1, data_dict)
-        check(
-            "normalization offset", data_dict["offset"], iteration + 1, data_dict
-        )
-        check(
-            "normalization scale", data_dict["scale"], iteration + 1, data_dict
-        )
+        check("normalization offset", data_dict["offset"], iteration + 1, data_dict)
+        check("normalization scale", data_dict["scale"], iteration + 1, data_dict)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -167,7 +171,11 @@ def train_epoch_vae(
                 for name, buffer in model.named_buffers()
             }
         try:
-            with (torch.autograd.detect_anomaly(check_nan=True) if debug else nullcontext()):
+            with (
+                torch.autograd.detect_anomaly(check_nan=True)
+                if debug
+                else nullcontext()
+            ):
                 results = model(inputs)
                 outputs = results["output"]
                 check("model output", outputs, iteration + 1, data_dict)
@@ -325,7 +333,10 @@ def get_argument():
         help="Path to save model and results",
     )
     parser.add_argument(
-        "--iterations", type=int, default=400, help="Training optimizer steps in thousands (100 means 100,000 steps)"
+        "--iterations",
+        type=int,
+        default=400,
+        help="Training optimizer steps in thousands (100 means 100,000 steps)",
     )
 
     parser.add_argument(
@@ -345,8 +356,17 @@ def get_argument():
     parser.add_argument("--pretrain", type=str, default="", help="pretrain path")
 
     parser.add_argument(
-        "--debug", action=argparse.BooleanOptionalAction, default=False,
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Enable finite checks, anomaly detection, failure snapshots and timing (default: off)",
+    )
+
+    parser.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Opt into torch.compile training (default: eager, for backward compatibility)",
     )
 
     # Dataset
@@ -470,7 +490,9 @@ if __name__ == "__main__":
         print("Using a single GPU!")
 
     model = model.to(device)
-    model = torch.compile(model)
+    if args.compile:
+        model = torch.compile(model)
+    print(f"Training execution: {'compiled' if args.compile else 'eager'}")
     # Loss function and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)

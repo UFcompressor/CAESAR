@@ -110,3 +110,10 @@ Debugging is off by default. Add `--debug` to enable finite-value checks,
 autograd anomaly detection, failure snapshots/replays, and initial batch timing;
 `--no-debug` explicitly disables them. `--iterations 100` means 100,000 optimizer
 steps. Training stops at that limit and includes evaluation at 100% progress.
+
+Training uses eager PyTorch execution by default. `--no-compile` explicitly
+selects this path; `--compile` opts into `torch.compile`. If compiled backward
+reports an invalid gradient shape, rerun with `--no-compile`.
+`--debug` controls diagnostics independently of compilation.
+Dataset entries inherit `n_frame` and other shared settings from `train_config`
+and `test_config`; they do not need their own `n_frame` entries.
