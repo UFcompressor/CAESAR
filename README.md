@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=800&size=64&duration=1&pause=1000&color=E8500A&center=true&vCenter=true&repeat=false&width=900&height=120&lines=CAESAR"/>
-  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=800&size=64&duration=1&pause=1000&color=E8500A&center=true&vCenter=true&repeat=false&width=900&height=120&lines=CAESAR" alt="CAESAR"/>
-</picture>
+<img src="docs/caesar_title.svg" width="900" height="120" alt="CAESAR"/>
 
 **Conditional AutoEncoder with Super-resolution for Augmented Reduction**
 
@@ -40,6 +37,57 @@ CAESAR runs on CPU by default, and supports GPU acceleration on both NVIDIA (CUD
 
 CAESAR requires a C++17 compiler. When using GCC, use GCC 9 or newer;
 GCC versions older than 9 (including 7.5) are unsupported.
+
+### Optional: Set Up GitHub CLI (`gh`)
+
+GitHub CLI is useful for authenticated Git operations and pull requests; it is
+optional for cloning this public repository. Install Git as well if needed.
+
+**With Conda**, activate the environment where you want `gh` available, then run:
+
+```bash
+conda install --channel conda-forge gh git
+```
+
+**Without Conda**, use the command for your platform:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y gh git
+
+# macOS (Homebrew)
+brew install gh git
+```
+
+```powershell
+# Windows (WinGet); reopen your terminal after installation.
+winget install --id GitHub.cli --source winget
+winget install --id Git.Git --source winget
+```
+
+**On HPC systems without sudo or Conda**, follow the
+[local binary installation instructions](docs/model_registration.md#install-on-linux-hpc-systems-without-sudo-or-conda)
+to download an official release into `~/.local/opt`, symlink `gh` into
+`~/.local/bin`, and configure PATH.
+
+Then authenticate with GitHub and configure Git to use `gh` for HTTPS credentials:
+
+```bash
+gh --version
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+gh auth status
+```
+
+Follow the browser prompts to finish signing in. On a remote machine, open the
+shown URL on your local computer and enter the displayed one-time code. With a
+Conda installation, keep that environment active when using `gh` or Git's `gh`
+credential helper.
+
+See the [official installation instructions](https://github.com/cli/cli#installation)
+for other platforms or newer packages, and the
+[authentication manual](https://cli.github.com/manual/gh_auth_login) for details.
 
 ### 1. Clone the Repository
 

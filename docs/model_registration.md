@@ -8,10 +8,106 @@ check passes. CAESAR's `register_model.py` prepares and opens these pull request
 
 ## Submit a model
 
-Install Git 2.38 or newer and GitHub CLI, then run `gh auth login` once.
-The registration checker requires `git merge-tree --write-tree`.
-Contributors need a GitHub
-account, not write access to UFL_MODELS. From CAESAR:
+Install Git 2.38 or newer and GitHub CLI (`gh`). Choose one installation
+method below. The registration checker requires `git merge-tree --write-tree`.
+
+### Install with Conda
+
+Activate your CAESAR Conda environment, then install both tools:
+
+```sh
+conda install --channel conda-forge "git>=2.38" gh
+```
+
+Keep this environment active when running `gh` and `register_model.py`.
+
+### Install without Conda
+
+On Ubuntu/Debian:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git gh
+```
+
+On macOS with Homebrew:
+
+```sh
+brew install git gh
+```
+
+On Windows with WinGet:
+
+```powershell
+winget install --id Git.Git --source winget
+winget install --id GitHub.cli --source winget
+```
+
+Reopen your terminal after installation. Check `git --version` below; if your
+Linux distribution provides Git older than 2.38, use a newer package from the
+[Git installation options](https://git-scm.com/downloads). Additional `gh`
+installation methods are in the
+[GitHub CLI installation guide](https://github.com/cli/cli#installation).
+
+### Install on Linux HPC systems without sudo or Conda
+
+Use the official [GitHub CLI release archives](https://github.com/cli/cli/releases)
+to install `gh` in your home directory. Run this on a login or transfer node
+with internet access. This Bash example requires `curl`, Python 3, and `tar`:
+
+```bash
+# Select the archive for this machine.
+case "$(uname -m)" in
+  x86_64) GH_ARCH=amd64 ;;
+  aarch64|arm64) GH_ARCH=arm64 ;;
+  *) echo "Unsupported architecture; choose an archive from the releases page."; exit 1 ;;
+esac
+
+mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
+
+# Resolve the latest release tag (for example, vX.Y.Z).
+GH_TAG=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])')
+GH_VERSION=${GH_TAG#v}
+GH_DIR="$HOME/.local/opt/gh_${GH_VERSION}_linux_${GH_ARCH}"
+GH_ARCHIVE="$HOME/.local/opt/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"
+
+# Download the release archive, extract it, then link the exact version.
+if [ -n "$GH_VERSION" ] && \
+   curl -fL "https://github.com/cli/cli/releases/download/${GH_TAG}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" -o "$GH_ARCHIVE" && \
+   tar -xzf "$GH_ARCHIVE" -C "$HOME/.local/opt"; then
+  ln -sfn "$GH_DIR/bin/gh" "$HOME/.local/bin/gh"
+fi
+
+export PATH="$HOME/.local/bin:$PATH"
+gh --version
+```
+
+Add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` to keep this available
+in future Bash sessions. For batch jobs, export the same PATH in the job script.
+The exact versioned directory avoids ambiguous matches when several versions
+are installed. If the cluster cannot reach GitHub, download the matching archive
+on another machine and transfer it to `~/.local/opt` before extracting and linking.
+
+This installs GitHub CLI only. For model registration, also load a cluster Git
+module providing Git 2.38 or newer (use `module avail git` to find it), and check
+`git --version`.
+
+### Sign in and submit
+
+Verify the tools and sign in once:
+
+```sh
+git --version  # Must be 2.38 or newer.
+gh --version
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+gh auth status
+```
+
+Follow the browser prompts. On a remote machine, open the displayed URL on your
+local computer and enter the one-time code. Contributors need a GitHub account,
+not write access to UFL_MODELS. From CAESAR:
 
 ```sh
 python3 register_model.py add \
