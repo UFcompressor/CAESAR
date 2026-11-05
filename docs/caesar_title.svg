@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="120" viewBox="0 0 900 120" role="img" aria-labelledby="title">
+  <title id="title">CAESAR</title>
+  <text x="450" y="82" text-anchor="middle" font-family="JetBrains Mono, monospace" font-weight="800" font-size="64" fill="#E8500A">CAESAR</text>
+  <path d="M 405 102 H 495" stroke="#22884C" stroke-width="6" stroke-linecap="round"/>
+</svg>
