@@ -6,6 +6,7 @@ AOTI inference model.
 """
 
 import os
+from contextlib import nullcontext
 import numpy as np
 import torch
 import torch.nn as nn
@@ -31,13 +32,6 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
-# To disable diagnostics for a future run (editing does not affect a running job):
-# 1. Add an immediate `return` inside check_finite to skip tensor scans and GPU syncs.
-# 2. Replace both detect_anomaly contexts with set_detect_anomaly(False).
-# 3. In train_epoch_vae, remove the pre-forward RNG/buffer snapshots and the
-#    debug_backward_failure call in the exception handler; keep the final `raise`.
-#    These snapshots are only for reproducing a failure and add per-batch overhead.
-# Leave optimizer.step(), scheduler.step(), and the loss calculations unchanged.
 def check_finite(name, tensor, iteration, data_dict):
     """Stop at the first nonfinite tensor and report the affected batch."""
     with torch.no_grad():
@@ -129,14 +123,31 @@ def debug_backward_failure(
 
 
 def train_epoch_vae(
-    model, loader, optimizer, scheduler, criterion, loss_beta, device, iteration=0
+    model,
+    loader,
+    optimizer,
+    scheduler,
+    criterion,
+    loss_beta,
+    device,
+    iteration=0,
+    debug=False,
+    max_iterations=None,
 ):
     """Train the model for one epoch."""
     model.train()
     running_loss1 = torch.zeros((), device=device)
     running_loss2 = torch.zeros((), device=device)
 
+    sample_count = 0
+
+    def check(name, tensor, current_iteration, batch):
+        if debug:
+            check_finite(name, tensor, current_iteration, batch)
+
     for data_dict in loader:
+        if max_iterations is not None and iteration >= max_iterations:
+            break
         t0 = time.time()
         # inputs = data_dict["input"].to(device, non_blocking=True)
         inputs = (
@@ -146,67 +157,69 @@ def train_epoch_vae(
         )
         targets = inputs
 
-        check_finite("input", inputs, iteration + 1, data_dict)
-        check_finite(
-            "normalization offset", data_dict["offset"], iteration + 1, data_dict
-        )
-        check_finite(
-            "normalization scale", data_dict["scale"], iteration + 1, data_dict
-        )
+        check("input", inputs, iteration + 1, data_dict)
+        check("normalization offset", data_dict["offset"], iteration + 1, data_dict)
+        check("normalization scale", data_dict["scale"], iteration + 1, data_dict)
 
         optimizer.zero_grad(set_to_none=True)
 
-        rng_state = torch.get_rng_state()
-        cuda_rng_state = torch.cuda.get_rng_state_all()
-        buffers = {
-            name: buffer.detach().cpu().clone()
-            for name, buffer in model.named_buffers()
-        }
+        if debug:
+            rng_state = torch.get_rng_state()
+            cuda_rng_state = torch.cuda.get_rng_state_all()
+            buffers = {
+                name: buffer.detach().cpu().clone()
+                for name, buffer in model.named_buffers()
+            }
         try:
-            with torch.autograd.detect_anomaly(check_nan=True):
+            with (
+                torch.autograd.detect_anomaly(check_nan=True)
+                if debug
+                else nullcontext()
+            ):
                 results = model(inputs)
                 outputs = results["output"]
-                check_finite("model output", outputs, iteration + 1, data_dict)
-                check_finite("bpp", results["bpp"], iteration + 1, data_dict)
+                check("model output", outputs, iteration + 1, data_dict)
+                check("bpp", results["bpp"], iteration + 1, data_dict)
 
                 loss_mse = criterion(outputs, targets)
                 loss_bpp = results["bpp"].mean() * loss_beta
                 loss = (loss_mse + loss_bpp) if loss_beta > 0.0 else loss_mse
 
-                check_finite("MSE loss", loss_mse, iteration + 1, data_dict)
-                check_finite("entropy loss", loss_bpp, iteration + 1, data_dict)
+                check("MSE loss", loss_mse, iteration + 1, data_dict)
+                check("entropy loss", loss_bpp, iteration + 1, data_dict)
 
                 loss.backward()
-                for name, parameter in model.named_parameters():
+                for name, parameter in (model.named_parameters() if debug else ()):
                     if parameter.grad is not None:
-                        check_finite(
+                        check(
                             f"gradient: {name}",
                             parameter.grad,
                             iteration + 1,
                             data_dict,
                         )
         except RuntimeError:
-            try:
-                debug_backward_failure(
-                    model,
-                    inputs,
-                    data_dict,
-                    criterion,
-                    loss_beta,
-                    iteration + 1,
-                    rng_state,
-                    cuda_rng_state,
-                    buffers,
-                )
-            except Exception as debug_error:
-                print(
-                    f"[DEBUG] Failure diagnostics could not complete: {debug_error}",
-                    flush=True,
-                )
+            if debug:
+                try:
+                    debug_backward_failure(
+                        model,
+                        inputs,
+                        data_dict,
+                        criterion,
+                        loss_beta,
+                        iteration + 1,
+                        rng_state,
+                        cuda_rng_state,
+                        buffers,
+                    )
+                except Exception as debug_error:
+                    print(
+                        f"[DEBUG] Failure diagnostics could not complete: {debug_error}",
+                        flush=True,
+                    )
             raise
         optimizer.step()
-        for name, parameter in model.named_parameters():
-            check_finite(
+        for name, parameter in (model.named_parameters() if debug else ()):
+            check(
                 f"parameter after update: {name}", parameter, iteration + 1, data_dict
             )
         scheduler.step()
@@ -214,13 +227,15 @@ def train_epoch_vae(
         running_loss1 += loss_mse.detach() * inputs.size(0)
         running_loss2 += loss_bpp.detach() * inputs.size(0)
 
+        sample_count += inputs.size(0)
         iteration += 1
-        if iteration < 30:
-            torch.cuda.synchronize()
+        if debug and iteration < 30:
+            if device.type == "cuda":
+                torch.cuda.synchronize()
             print(f"[TIMING] iter {iteration}: {time.time() - t0:.3f}s", flush=True)
 
-    epoch_loss1 = (running_loss1 / len(loader.dataset)).item()
-    epoch_loss2 = (running_loss2 / len(loader.dataset)).item()
+    epoch_loss1 = (running_loss1 / sample_count).item()
+    epoch_loss2 = (running_loss2 / sample_count).item()
 
     return epoch_loss1, epoch_loss2, iteration
 
@@ -318,7 +333,10 @@ def get_argument():
         help="Path to save model and results",
     )
     parser.add_argument(
-        "--iterations", type=int, default=400, help="Number of epochs for training"
+        "--iterations",
+        type=int,
+        default=400,
+        help="Training optimizer steps in thousands (100 means 100,000 steps)",
     )
 
     parser.add_argument(
@@ -337,12 +355,28 @@ def get_argument():
     parser.add_argument("--model_dim", type=int, default=16, help="loss beta")
     parser.add_argument("--pretrain", type=str, default="", help="pretrain path")
 
-    # Datatset
+    parser.add_argument(
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable finite checks, anomaly detection, failure snapshots and timing (default: off)",
+    )
+
+    parser.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Opt into torch.compile training (default: eager, for backward compatibility)",
+    )
+
+    # Dataset
     parser.add_argument("--train_set", type=str, default="S3D")
     parser.add_argument("--test_set", type=str, default="E3SM_test")
     parser.add_argument("--config", type=str, default="./configs/config_vae3d.yaml")
 
     args = parser.parse_args()
+    if args.iterations <= 0:
+        parser.error("--iterations must be positive")
 
     return args
 
@@ -456,7 +490,9 @@ if __name__ == "__main__":
         print("Using a single GPU!")
 
     model = model.to(device)
-    model = torch.compile(model)
+    if args.compile:
+        model = torch.compile(model)
+    print(f"Training execution: {'compiled' if args.compile else 'eager'}")
     # Loss function and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -470,7 +506,7 @@ if __name__ == "__main__":
     loggers = {name: Info(name, 32, model_path, json_path) for name in test_names}
 
     cur_iters = 0
-    is_eval = np.zeros(100, dtype=bool)
+    evaluated_progress = set()
 
     print(
         f"Learning rate milestones: {[int(i/5*args.iterations) for i in range(1, 5)]}"
@@ -495,12 +531,14 @@ if __name__ == "__main__":
             beta,
             device,
             cur_iters,
+            debug=args.debug,
+            max_iterations=args.iterations,
         )
         train_loss = mse_loss + bbp_loss
 
-        eval_index = cur_iters // (args.iterations // 100)
-        if not is_eval[eval_index]:
-            is_eval[eval_index] = True
+        eval_index = min(100, cur_iters * 100 // args.iterations)
+        if eval_index not in evaluated_progress:
+            evaluated_progress.add(eval_index)
 
             for test_loader in test_loaders:
                 cur_dataset = test_loader.dataset

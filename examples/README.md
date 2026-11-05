@@ -91,3 +91,29 @@ CAESAR_MODEL_DIR="$PWD/exported_model" build/examples/hello_caesar lbrc
 
 See [the API guide](../docs/public_api.md)
 for correction methods, 5D variable selection, and CPU validation.
+
+### RE3200 training with held-out uy
+
+[config_re3200.yaml](config_re3200.yaml) uses your 1025³ BP5 file, training on
+`vort`, `critq`, `pp`, `ux`, and `uz`, and evaluating only `uy`. It selects the
+last ADIOS step (`[8, 9]`) for both subsets.
+
+```bash
+python -m pyCAESAR.train_vae3d \
+  --config examples/config_re3200.yaml \
+  --train_set re3200 --test_set re3200 \
+  --save_path snapshots/re3200 --batch_size 8 --iterations 100 \
+  --model_dim 16 --sr_dim 16 --no-debug
+```
+
+Debugging is off by default. Add `--debug` to enable finite-value checks,
+autograd anomaly detection, failure snapshots/replays, and initial batch timing;
+`--no-debug` explicitly disables them. `--iterations 100` means 100,000 optimizer
+steps. Training stops at that limit and includes evaluation at 100% progress.
+
+Training uses eager PyTorch execution by default. `--no-compile` explicitly
+selects this path; `--compile` opts into `torch.compile`. If compiled backward
+reports an invalid gradient shape, rerun with `--no-compile`.
+`--debug` controls diagnostics independently of compilation.
+Dataset entries inherit `n_frame` and other shared settings from `train_config`
+and `test_config`; they do not need their own `n_frame` entries.
