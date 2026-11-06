@@ -97,7 +97,7 @@ def select_model(catalog, requested=None):
     for model in catalog.get("retired_models", []):
         if requested in (model["name"], model["id"]):
             raise ValueError(
-                f"Required model {requested!r} is retired and no longer available"
+                f"Required model {requested!r} has been removed and is no longer available"
             )
     raise ValueError(f"Required model {requested!r} is not registered in this catalog")
 
@@ -302,11 +302,11 @@ def main():
             print(f"  Identity    : {model['id']}")
         retired = catalog.get("retired_models", [])
         if retired:
-            print("\nRetired CAESAR models — no longer available")
+            print("\nRemoved CAESAR models — registration history")
             for model in sorted(retired, key=lambda item: item["registration_id"]):
                 print(
                     f"  {model['registration_id']}  {model['name']}"
-                    "  — Retired (no longer available)"
+                    f"  — Removed ({model['filename']})"
                 )
         return
     model = select_model(catalog, args.model)

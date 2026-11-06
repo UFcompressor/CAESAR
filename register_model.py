@@ -112,6 +112,9 @@ def prepare(clone, args, login, user_id, database):
         )
     else:
         updated = checker.retire(catalog, args.name, args.default_model)
+        model = next(m for m in catalog["models"] if m["name"] == args.name)
+        filename = validate_model(model)["filename"]
+        run("git", "rm", "--", filename, cwd=clone)
     catalog_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
     readme.write_text(
         checker.render_readme(updated, readme.read_text(encoding="utf-8")),
@@ -255,7 +258,7 @@ def main():
     add.add_argument("--min-dims", type=int, default=3)
     add.add_argument("--max-dims", type=int, default=5)
     retire = commands.add_parser(
-        "remove", help="Open a pull request retiring your model"
+        "remove", help="Open a pull request removing your model and its checkpoint"
     )
     retire.add_argument("name")
     retire.add_argument("--default-model", help="Administrator only")

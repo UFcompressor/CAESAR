@@ -74,17 +74,19 @@ class ModelRegistryTests(unittest.TestCase):
         self.catalog["retired_models"] = [retired]
         catalog = registry.load_catalog(self.catalog_file())
         for requested in (retired["name"], retired["id"]):
-            with self.assertRaisesRegex(ValueError, "retired and no longer available"):
+            with self.assertRaisesRegex(
+                ValueError, "removed and is no longer available"
+            ):
                 registry.select_model(catalog, requested)
         output = io.StringIO()
         with patch("sys.argv", ["model_registry.py", "--list"]), patch.object(
             registry, "load_catalog", return_value=catalog
         ), patch("sys.stdout", output):
             registry.main()
-        active, history = output.getvalue().split("Retired CAESAR models")
+        active, history = output.getvalue().split("Removed CAESAR models")
         self.assertNotIn(retired["name"], active)
         self.assertIn(retired["name"], history)
-        self.assertIn("Retired (no longer available)", history)
+        self.assertIn(f"Removed ({retired['filename']})", history)
 
     def test_duplicate_registration_rejected(self):
         self.catalog["models"][1]["registration_id"] = self.model["registration_id"]
