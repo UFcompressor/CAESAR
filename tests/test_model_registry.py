@@ -74,7 +74,9 @@ class ModelRegistryTests(unittest.TestCase):
         self.catalog["retired_models"] = [retired]
         catalog = registry.load_catalog(self.catalog_file())
         for requested in (retired["name"], retired["id"]):
-            with self.assertRaisesRegex(ValueError, "removed and is no longer available"):
+            with self.assertRaisesRegex(
+                ValueError, "removed and is no longer available"
+            ):
                 registry.select_model(catalog, requested)
         output = io.StringIO()
         with patch("sys.argv", ["model_registry.py", "--list"]), patch.object(

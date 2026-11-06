@@ -192,18 +192,39 @@ class RemovalPreparationTests(unittest.TestCase):
             (root / "README.md").write_text("# Models\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test",
-                            "-c", "user.email=test@example.com", "commit", "-qm", "Initial"], check=True)
-            removed = dict(catalog, models=catalog["models"][1:], retired_models=[model])
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "-qm",
+                    "Initial",
+                ],
+                check=True,
+            )
+            removed = dict(
+                catalog, models=catalog["models"][1:], retired_models=[model]
+            )
             checker = Mock()
             checker.retire.return_value = removed
             checker.render_readme.side_effect = render_readme
-            args = SimpleNamespace(command="remove", name=model["name"], default_model=None)
+            args = SimpleNamespace(
+                command="remove", name=model["name"], default_model=None
+            )
             with patch.object(service, "load_checker", return_value=checker):
                 service.prepare(root, args, "Test", 123, service.DATABASE)
             self.assertFalse((root / model["filename"]).exists())
-            self.assertEqual(json.loads((root / "model_catalog.json").read_text()), removed)
-            changes = service.run("git", "diff", "HEAD~", "HEAD", "--name-status", cwd=root)
+            self.assertEqual(
+                json.loads((root / "model_catalog.json").read_text()), removed
+            )
+            changes = service.run(
+                "git", "diff", "HEAD~", "HEAD", "--name-status", cwd=root
+            )
             self.assertIn("D\t" + model["filename"], changes)
 
 
