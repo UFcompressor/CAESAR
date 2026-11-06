@@ -24,7 +24,7 @@ def model_list(catalog):
     ]
     for status, models in (
         ("Active", catalog["models"]),
-        ("Retired", catalog.get("retired_models", [])),
+        ("Removed", catalog.get("retired_models", [])),
     ):
         for model in sorted(models, key=lambda m: m["registration_id"]):
             state = status

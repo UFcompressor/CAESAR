@@ -170,13 +170,15 @@ which rebuilds the request on the updated database.
 python3 register_model.py remove my_model
 ```
 
-This opens a pull request moving the model to `retired_models`. Only the account
+This opens a pull request deleting the `.pt` checkpoint and moving the model to
+`retired_models` as registration history. Only the account
 with the recorded numeric owner ID, or an administrator, may retire a model.
 Usernames are displayed for people; stable IDs enforce ownership even after
 account renames. The initial registrations belong to database administrator
 E53klasky (GitHub ID `173562962`).
 
-Retirement keeps the checkpoint file, URL and identity and reserves the number,
+Removal deletes the checkpoint file from the current branch, preserves its catalog
+record under `retired_models`, and reserves the number,
 name, filename and hash. Older installations keep their snapshots; new snapshots
 exclude retired models. Only administrators can change the default:
 

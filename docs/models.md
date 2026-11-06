@@ -124,7 +124,8 @@ that ownership comes from the pull request author's stable account ID, that the
 checkpoint is a state_dict matching the CAESAR network, and that nothing else changed,
 then merges it automatically. Users may retire only their own models; administrator
 E53klasky may retire any model. Retirement preserves the full record and reserves its
-identity.
+identity. The checkpoint is deleted from the current branch; Git history retains
+older versions, so this does not shrink the full repository history.
 
 See [Automated model registration](model_registration.md) for commands, validation,
 one-time GitHub setup, admin rules, and consuming catalog updates. Local

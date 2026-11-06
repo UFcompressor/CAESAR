@@ -12,8 +12,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import zipfile
 
 import register_model as service
@@ -178,6 +179,32 @@ class PullRequestClientTests(unittest.TestCase):
 
 
 from catalog_fixture import make_catalog
+
+
+class RemovalPreparationTests(unittest.TestCase):
+    def test_removal_deletes_checkpoint_and_preserves_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = make_catalog()
+            model = catalog["models"][0]
+            (root / model["filename"]).write_bytes(b"checkpoint")
+            (root / "model_catalog.json").write_text(json.dumps(catalog))
+            (root / "README.md").write_text("# Models\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.com", "commit", "-qm", "Initial"], check=True)
+            removed = dict(catalog, models=catalog["models"][1:], retired_models=[model])
+            checker = Mock()
+            checker.retire.return_value = removed
+            checker.render_readme.side_effect = render_readme
+            args = SimpleNamespace(command="remove", name=model["name"], default_model=None)
+            with patch.object(service, "load_checker", return_value=checker):
+                service.prepare(root, args, "Test", 123, service.DATABASE)
+            self.assertFalse((root / model["filename"]).exists())
+            self.assertEqual(json.loads((root / "model_catalog.json").read_text()), removed)
+            changes = service.run("git", "diff", "HEAD~", "HEAD", "--name-status", cwd=root)
+            self.assertIn("D\t" + model["filename"], changes)
 
 
 class CatalogTests(unittest.TestCase):
