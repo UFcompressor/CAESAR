@@ -197,6 +197,12 @@ CompressionResult Compressor::compress(const CompressionConfig &config,
   get_model_metadata().require_dims(config.memory_data.dim());
   if (!config.memory_data.is_floating_point())
     throw std::invalid_argument("memory_data must be floating point");
+  if (!(config.memory_data.min().item<double>() >=
+            -std::numeric_limits<float>::max() &&
+        config.memory_data.max().item<double>() <=
+            std::numeric_limits<float>::max()))
+    throw std::invalid_argument("memory_data values must be finite and within "
+                                "float32 range (+/-3.4028235e38)");
   if (device_.is_mps() && config.memory_data.scalar_type() == torch::kFloat64)
     throw std::invalid_argument("MPS does not support double-precision input");
   caesar::correction_method_from_byte(static_cast<uint8_t>(correction_method));
