@@ -54,7 +54,7 @@
 - [ ] Evaluate federated learning after the distributed training work.
 - [ ] Investigate decompression performance, including the cost of nvCOMP decompression calls.
 - [ ] Find ways to further reduce LBRC memory use, which has improved substantially.
-- [ ] Add CMake-driven installation of nvCOMP 5.0.0.6 for NVIDIA CUDA builds
+- [x] Add CMake-driven installation of nvCOMP 5.0.0.6 for NVIDIA CUDA builds
   only; exclude AMD ROCm builds. Future work only; retain manual installation
   for now.
 - [ ] Clean up the commit history before merging future changes.

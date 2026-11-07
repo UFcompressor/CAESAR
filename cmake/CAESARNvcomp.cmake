@@ -1,0 +1,63 @@
+# NVIDIA distributes nvCOMP as a binary SDK, not a source dependency.
+set(NVCOMP_FOUND OFF)
+if(NOT CAESAR_HAS_CUDA_RANS)
+    return()
+endif()
+
+option(CAESAR_DOWNLOAD_NVCOMP "Download nvCOMP 5.0.0.6 if not installed" ON)
+set(CAESAR_NVCOMP_VERSION "5.0.0.6")
+
+function(caesar_check_nvcomp include_dir library result)
+    set(${result} OFF PARENT_SCOPE)
+    if(NOT EXISTS "${include_dir}/nvcomp/version.h" OR NOT EXISTS "${library}")
+        return()
+    endif()
+    file(READ "${include_dir}/nvcomp/version.h" version_header)
+    set(version_parts)
+    foreach(part MAJOR MINOR PATCH BUILD)
+        string(REGEX MATCH "#define[ \t]+NVCOMP_VER_${part}[ \t]+([0-9]+)" match "${version_header}")
+        if(NOT match)
+            return()
+        endif()
+        list(APPEND version_parts "${CMAKE_MATCH_1}")
+    endforeach()
+    list(JOIN version_parts "." version)
+    # Check the library too: stale cache entries can mix SDK installations.
+    get_filename_component(real_library "${library}" REALPATH)
+    get_filename_component(library_name "${real_library}" NAME)
+    if(version STREQUAL CAESAR_NVCOMP_VERSION AND
+       library_name STREQUAL "libnvcomp.so.${CAESAR_NVCOMP_VERSION}")
+        set(${result} ON PARENT_SCOPE)
+    endif()
+endfunction()
+
+find_path(NVCOMP_INCLUDE_DIR NAMES nvcomp/version.h)
+find_library(NVCOMP_LIBRARY NAMES nvcomp)
+caesar_check_nvcomp("${NVCOMP_INCLUDE_DIR}" "${NVCOMP_LIBRARY}" NVCOMP_FOUND)
+
+if(NOT NVCOMP_FOUND)
+    if(NOT CAESAR_DOWNLOAD_NVCOMP)
+        message(FATAL_ERROR "nvCOMP 5.0.0.6 not found. Set CMAKE_PREFIX_PATH to its SDK or enable CAESAR_DOWNLOAD_NVCOMP.")
+    endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+       NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$" OR
+       NOT CUDAToolkit_VERSION_MAJOR EQUAL 12)
+        message(FATAL_ERROR "Automatic nvCOMP 5.0.0.6 download requires Linux x86_64 and CUDA 12. Supply the matching SDK using CMAKE_PREFIX_PATH.")
+    endif()
+    include(FetchContent)
+    if(POLICY CMP0135)
+        cmake_policy(SET CMP0135 NEW)
+    endif()
+    message(STATUS "Downloading nvCOMP 5.0.0.6 (CUDA 12)")
+    FetchContent_Declare(caesar_nvcomp
+        URL https://developer.download.nvidia.com/compute/nvcomp/redist/nvcomp/linux-x86_64/nvcomp-linux-x86_64-5.0.0.6_cuda12-archive.tar.xz
+        URL_HASH SHA256=40ac1d5f8c0a2719f11b21a4d31b6050343607dffd1401d1fe9a154800b56e46)
+    FetchContent_MakeAvailable(caesar_nvcomp)
+    set(NVCOMP_INCLUDE_DIR "${caesar_nvcomp_SOURCE_DIR}/include" CACHE PATH "nvCOMP headers" FORCE)
+    set(NVCOMP_LIBRARY "${caesar_nvcomp_SOURCE_DIR}/lib/libnvcomp.so.5.0.0.6" CACHE FILEPATH "nvCOMP library" FORCE)
+    caesar_check_nvcomp("${NVCOMP_INCLUDE_DIR}" "${NVCOMP_LIBRARY}" NVCOMP_FOUND)
+    if(NOT NVCOMP_FOUND)
+        message(FATAL_ERROR "Downloaded SDK is not nvCOMP 5.0.0.6")
+    endif()
+endif()
+message(STATUS "Using nvCOMP ${CAESAR_NVCOMP_VERSION}: ${NVCOMP_LIBRARY}")

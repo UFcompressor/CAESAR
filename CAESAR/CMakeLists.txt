@@ -39,21 +39,6 @@ else()
     message(STATUS "GPU Support Disabled (Using CPU Only)")
 endif()
 
-set(NVCOMP_FOUND OFF)
-
-
-if(USE_CUDA)
-    message(STATUS "Checking for nvcomp (NVIDIA specific)...")
-
-    find_path(NVCOMP_INCLUDE_DIR NAMES nvcomp.h nvcomp/nvcomp.h)
-    find_library(NVCOMP_LIBRARY NAMES nvcomp)
-
-    if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIBRARY)
-        set(NVCOMP_FOUND TRUE)
-        message(STATUS ">>> Found nvcomp: ${NVCOMP_LIBRARY}")
-    endif()
-endif()
-
 set(CAESAR_SRC
     CAESAR.cpp
     dataset/dataset.cpp

@@ -6,6 +6,7 @@ install/
 *.so
 *.a
 *.cmake
+!cmake/CAESARNvcomp.cmake
 CMakeFiles/
 CMakeCache.txt
 Makefile

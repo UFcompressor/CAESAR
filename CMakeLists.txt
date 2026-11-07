@@ -35,6 +35,7 @@ if(TARGET torch_cuda AND NOT TARGET torch_hip AND NOT HIP_FOUND AND NOT USE_ROCM
     set(CAESAR_HAS_CUDA_RANS ON)
 endif()
 
+include(cmake/CAESARNvcomp.cmake)
 add_subdirectory(CAESAR)
 
 option(BUILD_TESTS "Build CAESAR test files" OFF)
