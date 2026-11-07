@@ -10,7 +10,8 @@ int main() {
     // Exercise both a single chunk and CAESAR's multi-chunk frame.
     std::vector<torch::Tensor> inputs;
     for (int64_t bytes : {int64_t(4096), int64_t(200000)})
-      inputs.push_back(torch::randint(0, 256, {bytes},
+      inputs.push_back(torch::randint(
+          0, 256, {bytes},
           torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCUDA)));
     auto compressed = nvcomp_batch_compress(inputs);
     std::vector<const uint8_t *> pointers;
@@ -24,10 +25,12 @@ int main() {
     for (size_t i = 0; i < inputs.size(); ++i) {
       auto original = inputs[i].cpu();
       if (decoded[i].size() != raw_sizes[i] ||
-          !std::equal(decoded[i].begin(), decoded[i].end(), original.data_ptr<uint8_t>()))
+          !std::equal(decoded[i].begin(), decoded[i].end(),
+                      original.data_ptr<uint8_t>()))
         throw std::runtime_error("nvCOMP round-trip mismatch");
     }
-    std::cout << "PASS: nvCOMP Zstd GPU round trips (single and multiple chunks)\n";
+    std::cout
+        << "PASS: nvCOMP Zstd GPU round trips (single and multiple chunks)\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << "FAIL: " << error.what() << '\n';
