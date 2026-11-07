@@ -314,7 +314,7 @@ For a runnable C++ example, configure with `-DBUILD_EXAMPLES=ON`, build, and run
 
 ## GPU Support (NVIDIA)
 
-GPU support requires CUDA and nvCOMP.
+NVIDIA GPU builds use nvCOMP **5.0.0.6**. CMake reuses an exact matching SDK or downloads the checksum-verified NVIDIA CUDA 12 binary SDK into the build directory. Automatic downloads support Linux x86_64 with CUDA 12; CPU and ROCm builds do not download nvCOMP. Set `-DCAESAR_DOWNLOAD_NVCOMP=OFF` to require a local SDK (provided through `CMAKE_PREFIX_PATH`). nvCOMP is distributed prebuilt, so no source compilation is needed.
 
 <details>
 <summary>Install nvCOMP</summary>
@@ -344,14 +344,22 @@ GPU_ARCH=$(python -c 'import torch; a,b=torch.cuda.get_device_capability(); prin
 # Run from the repository root; target the current NVIDIA GPU architecture.
 cmake -S . -B build \
   -DCMAKE_CUDA_ARCHITECTURES="$GPU_ARCH" \
-  -DCMAKE_PREFIX_PATH="$TORCH_PATH;$HOME/local/nvcomp" \
-  -DCMAKE_CXX_FLAGS="-I$HOME/local/nvcomp/include" \
-  -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/local/nvcomp/lib" \
+  -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
   -DBUILD_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
 cmake --build build -j6
 ```
+
+Quick nvCOMP verification (requires CUDA LibTorch, the CUDA 12 toolkit, and an NVIDIA GPU; the normal configure also requires the registered model installation described above):
+
+```bash
+# Configure with BUILD_TESTS=ON as above. Look for "Using nvCOMP 5.0.0.6".
+cmake --build build --target test_nvcomp -j2
+./build/tests/test_nvcomp
+```
+
+The test requires no model inference and checks exact byte recovery for single-chunk and multi-chunk Zstd GPU compression. It exits nonzero on failure. For offline builds, keep the local SDK and pass its prefix with `-DCMAKE_PREFIX_PATH="$TORCH_PATH;$HOME/local/nvcomp"`.
 
 </details>
 
