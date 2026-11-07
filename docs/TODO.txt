@@ -34,8 +34,8 @@
 - The 11 model-registry tests and existing CPU unit binaries returned success;
   see docs/public_api.md for details and Release-build assertion limitations.
 - External ADIOS2 integration is complete, as confirmed by the maintainer.
-  GPU testing, GPU-to-CPU portability, and NGLR full-pipeline validation
-  remain pending; CPU results do not establish a general error-bound guarantee.
+  GPU testing and GPU-to-CPU portability remain pending; CPU results do not
+  establish a general error-bound guarantee.
 
 ## Serialization implemented
 
@@ -54,16 +54,8 @@
 - [ ] Evaluate federated learning after the distributed training work.
 - [ ] Investigate decompression performance, including the cost of nvCOMP decompression calls.
 - [ ] Find ways to further reduce LBRC memory use, which has improved substantially.
-- [x] Add CMake-driven installation of nvCOMP 5.0.0.6 for NVIDIA CUDA builds
-  only; exclude AMD ROCm builds. Future work only; retain manual installation
-  for now.
-- [ ] Clean up the commit history before merging future changes.
-- [ ] Validate input before casting to float32. Reject non-finite inputs and
-  finite values outside float32's finite range (approximately +/-3.4028235e38)
-  with a clear error before conversion; large float64 values can become infinity.
-  Also investigate tiny values becoming zero and precision loss within range.
+- [ ] Investigate tiny values becoming zero and precision loss within float32 range.
   Evaluate conversion error against the original input and requested error
   target, since checking only the converted float32 data hides casting error.
-  Add focused boundary and float64 regression tests when implementing this.
 
 These are plans and known issues, not requirements for unrelated changes currently in progress.
