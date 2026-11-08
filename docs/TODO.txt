@@ -1,5 +1,20 @@
 # Current limitations and development plans
 
+## Platform validation status
+
+- GAE and LBRC are extensively tested on Linux CPU and Linux NVIDIA CUDA in
+  normal supported configurations. NGLR has limited validation and may encounter
+  issues. This does not guarantee requested NRMSE for every input.
+- CPU builds and GAE/LBRC tests are included in Linux/macOS/Windows CI; Windows
+  skips test_model_cache and uses Release, which disables assertion-based checks.
+  NGLR end-to-end accuracy is not established by these CI jobs.
+- AMD ROCm GAE has preliminary validation; LBRC is Testing in progress; NGLR
+  is insufficiently validated. MPS is experimental, with GAE demonstrated only
+  for selected, less stringent targets. XPU and Windows GPU are not verified.
+- See docs/platform_support.md for the full matrix, CI scope, Windows build,
+  and AMD LBRC evidence template. Defer SoftwareX platform changes until AMD
+  LBRC evidence is reviewed.
+
 ## Known behavior to preserve and investigate
 
 - GPU compression followed by CPU decompression can produce garbled output. The
@@ -34,8 +49,8 @@
 - The 11 model-registry tests and existing CPU unit binaries returned success;
   see docs/public_api.md for details and Release-build assertion limitations.
 - External ADIOS2 integration is complete, as confirmed by the maintainer.
-  GPU testing and GPU-to-CPU portability remain pending; CPU results do not
-  establish a general error-bound guarantee.
+  Additional GPU validation and GPU-to-CPU portability remain pending; CPU
+  results do not establish a general error-bound guarantee.
 
 ## Serialization implemented
 

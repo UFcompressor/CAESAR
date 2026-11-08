@@ -16,6 +16,7 @@ compression interfaces, result fields, and the implemented version-1 buffer and 
 | `tests/` | Python and C++ checks. C++ test targets are registered in `tests/CMakeLists.txt`. |
 | `examples/` | Small integration examples. |
 | `docs/models.md` | Current model installation and identity details. Review it when changing model artifacts. |
+| `docs/platform_support.md` | Platform/method validation matrix, CPU CI scope, and Windows build procedure.                        |
 | `docs/TODO.txt` | Known limitations and planned work. |
 
 ## How the pieces fit together
@@ -51,8 +52,11 @@ new process so that cached runners and tables stay consistent.
 - **Numerical validation:** A requested error bound is a target to measure.
   Filtering and possibly padding can make actual error exceed it. Check the
   reconstructed data when changing these paths.
-- **Platform support:** Local CPU tests do not establish GPU or cross-platform
-  behavior. Apple GPU double-precision data is unsupported in this path.
+- **Platform support:** GAE/LBRC have extensive Linux CPU and NVIDIA testing.
+  Local CPU tests do not establish GPU or cross-platform behavior. ROCm GAE has
+  preliminary validation; ROCm LBRC testing is in progress. MPS is experimental
+  (float64 unsupported); XPU and Windows GPU execution are unverified. See the
+  [platform matrix](platform_support.md) for evidence and CI limitations.
 - **ADIOS integration:** Preserve the information needed to identify the model
   and decode a buffer. Use the implemented `caesar::serialize` and
   `caesar::deserialize` API rather than duplicating the result field layout.

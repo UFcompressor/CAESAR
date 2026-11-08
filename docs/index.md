@@ -12,6 +12,7 @@ compression, local reconstruction, correction, metadata, and decompression.
 :maxdepth: 2
 
 codebase
+platform_support
 architecture
 public_api
 adios_serialization
