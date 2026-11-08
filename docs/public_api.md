@@ -22,7 +22,10 @@ auto restored = decompressor.decompress(compressed);
 GAE is the default correction method. `LBRC` and `NGLR` are alternatives;
 `config.nglr_options` controls NGLR correction training. Requested relative error
 bounds remain targets to validate on the actual data, not unconditional guarantees.
-See [known limitations](TODO.txt) and [NGLR](nglr.md).
+GAE and LBRC are extensively tested on Linux CPU and Linux NVIDIA CUDA. NGLR
+has more limited validation and may encounter issues. Other backends have
+method-specific testing status; see the [platform matrix](platform_support.md),
+[known limitations](TODO.txt), and [NGLR](nglr.md).
 
 ## Shapes and ownership
 
@@ -54,6 +57,8 @@ training batch option does not change foundation-model inference batching.
 
 Constructors infer the device from the installed model. They optionally accept an
 exact required model identity string, but no device or batch-size argument.
+The compiled artifacts must target the intended backend; runtime availability
+cannot make an installation compiled for a different backend compatible.
 `CompressionResult` stores `model_id`, `n_frame`, correction method, original
 shape, conversion metadata, encoded streams, and correction payloads.
 Decompression checks that the installed model matches the result's identity

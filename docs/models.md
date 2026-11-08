@@ -8,6 +8,11 @@ newer optimized release and remains the default. eelsM1 (registration 3) is a
 domain fine-tune trained and tested on one EELS dataset. microscopy (registration
 4) is a domain-specific model trained and tested across four microscopy datasets.
 
+Model training has been tested on NVIDIA GPUs only, according to the maintainer.
+Training has not been tested on CPU, AMD GPUs, Apple MPS, Intel XPU, or any other
+backend. This is separate from model export and compression/decompression
+validation; see [training and platform testing scope](platform_support.md).
+
 ## Download and compile
 
 ```sh
@@ -20,6 +25,11 @@ The shell wrapper `compile_model.sh` invokes the compilation command.
 The Python entrypoints also work on Windows. Use the same Python environment that
 contains torch and CAESAR's dependencies. Choose `cpu`, `cuda` (including ROCm),
 `mps`, or `xpu`; the backend must support AOTI compilation on your platform.
+These export choices do not establish equal platform or correction-method
+validation. GAE/LBRC are extensively tested on Linux CPU and NVIDIA CUDA;
+ROCm GAE has preliminary validation and **ROCm LBRC testing is in progress**.
+MPS is experimental and XPU end-to-end execution is unverified. See the
+[platform matrix and Windows CPU procedure](platform_support.md).
 
 For offline use with a local UFL_MODELS checkout, set the catalog path for
 downloading, compilation, and CMake validation:
@@ -156,7 +166,11 @@ One compiled installation is selected per process. Set `CAESAR_MODEL_DIR` before
 first use; restart the process to switch installations. Missing files in an
 explicit directory fail rather than falling back to another installation. All
 artifacts are loaded from the metadata's directory, never combined across paths.
-The runtime device must match the compilation target and be available.
+The runtime device must match the compilation target and be available. Runtime
+accelerator selection cannot retarget compiled artifacts; the CLI provides no
+device override. Export for the intended backend with its appropriate PyTorch
+build, then use that matching installation. Backend availability alone does not
+validate correction methods or achieved NRMSE.
 
 ### Runtime cache lifetime and clearing
 

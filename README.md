@@ -10,8 +10,8 @@ _A C++ / LibTorch foundation model for efficient compression of scientific data_
 ![C++](https://img.shields.io/badge/C++-17-E8500A)
 ![LibTorch](https://img.shields.io/badge/LibTorch-2.8%2B-1B4FA8)
 ![zstd](https://img.shields.io/badge/zstd-1.5%2B-E8500A)
-![GPU](https://img.shields.io/badge/GPU-NVIDIA%20CUDA%20%7C%20AMD%20ROCm%20%7C%20Apple%20Silicon-1B4FA8)
-[![License](https://img.shields.io/badge/license-Apache--2.0-1B4FA8)](https://github.com/UFcomrpessor/CAESAR/tree/master#Apache-2.0-1-ov-file)
+[![GPU validation](https://img.shields.io/badge/GPU-validation%20varies%20by%20backend-1B4FA8)](docs/platform_support.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1B4FA8)](LICENSE)
 
 </div>
 
@@ -27,7 +27,18 @@ is connected to a Read the Docs project.
 
 It encodes data into a compact latent space and uses learned priors for information-rich representation. This repository ports CAESAR into **C++ with LibTorch** for deployment in high-performance computing (HPC) environments and scientific workflows.
 
-CAESAR runs on CPU by default, and supports GPU acceleration on both NVIDIA (CUDA) and Apple Silicon (Metal / MPS) platforms.
+GAE and LBRC are extensively tested on Linux CPU and Linux NVIDIA CUDA,
+which is the primary GPU deployment platform. CPU builds and GAE/LBRC tests
+are included in Linux, macOS, and Windows CI. NGLR has more limited validation.
+AMD ROCm has preliminary GAE validation; **LBRC testing is in progress**.
+Apple MPS is experimental, Intel XPU is unverified, and Windows GPU execution
+has not been verified. See the [platform compatibility matrix](docs/platform_support.md)
+for method-specific confidence, CI scope, and known limitations.
+
+Model training has been tested on **NVIDIA GPUs only**, as reported by the
+maintainer. Training has not been tested on CPU, AMD GPUs, Apple MPS, Intel XPU,
+or any other backend. Training validation is separate from the compression and
+decompression testing summarized above.
 
 > **Reference:** Shaw et al., _CAESAR: A Unified Framework of Foundation and Generative Models for Efficient Compression of Scientific Data_
 
@@ -117,7 +128,7 @@ used by the CAESAR model and training configuration code.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake g++ zstd libzstd-dev
+sudo apt-get install -y cmake g++ zstd libzstd-dev libomp-dev
 
 # Verify that the installed GCC version is 9 or newer.
 g++ --version
@@ -129,11 +140,13 @@ grep -v "^torch" requirements.txt | \
   grep -v "^--extra-index-url" | \
   grep -v "^cupy" | \
   grep -v "^nvidia" | \
+  grep -v "^compressai" | \
   grep -v "^$" > temp_requirements.txt
 
+pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/cpu
 pip install --no-cache-dir -r temp_requirements.txt
-pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6
+pip install "pybind11>=2.6.0"
+pip install --no-build-isolation compressai==1.2.6
 rm temp_requirements.txt
 ```
 
@@ -143,7 +156,7 @@ rm temp_requirements.txt
 <summary>macOS</summary>
 
 ```bash
-brew install cmake zstd gcc
+brew install cmake zstd gcc libomp
 
 source venv/bin/activate
 
@@ -152,53 +165,35 @@ grep -v "^torch" requirements.txt | \
   grep -v "^--extra-index-url" | \
   grep -v "^cupy" | \
   grep -v "^nvidia" | \
+  grep -v "^compressai" | \
   grep -v "^$" > temp_requirements.txt
 
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
 pip install -r temp_requirements.txt
-pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6 
+pip install "pybind11>=2.6.0"
+CC=clang CXX=clang++ pip install --no-build-isolation compressai==1.2.6
 rm temp_requirements.txt
 ```
 
-> On Apple Silicon (M1/M2/M3/M4), the standard CPU wheel above also enables the Metal Performance Shaders (MPS) backend for CPU-only use, but MPS acceleration for this project has only been verified on the nightly build. To enable MPS, install the nightly build instead of the pinned CPU wheel above:
->
-> ```bash
-> pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
-> ```
->
-> This project has been verified on Apple Silicon (M1) with at least the following versions:
->
-> | Package     | Minimum Version Verified |
-> | ----------- | ------------------------- |
-> | torch       | 2.14.0.dev20260702         |
-> | torchvision | 0.29.0.dev20260702         |
-> | torchaudio  | 2.11.0                     |
->
-> Check your installed versions with:
->
-> ```bash
-> python3 -c "import torch, torchvision, torchaudio; print('torch:', torch.__version__); print('torchvision:', torchvision.__version__); print('torchaudio:', torchaudio.__version__)"
-> ```
->
-> See [GPU Support (Apple Silicon)](#gpu-support-apple-silicon) below to build with MPS acceleration enabled.
+> Apple MPS is experimental. GAE has worked for selected, less stringent
+> error targets; stringent targets, LBRC, and NGLR remain insufficiently validated.
+> Compatibility depends on the PyTorch version, AOTI export, and available MPS
+> operations. Earlier instructions recorded an M1 trial with torch
+> `2.14.0.dev20260702`, torchvision `0.29.0.dev20260702`, and torchaudio `2.11.0`;
+> these are trial versions, not minimum compatibility guarantees. CPU CI uses
+> torch `2.8.0` and does not establish MPS reliability. See
+> [Apple GPU guidance](#gpu-support-apple-silicon).
 
 </details>
 
 <details>
 <summary>Windows</summary>
 
-```powershell
-# Install CMake, zstd, and a recent MSVC toolchain (Visual Studio Build Tools) first
-
-venv\Scripts\activate
-
-findstr /v /b "torch torchvision --extra-index-url cupy nvidia" requirements.txt > temp_requirements.txt
-
-pip install --no-cache-dir -r temp_requirements.txt
-pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install compressai==1.2.6 
-del temp_requirements.txt
-```
+Windows uses a separate **Miniconda / Python 3.10 / MSVC / CPU PyTorch**
+procedure. Follow the [Windows CI installation procedure](docs/platform_support.md#windows-cpu-installation)
+for the exact dependency filtering, CompressAI wheel workarounds, MSVC model
+export, and NMake build. The POSIX virtual-environment and `make` commands on
+this page are for Linux/macOS. Windows GPU execution is not verified.
 
 </details>
 
@@ -235,6 +230,11 @@ cmake .. \
 make -j6
 cd ..
 ```
+
+On macOS, use the explicit Homebrew OpenMP CMake flags in the
+[cross-platform workflow](.github/workflows/cross-platform-test.yml); the CI
+also sets `DYLD_LIBRARY_PATH` to the Homebrew libomp directory and
+`OMP_NUM_THREADS=1` when running tests.
 
 For debug builds, replace `-DCMAKE_BUILD_TYPE=Release` with `-DCMAKE_BUILD_TYPE=Debug`.
 
@@ -314,6 +314,10 @@ For a runnable C++ example, configure with `-DBUILD_EXAMPLES=ON`, build, and run
 
 ## GPU Support (NVIDIA)
 
+Linux NVIDIA CUDA is the primary, extensively tested GPU configuration for GAE
+and LBRC; NGLR has limited validation. Export the model with
+`python3 compile_model.py cuda` before configuring the build.
+
 NVIDIA GPU builds use nvCOMP **5.0.0.6**. CMake reuses an exact matching SDK or downloads the checksum-verified NVIDIA CUDA 12 binary SDK into the build directory. Automatic downloads support Linux x86_64 with CUDA 12; CPU and ROCm builds do not download nvCOMP. Set `-DCAESAR_DOWNLOAD_NVCOMP=OFF` to require a local SDK (provided through `CMAKE_PREFIX_PATH`). nvCOMP is distributed prebuilt, so no source compilation is needed.
 
 <details>
@@ -367,14 +371,18 @@ The test requires no model inference and checks exact byte recovery for single-c
 
 ## GPU Support (Apple Silicon)
 
-CAESAR supports GPU acceleration on Apple Silicon (M1/M2/M3/M4) through PyTorch's Metal Performance Shaders (MPS) backend. No additional compression library equivalent to nvCOMP is required for this path.
+Apple Silicon MPS is an experimental accelerator path. GAE has worked for
+selected, less stringent NRMSE targets. More stringent targets and other correction
+methods have not been sufficiently validated. Float64 input is unsupported.
+This path uses CPU entropy coding and does not use nvCOMP. See the
+[platform matrix](docs/platform_support.md).
 
 <details>
 <summary>Requirements</summary>
 
 - Apple Silicon Mac (M1 or newer)
-- LibTorch build with MPS support (the standard macOS LibTorch distribution includes this)
-- torch >= 2.14.0.dev20260702, torchvision >= 0.29.0.dev20260702, torchaudio >= 2.11.0 (nightly build; see installation note above)
+- A PyTorch/LibTorch build whose MPS operations and AOTI export work for the selected model
+- Matching model artifacts exported for `mps`; a version number alone does not establish compatibility
 
 </details>
 
@@ -382,16 +390,18 @@ CAESAR supports GPU acceleration on Apple Silicon (M1/M2/M3/M4) through PyTorch'
 <summary>Build with MPS support</summary>
 
 ```bash
+# Run from the repository root with an MPS-compatible PyTorch environment.
 source venv/bin/activate
+python3 compile_model.py mps
 
 TORCH_PATH=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
 
-cmake .. \
+cmake -S . -B build \
   -DCMAKE_PREFIX_PATH="$TORCH_PATH" \
   -DBUILD_TESTS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
-make -j6
+cmake --build build --parallel 6
 ```
 
 Verify that MPS is available before running:
@@ -400,7 +410,13 @@ Verify that MPS is available before running:
 python3 -c "import torch; print(torch.backends.mps.is_available())"
 ```
 
-At runtime, select the MPS device the same way you would select `cuda` on NVIDIA systems (refer to the relevant CLI flag or configuration option for device selection).
+Use the Homebrew OpenMP configuration described in the CPU build instructions.
+Export for the intended device before building: `python3 compile_model.py mps`.
+Use `cpu` for CPU execution or `cuda` for CUDA/ROCm export with the appropriate
+PyTorch build. The runtime derives its device from the compiled installation;
+there is no runtime CLI device override. A positive availability check alone
+does not establish successful export or an accurate round trip. See
+[model device constraints](docs/models.md#download-and-compile).
 
 </details>
 
@@ -428,7 +444,7 @@ export CAESAR_MODEL_DIR=/path/to/your/models
 | -------------------------- | --------------- |
 | GCC (when using GCC)       | 9 (C++17)       |
 | LibTorch (PyTorch C++ API) | 2.8             |
-| CMake                      | 3.10            |
+| CMake                      | 3.18            |
 | Zstandard (zstd)           | 1.5 (required)  |
 | Python                     | 3.10            |
 | PyYAML                     | 6.0             |
@@ -465,7 +481,7 @@ If you use CAESAR in your research, please cite the following works:
 
 ## Contact
 
-For questions, bug reports, or contributions, please open an issue on [GitHub](https://github.com/UFcomrpessor/CAESAR/issues).
+For questions, bug reports, or contributions, please open an issue on [GitHub](https://github.com/UFcompressor/CAESAR/issues).
 
 ---
 
