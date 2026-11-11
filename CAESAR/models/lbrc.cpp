@@ -696,7 +696,7 @@ static void compress_gpu(const torch::Tensor &original,
   for (auto &blk : blocks)
     blk.streams.clear();
 
-  int zstd_level = 21;
+  int zstd_level = 3;
   if (workers <= 0)
     workers = get_allocated_cores();
 

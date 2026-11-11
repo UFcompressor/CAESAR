@@ -164,17 +164,16 @@ same time, GitHub refuses to merge the second if both edit the same catalog line
 as any two registrations or retirements do; its author reruns `register_model.py`,
 which rebuilds the request on the updated database.
 
-## Remove your model
+## Remove a model (E53klasky only)
 
 ```sh
 python3 register_model.py remove my_model
 ```
 
 This opens a pull request deleting the `.pt` checkpoint and moving the model to
-`retired_models` as registration history. Only the account
-with the recorded numeric owner ID, or an administrator, may retire a model.
-Usernames are displayed for people; stable IDs enforce ownership even after
-account renames. The initial registrations belong to database administrator
+`retired_models` as registration history. Only GitHub ID `173562962` (E53klasky) may retire a model. Model ownership
+and other administrator accounts do not grant removal rights. The trusted
+workflow checks that stable numeric ID, including after account renames. The initial registrations belong to database administrator
 E53klasky (GitHub ID `173562962`).
 
 Removal deletes the checkpoint file from the current branch, preserves its catalog
@@ -186,8 +185,9 @@ exclude retired models. Only administrators can change the default:
 python3 register_model.py remove caesar_v2 --default-model caesar_v1
 ```
 
-The local check stops requests the workflow would reject. `--skip-local-check`
-submits them anyway, to test the workflow's own rejection.
+The client rejects removal by anyone else before preparing a branch, including
+with `--skip-local-check`. The UFL_MODELS workflow independently enforces this
+restriction against the pull request author.
 
 ## Repository settings (administrator, once)
 

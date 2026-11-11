@@ -1,6 +1,7 @@
 """Export one verified checkpoint into a complete CAESAR installation."""
 
 import argparse
+import json
 import os
 import platform
 from pathlib import Path
@@ -9,7 +10,13 @@ import subprocess
 import sys
 import tempfile
 
-from model_registry import COMPONENTS, read_selection, write_installation
+from model_registry import (
+    COMPONENTS,
+    atomic_json,
+    read_selection,
+    selection_catalog,
+    write_installation,
+)
 
 
 def compilation_device_name(device):
@@ -61,15 +68,22 @@ def compile_installation(device, selection, output):
                 CAESAR_EXPORT_DIR=str(stage),
             )
             # Freeze selection for all three subprocesses, even if another download occurs.
-            from model_registry import atomic_json
-
             frozen = Path(temporary) / "checkpoint"
             frozen.mkdir()
             _, checkpoint = read_selection(selection)
             shutil.copyfile(checkpoint, frozen / model["filename"])
-            atomic_json(
-                frozen / "selected_model.json", {"schema_version": 1, "model": model}
+            catalog = selection_catalog(
+                json.loads(selection.read_text(encoding="utf-8"))
             )
+            atomic_json(
+                frozen / "selected_model.json",
+                {
+                    "schema_version": 1,
+                    "model": model,
+                    "catalog": catalog,
+                },
+            )
+            atomic_json(stage / "model_catalog.json", catalog)
             env["CAESAR_MODEL_SELECTION"] = str(frozen / "selected_model.json")
             for component in COMPONENTS:
                 script = Path(__file__).with_name(
