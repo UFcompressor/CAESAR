@@ -161,17 +161,10 @@ class PullRequestClientTests(unittest.TestCase):
         self.assertFalse(github.named("gh", "pr", "create"))
         self.assertIn("Updated pull request https://x/pull/7", output)
 
-    def test_local_check_stops_requests_the_workflow_would_reject(self):
-        with self.assertRaisesRegex(
-            ValueError, "local check failed.*Only the model owner"
-        ):
-            self.main("remove", "eelsM1")
-        github, output = self.main("remove", "eelsM1", "--skip-local-check")
-        self.assertIn("submitting anyway", output)
-        (create,) = github.named("gh", "pr", "create")
-        self.assertEqual(
-            create[create.index("--title") + 1], "[model-registry] retire: eelsM1"
-        )
+    def test_non_admin_cannot_remove_even_with_skip_local_check(self):
+        for flags in ((), ("--skip-local-check",)):
+            with self.assertRaisesRegex(ValueError, "Only E53klasky"):
+                self.main("remove", "eelsM1", *flags)
 
     def test_names_cannot_inject_git_or_shell_syntax(self):
         with self.assertRaisesRegex(ValueError, "letters, digits"):
@@ -217,7 +210,7 @@ class RemovalPreparationTests(unittest.TestCase):
                 command="remove", name=model["name"], default_model=None
             )
             with patch.object(service, "load_checker", return_value=checker):
-                service.prepare(root, args, "Test", 123, service.DATABASE)
+                service.prepare(root, args, "RenamedAdmin", 173562962, service.DATABASE)
             self.assertFalse((root / model["filename"]).exists())
             self.assertEqual(
                 json.loads((root / "model_catalog.json").read_text()), removed

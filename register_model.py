@@ -22,6 +22,7 @@ from model_registry import validate_model
 from registry_catalog import render_readme
 
 DATABASE = "UFcompressor/UFL_MODELS"
+MODEL_REMOVAL_ADMIN_ID = 173562962
 LOGIN = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
 
 
@@ -74,6 +75,9 @@ def prepare(clone, args, login, user_id, database):
     commit becomes part of UFL_MODELS and the URL stays valid.
     """
     checker = load_checker(clone)
+    if args.command == "remove":
+        if user_id != MODEL_REMOVAL_ADMIN_ID:
+            raise ValueError("Only E53klasky (GitHub ID 173562962) may retire a model")
     identity = [
         "-c",
         f"user.name={login}",
@@ -258,7 +262,7 @@ def main():
     add.add_argument("--min-dims", type=int, default=3)
     add.add_argument("--max-dims", type=int, default=5)
     retire = commands.add_parser(
-        "remove", help="Open a pull request removing your model and its checkpoint"
+        "remove", help="Administrator only: remove a model and its checkpoint"
     )
     retire.add_argument("name")
     retire.add_argument("--default-model", help="Administrator only")

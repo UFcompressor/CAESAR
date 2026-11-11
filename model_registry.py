@@ -66,6 +66,11 @@ def load_catalog(path=None):
             catalog = json.load(response)
     else:
         catalog = json.loads(Path(path).read_text(encoding="utf-8"))
+    return validate_catalog(catalog)
+
+
+def validate_catalog(catalog):
+    """Validate either an upstream catalog or a saved download snapshot."""
     if catalog["schema_version"] != 1:
         raise ValueError("Unsupported model catalog schema")
     names, identities, numbers, hashes = set(), set(), set(), set()
@@ -124,7 +129,10 @@ def atomic_json(path, data):
             os.unlink(temporary)
 
 
-def download(model, destination, source_dir=None):
+def download(model, destination, source_dir=None, catalog=None):
+    catalog = validate_catalog(catalog) if catalog is not None else load_catalog()
+    if select_model(catalog, model["id"]) != model:
+        raise ValueError("Selection does not match its registered UFL catalog entry")
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / model["filename"]
@@ -147,7 +155,8 @@ def download(model, destination, source_dir=None):
             if os.path.exists(temporary):
                 os.unlink(temporary)
     atomic_json(
-        destination / "selected_model.json", {"schema_version": 1, "model": model}
+        destination / "selected_model.json",
+        {"schema_version": 1, "model": model, "catalog": catalog},
     )
     return target
 
@@ -158,8 +167,8 @@ def read_selection(path):
     if selected["schema_version"] != 1:
         raise ValueError("Unsupported selection schema")
     model = validate_model(selected["model"])
-    # A selection file is not a registration: independently consult our catalog.
-    registered = select_model(load_catalog(), model["id"])
+    # Downloads carry their validated registration snapshot onto offline nodes.
+    registered = select_model(selection_catalog(selected), model["id"])
     if model != registered:
         differences = {
             key: (repr(model.get(key)), repr(registered.get(key)))
@@ -173,6 +182,19 @@ def read_selection(path):
     checkpoint = path.parent / model["filename"]
     verify_checkpoint(checkpoint, model)
     return model, checkpoint
+
+
+def selection_catalog(selected):
+    if "catalog" in selected:
+        return validate_catalog(selected["catalog"])
+    local = os.environ.get("CAESAR_MODEL_CATALOG")
+    if local and not local.startswith("https://"):
+        return load_catalog(local)
+    raise ValueError(
+        "Missing local model catalog snapshot. On a login node, rerun "
+        "model_registry.py for this model (the verified checkpoint is reused), "
+        "or set CAESAR_MODEL_CATALOG to a local catalog file."
+    )
 
 
 def export_context():
@@ -221,7 +243,9 @@ def validate_installation(directory):
         if not separator or not value or key in fields:
             raise ValueError("Malformed installation metadata")
         fields[key] = value
-    model = select_model(load_catalog(), fields.get("model_id", "unregistered"))
+    snapshot = directory / "model_catalog.json"
+    catalog = load_catalog(snapshot) if snapshot.is_file() else selection_catalog({})
+    model = select_model(catalog, fields.get("model_id", "unregistered"))
     expected = dict(
         schema_version="1",
         registration_id=str(model["registration_id"]),
@@ -310,7 +334,7 @@ def main():
                 )
         return
     model = select_model(catalog, args.model)
-    target = download(model, args.output, args.source_dir)
+    target = download(model, args.output, args.source_dir, catalog=catalog)
     print(f"Verified {model['id']}\nSaved checkpoint: {target}")
 
 

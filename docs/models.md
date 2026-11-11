@@ -40,9 +40,23 @@ python3 model_registry.py caesar_v2 --source-dir ../UFL_MODELS
 python3 compile_model.py cpu
 ```
 
-The default requires network access for catalog validation. `--catalog` overrides
-the catalog path or HTTPS URL for a registry command. `CAESAR_MODEL_CATALOG`
-sets it for registry, compilation, exporters, and CMake validation.
+Downloads automatically save the validated UFL catalog inside
+`pretrained/selected_model.json`. Compilation checks that snapshot and the local
+checkpoint hash, and exports `model_catalog.json` with the installation. Exporters
+and CMake validate locally: no internet access is needed after downloading. A
+later administrator removal does not invalidate an existing download's snapshot.
+
+For Frontier, run `python3 model_registry.py caesar_v2` on the login node, then
+run `python3 compile_model.py cuda` in the GPU job. ROCm uses the `cuda` device name.
+Existing downloads made before snapshots were introduced need that registry
+command once on the login node; matching checkpoints are reused. Missing snapshots
+produce an actionable error without attempting a network connection.
+
+`--catalog` overrides the catalog source for a registry command.
+`CAESAR_MODEL_CATALOG` sets the download source and can supply a local catalog
+for older selections or installations that lack snapshots. Saved snapshots take
+precedence during compilation and installation validation. Snapshots are trusted
+local download artifacts, not cryptographically signed registration certificates.
 
 Download accepts an exact `ufl:<number>@sha256:<hash>` identity as well as a
 registered name. `--output` selects the download directory; pass its
@@ -51,9 +65,9 @@ registered name. `--output` selects the download directory; pass its
 uses `exported_model/`. `CAESAR_MODEL_DIR` selects a compiled installation at runtime.
 
 Downloads preserve actual checkpoint filenames, verify SHA-256, and publish a
-selection only after verification. Compilation independently checks the
-UFL catalog; a hand-written selection does not register a model. CMake also
-validates the compiled installation against that catalog before configuring. All three
+selection only after verification. Compilation checks the saved
+UFL catalog snapshot; a hand-written selection does not register a model. CMake also
+validates the compiled installation against its exported snapshot before configuring. All three
 exporters use a frozen copy of the same verified checkpoint. A staged export is
 published only when all three packages and six entropy tables exist. A failed
 export preserves the old installation. Do not replace an installation while a

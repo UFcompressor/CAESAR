@@ -38,6 +38,7 @@ class ModelRegistryTests(unittest.TestCase):
             f"ufl:{self.model['registration_id']}@sha256:{self.model['sha256']}"
         )
         self.catalog["models"][0] = self.model
+        self.upstream = json.dumps(self.catalog).encode()
 
     def catalog_file(self):
         path = self.root / "catalog.json"
@@ -115,7 +116,9 @@ class ModelRegistryTests(unittest.TestCase):
         with patch.object(
             registry, "urlopen", side_effect=AssertionError("Should use local cache")
         ):
-            registry.download(self.model, output)
+            registry.download(self.model, output, catalog=self.catalog)
+            selected, _ = registry.read_selection(output / "selected_model.json")
+            self.assertEqual(selected, self.model)
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             selected, path = registry.read_selection(output / "selected_model.json")
         self.assertEqual(selected, self.model)
@@ -136,15 +139,61 @@ class ModelRegistryTests(unittest.TestCase):
         self.assertEqual((output / "selected_model.json").read_bytes(), selection)
         self.assertFalse(list(output.glob(".checkpoint-*")))
 
+    def test_download_adds_snapshot_to_legacy_cached_checkpoint(self):
+        output = self.root / "pretrained"
+        target = registry.download(self.model, output, self.source)
+        registry.atomic_json(
+            output / "selected_model.json", {"schema_version": 1, "model": self.model}
+        )
+        with patch.object(registry, "urlopen", side_effect=AssertionError("cached")):
+            registry.download(self.model, output, catalog=self.catalog)
+            selected, checkpoint = registry.read_selection(
+                output / "selected_model.json"
+            )
+        self.assertEqual(selected, self.model)
+        self.assertEqual(checkpoint.read_bytes(), target.read_bytes())
+
+    def test_snapshot_survives_upstream_removal_and_still_checks_hash(self):
+        output = self.root / "pretrained"
+        target = registry.download(self.model, output, self.source)
+        self.catalog["models"].remove(self.model)
+        self.catalog["retired_models"] = [self.model]
+        self.upstream = json.dumps(self.catalog).encode()
+        with patch.object(registry, "urlopen", side_effect=AssertionError("offline")):
+            self.assertEqual(
+                registry.read_selection(output / "selected_model.json")[0], self.model
+            )
+            target.write_bytes(b"corrupt checkpoint")
+            with self.assertRaisesRegex(ValueError, "checkpoint .* has SHA-256"):
+                registry.read_selection(output / "selected_model.json")
+
+    def test_legacy_selection_accepts_explicit_local_catalog(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        path = self.root / "pretrained/selected_model.json"
+        registry.atomic_json(path, {"schema_version": 1, "model": self.model})
+        with patch.dict(os.environ, {"CAESAR_MODEL_CATALOG": str(self.catalog_file())}):
+            with patch.object(
+                registry, "urlopen", side_effect=AssertionError("offline")
+            ):
+                self.assertEqual(registry.read_selection(path)[0], self.model)
+
     def test_selection_alone_does_not_register_checkpoint(self):
         registry.download(self.model, self.root / "pretrained", self.source)
-        with self.assertRaisesRegex(ValueError, "not registered"):
+        selection = self.root / "pretrained/selected_model.json"
+        data = json.loads(selection.read_text())
+        del data["catalog"]
+        selection.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "Missing local model catalog snapshot"):
             registry.read_selection(self.root / "pretrained/selected_model.json")
 
     def test_altered_registration_metadata_rejected(self):
         altered = copy.deepcopy(self.model)
         altered["min_dims"] = 4
-        registry.download(altered, self.root / "pretrained", self.source)
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        data = json.loads(selection.read_text())
+        data["model"] = altered
+        selection.write_text(json.dumps(data))
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             with self.assertRaisesRegex(ValueError, "does not match"):
                 registry.read_selection(self.root / "pretrained/selected_model.json")
@@ -186,6 +235,8 @@ class ModelRegistryTests(unittest.TestCase):
         output = self.root / "exported_model"
 
         def export(*args, env, **kwargs):
+            selected, _ = registry.read_selection(env["CAESAR_MODEL_SELECTION"])
+            self.assertEqual(selected, self.model)
             stage = Path(env["CAESAR_EXPORT_DIR"])
             for filename in (
                 *[f"{c}.pt2" for c in registry.COMPONENTS],
@@ -199,6 +250,10 @@ class ModelRegistryTests(unittest.TestCase):
             compile_model.subprocess, "run", side_effect=export
         ), patch.object(
             compile_model, "compilation_device_name", return_value="GPU: NVIDIA B200"
+        ), patch.object(
+            registry,
+            "urlopen",
+            side_effect=AssertionError("Compilation must be offline"),
         ):
             compile_model.compile_installation(
                 "cuda", self.root / "pretrained/selected_model.json", output
@@ -226,10 +281,11 @@ class ModelRegistryTests(unittest.TestCase):
         for filename in (*[f"{c}.pt2" for c in registry.COMPONENTS], *registry.TABLES):
             (self.root / filename).write_bytes(b"artifact")
         registry.write_installation(self.root, self.model, "cpu")
+        registry.atomic_json(self.root / "model_catalog.json", self.catalog)
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             self.assertEqual(registry.validate_installation(self.root), self.model)
-        with self.assertRaisesRegex(ValueError, "not registered"):
-            registry.validate_installation(self.root)
+        with patch.object(registry, "urlopen", side_effect=AssertionError("offline")):
+            self.assertEqual(registry.validate_installation(self.root), self.model)
         path = self.root / "model_metadata.txt"
         path.write_text(path.read_text().replace("min_dims=3", "min_dims=4"))
         with patch.object(registry, "load_catalog", return_value=self.catalog):
