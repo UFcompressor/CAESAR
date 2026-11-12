@@ -277,7 +277,7 @@ class ModelRegistryTests(unittest.TestCase):
         self.assertIn("device=cpu", text)
         self.assertNotIn("description=", text)
 
-    def test_cmake_installation_validation_rejects_unregistered_metadata(self):
+    def test_installation_validation_rejects_unregistered_metadata(self):
         for filename in (*[f"{c}.pt2" for c in registry.COMPONENTS], *registry.TABLES):
             (self.root / filename).write_bytes(b"artifact")
         registry.write_installation(self.root, self.model, "cpu")
