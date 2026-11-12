@@ -223,25 +223,21 @@ set(CAESAR_METADATA "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_metadat
 if(NOT EXISTS "${CAESAR_METADATA}")
     message(FATAL_ERROR "model_metadata.txt not found. Run python3 model_registry.py and python3 compile_model.py <device> first.")
 endif()
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../model_registry.py"
-            --validate-installation "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model"
-    RESULT_VARIABLE CAESAR_REGISTRY_STATUS
-    OUTPUT_VARIABLE CAESAR_REGISTRY_OUTPUT
-    ERROR_VARIABLE CAESAR_REGISTRY_ERROR
-)
-if(NOT CAESAR_REGISTRY_STATUS EQUAL 0)
-    message(FATAL_ERROR "CAESAR requires a registered model installation: ${CAESAR_REGISTRY_ERROR}")
-endif()
-message(STATUS "${CAESAR_REGISTRY_OUTPUT}")
-# Revalidate on incremental builds too: an installation can change after configure.
-add_custom_target(caesar_validate_model
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../model_registry.py"
-            --validate-installation "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model"
-    VERBATIM
-)
-add_dependencies(caesar_objs caesar_validate_model)
+# Registry and checkpoint validation belong to model export. Building the C++
+# library only requires the compiled installation, including offline/older exports.
+foreach(CAESAR_MODEL_FILE IN ITEMS
+    caesar_compressor.pt2 caesar_hyper_decompressor.pt2 caesar_decompressor.pt2
+    vbr_quantized_cdf.bin vbr_cdf_length.bin vbr_offset.bin
+    gs_quantized_cdf.bin gs_cdf_length.bin gs_offset.bin)
+    set(CAESAR_MODEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/${CAESAR_MODEL_FILE}")
+    if(NOT EXISTS "${CAESAR_MODEL_PATH}" OR IS_DIRECTORY "${CAESAR_MODEL_PATH}")
+        message(FATAL_ERROR "Compiled model artifact not found: ${CAESAR_MODEL_PATH}")
+    endif()
+    file(SIZE "${CAESAR_MODEL_PATH}" CAESAR_MODEL_SIZE)
+    if(CAESAR_MODEL_SIZE EQUAL 0)
+        message(FATAL_ERROR "Compiled model artifact is empty: ${CAESAR_MODEL_PATH}")
+    endif()
+endforeach()
 install(FILES "${CAESAR_METADATA}" DESTINATION share/caesar/models)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../exported_model/model_catalog.json"
     DESTINATION share/caesar/models OPTIONAL)

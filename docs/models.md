@@ -32,7 +32,7 @@ MPS is experimental and XPU end-to-end execution is unverified. See the
 [platform matrix and Windows CPU procedure](platform_support.md).
 
 For offline use with a local UFL_MODELS checkout, set the catalog path for
-downloading, compilation, and CMake validation:
+downloading and model compilation:
 
 ```sh
 export CAESAR_MODEL_CATALOG="$PWD/../UFL_MODELS/model_catalog.json"
@@ -43,7 +43,9 @@ python3 compile_model.py cpu
 Downloads automatically save the validated UFL catalog inside
 `pretrained/selected_model.json`. Compilation checks that snapshot and the local
 checkpoint hash, and exports `model_catalog.json` with the installation. Exporters
-and CMake validate locally: no internet access is needed after downloading. A
+validate locally: no internet access is needed after downloading. CMake only checks
+that the compiled packages, entropy tables, and metadata exist; it does not require
+a registry catalog or Python. A
 later administrator removal does not invalidate an existing download's snapshot.
 
 For Frontier, run `python3 model_registry.py caesar_v2` on the login node, then
@@ -66,8 +68,7 @@ uses `exported_model/`. `CAESAR_MODEL_DIR` selects a compiled installation at ru
 
 Downloads preserve actual checkpoint filenames, verify SHA-256, and publish a
 selection only after verification. Compilation checks the saved
-UFL catalog snapshot; a hand-written selection does not register a model. CMake also
-validates the compiled installation against its exported snapshot before configuring. All three
+UFL catalog snapshot; a hand-written selection does not register a model. All three
 exporters use a frozen copy of the same verified checkpoint. A staged export is
 published only when all three packages and six entropy tables exist. A failed
 export preserves the old installation. Do not replace an installation while a
