@@ -244,6 +244,19 @@ class ModelRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported model architecture"):
             registry.read_selection(selection, bypass=True)
 
+    def test_registered_bypass_preserves_identity_without_unsafe_warning(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        for legacy in (False, True):
+            if legacy:
+                registry.atomic_json(
+                    selection, {"schema_version": 1, "model": self.model}
+                )
+            with patch("sys.stderr", io.StringIO()) as warning:
+                model, _ = registry.read_selection(selection, bypass=True)
+            self.assertEqual(model, self.model)
+            self.assertNotIn("UNSAFE", warning.getvalue())
+
     def test_individual_export_context_all_devices(self):
         registry.download(self.model, self.root / "pretrained", self.source)
         selection = self.root / "pretrained/selected_model.json"
@@ -263,14 +276,18 @@ class ModelRegistryTests(unittest.TestCase):
                 compile_model.subprocess, "run"
             ) as run:
                 model, checkpoint, output = registry.export_context()
-                self.assertEqual(model["registration_id"], 0)
+                self.assertEqual(model, self.model)
                 self.assertEqual(checkpoint.name, self.model["filename"])
-                self.assertEqual(output, Path("exported_model_dev"))
+                self.assertEqual(output, Path("exported_model"))
                 run.assert_not_called()
 
     def test_bypass_compile_freezes_selection_and_marks_installation_local(self):
         registry.download(self.model, self.root / "pretrained", self.source)
         selection = self.root / "pretrained/selected_model.json"
+        local = dict(
+            self.model, registration_id=0, id="local@sha256:" + self.model["sha256"]
+        )
+        registry.atomic_json(selection, {"schema_version": 1, "model": local})
         output = self.root / "exported_model"
         calls = []
 
@@ -293,12 +310,22 @@ class ModelRegistryTests(unittest.TestCase):
         ), patch.object(
             compile_model, "compilation_device_name", return_value="CPU: test"
         ), patch.object(
-            registry, "urlopen", side_effect=AssertionError("offline")
+            registry, "urlopen", side_effect=OSError("offline")
         ):
             compile_model.compile_installation("cpu", selection, output, bypass=True)
         self.assertEqual(len(calls), 3)
         self.assertFalse((output / "model_catalog.json").exists())
         self.assertEqual(registry.validate_installation(output)["registration_id"], 0)
+
+    def test_advisory_registration_check_handles_network_timeout(self):
+        with patch.object(
+            registry, "urlopen", side_effect=TimeoutError("no network")
+        ) as query, patch("sys.stderr", io.StringIO()) as warning:
+            self.assertEqual(registry.check_current_registration(self.model), 2)
+        query.assert_called_once_with(registry.DEFAULT_CATALOG, timeout=3)
+        self.assertIn("REGISTRATION IS UNCONFIRMED", warning.getvalue())
+        self.assertIn("CONTINUING WITH THE SAVED LOCAL SELECTION", warning.getvalue())
+        self.assertNotIn("NOT IN THE UFL DATABASE", warning.getvalue())
 
     def test_explicit_database_check_present_missing_and_unavailable(self):
         registry.download(self.model, self.root / "pretrained", self.source)
@@ -376,7 +403,7 @@ class ModelRegistryTests(unittest.TestCase):
         ), patch.object(
             registry,
             "urlopen",
-            side_effect=AssertionError("Compilation must be offline"),
+            side_effect=OSError("Compute node has no network"),
         ):
             compile_model.compile_installation(
                 "cuda", self.root / "pretrained/selected_model.json", output

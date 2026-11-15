@@ -13,6 +13,7 @@ import tempfile
 from model_registry import (
     COMPONENTS,
     atomic_json,
+    check_current_registration,
     read_selection,
     selection_catalog,
     write_installation,
@@ -46,6 +47,7 @@ def compilation_device_name(device):
 def compile_installation(device, selection, output, bypass=False):
     selection = Path(selection).resolve()
     model, _ = read_selection(selection, bypass=bypass)
+    check_current_registration(model)
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     # A second installer must never interleave publication of a different model.
@@ -74,7 +76,7 @@ def compile_installation(device, selection, output, bypass=False):
             shutil.copyfile(checkpoint, frozen / model["filename"])
             catalog = (
                 None
-                if bypass
+                if model["registration_id"] == 0
                 else selection_catalog(
                     json.loads(selection.read_text(encoding="utf-8"))
                 )
@@ -87,7 +89,7 @@ def compile_installation(device, selection, output, bypass=False):
                     **({"catalog": catalog} if catalog is not None else {}),
                 },
             )
-            if bypass:
+            if model["registration_id"] == 0:
                 atomic_json(stage / "local_model_selection.json", {"model": model})
             else:
                 atomic_json(stage / "model_catalog.json", catalog)

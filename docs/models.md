@@ -91,7 +91,13 @@ python3 compile_model.py cuda
 An existing registered selection, including an older JSON without a catalog
 snapshot, does not need to be downloaded or registered again. Its saved registration
 is assumed locally; compilation still verifies the checkpoint hash and network
-compatibility. This is not a live check of current UFL membership.
+compatibility. At the start of compilation, CAESAR also tries the current UFL
+catalog with a three-second network timeout. If this compute node cannot reach
+UFL, a warning says registration is unconfirmed and compilation continues using
+the saved local selection. An unavailable database is not treated as proof that
+the model is unregistered. If UFL is reachable but the checkpoint is absent, CAESAR
+warns to submit it and continues compilation. This check never changes identity.
+The complete installer checks once, rather than repeating it for each component.
 
 On a networked login node, explicitly check the current database later:
 
@@ -128,11 +134,13 @@ the exact `filename` next to that JSON and verify its SHA-256. CAESAR does not s
 `pretrained/` for a checkpoint or choose based on file timestamps. The `.pt2` files
 in `exported_model/` are compilation outputs, not the original training checkpoint.
 
-Individual exports default to `exported_model_dev/`. Use `--output DIRECTORY` and
-`--selection PATH` to override either location. These are partial developer
-artifacts: they do not update installation metadata or certify a complete set.
-Keep them separate from an installed model to avoid mixing devices, checkpoints,
-or entropy tables. The compressor also writes the six entropy tables.
+Individual exports default to `exported_model/`, replacing only the selected
+component's package. Use `--output DIRECTORY` and `--selection PATH` to override
+either location. They do not update installation metadata or certify a complete
+set. When replacing a component in an existing installation, use the same
+checkpoint and device as its other components. The compressor also writes the
+six entropy tables. Use `compile_model.py` when changing the installation's model
+or device.
 
 To select your own checkpoint without sending anything to UFL:
 
@@ -152,11 +160,13 @@ python3 compile_model.py cuda bypass --output exported_model
 python3 model_registry.py --validate-installation exported_model
 ```
 
-Bypass is fully offline. It skips catalog approval, keeps the hash and metadata
+Bypass works without internet access. Its UFL check is advisory; it skips catalog approval, keeps the hash and metadata
 checks, and still strictly loads the state dictionary. Bypassed installations use
-registration `0` and identity `local@sha256:<hash>`, including when the original
-selection had a UFL registration. Python prints an all-caps unsupported/unsafe
-warning and submission instructions; C++ warns when loading a local installation.
+registration `0` and identity `local@sha256:<hash>` when no matching saved
+registration can be validated. A valid saved UFL registration keeps its original
+identity even with bypass; it does not trigger the unsupported-model warning.
+For unregistered models, Python prints an all-caps unsupported/unsafe warning and
+submission instructions; C++ warns when loading a local installation.
 The compressed data records the local identity, so decoding must use that same
 identity. Registering the same bytes later gives a different UFL identity; keep
 the local installation for previously encoded data.

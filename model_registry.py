@@ -91,12 +91,12 @@ def validate_model(model, allow_local=False):
     return model
 
 
-def load_catalog(path=None):
+def load_catalog(path=None, timeout=60):
     if path is None:
         path = os.environ.get("CAESAR_MODEL_CATALOG", DEFAULT_CATALOG)
     path = str(path)
     if path.startswith("https://"):
-        with urlopen(path, timeout=60) as response:
+        with urlopen(path, timeout=timeout) as response:
             catalog = json.load(response)
     else:
         catalog = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -204,7 +204,13 @@ def read_selection(path, bypass=False):
     checkpoint = path.parent / model["filename"]
     verify_checkpoint(checkpoint, model)
     if bypass:
-        # Never present a bypassed installation as an approved UFL registration.
+        if model["registration_id"] > 0:
+            try:
+                # Bypass does not revoke a valid saved UFL registration.
+                return read_selection(path)
+            except (ValueError, KeyError, OSError):
+                pass
+        # Models without a matching saved registration remain explicitly local.
         model = dict(model, registration_id=0, id=f'local@sha256:{model["sha256"]}')
         warn_local()
         return model, checkpoint
@@ -244,7 +250,8 @@ def export_context():
     selection = os.environ.get("CAESAR_MODEL_SELECTION")
     output = os.environ.get("CAESAR_EXPORT_DIR")
     bypass = os.environ.get("CAESAR_MODEL_BYPASS") == "1"
-    if not selection or not output:
+    direct = not selection or not output
+    if direct:
         parser = argparse.ArgumentParser(
             description="Compile this model component only; use compile_model.py for a complete installation"
         )
@@ -252,7 +259,7 @@ def export_context():
         parser.add_argument("mode", nargs="?", choices=("bypass",))
         parser.add_argument("--bypass", action="store_true")
         parser.add_argument("--selection", default="pretrained/selected_model.json")
-        parser.add_argument("--output", default="exported_model_dev")
+        parser.add_argument("--output", default="exported_model")
         args = parser.parse_args()
         selection, output = args.selection, args.output
         bypass = args.bypass or args.mode == "bypass"
@@ -261,6 +268,8 @@ def export_context():
             file=sys.stderr,
         )
     model, checkpoint = read_selection(selection, bypass=bypass)
+    if direct:
+        check_current_registration(model)
     return model, checkpoint, Path(output)
 
 
@@ -341,13 +350,20 @@ def check_registration(selection, catalog_path=None):
         raise ValueError("Unsupported selection schema")
     model = validate_model(selected["model"], allow_local=True)
     verify_checkpoint(path.parent / model["filename"], model)
+    return check_current_registration(model, catalog_path)
+
+
+def check_current_registration(model, catalog_path=None):
+    """Advisory check only: network failures must never prevent compilation."""
     try:
-        # Deliberately check today's database rather than the saved snapshot.
-        catalog = load_catalog(catalog_path or DEFAULT_CATALOG)
-    except (OSError, ValueError) as error:
+        # Short timeout for compute nodes with no outbound network access.
+        catalog = load_catalog(catalog_path or DEFAULT_CATALOG, timeout=3)
+    except (OSError, ValueError, KeyError, TypeError) as error:
         print(
             f"WARNING: COULD NOT CHECK THE UFL DATABASE: {error}. "
-            "LOCAL COMPILATION REMAINS AVAILABLE; RETRY ON A NETWORKED LOGIN NODE.",
+            "THIS NODE MAY HAVE NO INTERNET ACCESS. REGISTRATION IS UNCONFIRMED; "
+            "CONTINUING WITH THE SAVED LOCAL SELECTION. "
+            "RETRY --check-registration ON A NETWORKED LOGIN NODE.",
             file=sys.stderr,
         )
         return 2
