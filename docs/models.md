@@ -50,9 +50,10 @@ later administrator removal does not invalidate an existing download's snapshot.
 
 For Frontier, run `python3 model_registry.py caesar_v2` on the login node, then
 run `python3 compile_model.py cuda` in the GPU job. ROCm uses the `cuda` device name.
-Existing downloads made before snapshots were introduced need that registry
-command once on the login node; matching checkpoints are reused. Missing snapshots
-produce an actionable error without attempting a network connection.
+Existing downloads made before snapshots were introduced compile directly from
+`pretrained/selected_model.json`: the complete model record becomes a one-entry
+local snapshot, and the checkpoint SHA-256 must still match. No login-node retry
+or internet connection is needed.
 
 `--catalog` overrides the catalog source for a registry command.
 `CAESAR_MODEL_CATALOG` sets the download source and can supply a local catalog
@@ -68,13 +69,144 @@ uses `exported_model/`. `CAESAR_MODEL_DIR` selects a compiled installation at ru
 
 Downloads preserve actual checkpoint filenames, verify SHA-256, and publish a
 selection only after verification. Compilation checks the saved
-UFL catalog snapshot; a hand-written selection does not register a model. All three
+UFL catalog snapshot when present; legacy selections supply their saved model
+record instead. A local selection is not proof of upstream registration. All three
 exporters use a frozen copy of the same verified checkpoint. A staged export is
 published only when all three packages and six entropy tables exist. A failed
 export preserves the old installation. Do not replace an installation while a
 process is using it. An interrupted installer may leave `exported_model.lock`;
 remove that directory only after confirming the installer is no longer running.
-Individual exporter scripts are internal to `compile_model.py`.
+Individual exporter scripts can also be run separately for development, as described below.
+
+## Check the current UFL database later
+
+Normal compilation uses the saved selection and checkpoint locally:
+
+```sh
+python3 compile_model.py cpu
+# Or on the target GPU machine:
+python3 compile_model.py cuda
+```
+
+An existing registered selection, including an older JSON without a catalog
+snapshot, does not need to be downloaded or registered again. Its saved registration
+is assumed locally; compilation still verifies the checkpoint hash and network
+compatibility. At the start of compilation, CAESAR also tries the current UFL
+catalog with a three-second network timeout. If this compute node cannot reach
+UFL, a warning says registration is unconfirmed and compilation continues using
+the saved local selection. An unavailable database is not treated as proof that
+the model is unregistered. If UFL is reachable but the checkpoint is absent, CAESAR
+warns to submit it and continues compilation. This check never changes identity.
+The complete installer checks once, rather than repeating it for each component.
+
+On a networked login node, explicitly check the current database later:
+
+```sh
+python3 model_registry.py --check-registration
+# Or check another selection:
+python3 model_registry.py --check-registration /path/to/selected_model.json
+```
+
+The check uses the current UFL database, not the saved snapshot. It does not
+compile, download checkpoints, or change the selection. A missing checkpoint
+prints an all-caps warning and submission instructions. A retired checkpoint is
+identified separately. A network failure says that registration could not be
+checked; it does not claim the model is missing or block later local compilation.
+Exit statuses are 0 for present, 1 for absent/retired, and 2 for unavailable.
+`--catalog PATH` can check a local copy of the database instead. A local bypass
+selection whose checkpoint hash is already registered reports the UFL identity
+and how to select it.
+
+## Individual developer and in situ bypass
+
+Each script accepts `bypass` or `--bypass`, independently of the device:
+
+```sh
+source venv_cpu/bin/activate  # or your target device's environment
+python3 CAESAR_compressor.py cpu bypass
+python3 CAESAR_decompressor.py cpu bypass
+python3 CAESAR_hyper_decompressor.py cpu bypass
+```
+
+Replace `cpu` with `cuda`, `mps`, or `xpu` for your target machine. Each command
+compiles only that component. All read `pretrained/selected_model.json`, then load
+the exact `filename` next to that JSON and verify its SHA-256. CAESAR does not scan
+`pretrained/` for a checkpoint or choose based on file timestamps. The `.pt2` files
+in `exported_model/` are compilation outputs, not the original training checkpoint.
+
+Individual exports default to `exported_model/`, replacing only the selected
+component's package. Use `--output DIRECTORY` and `--selection PATH` to override
+either location. They do not update installation metadata or certify a complete
+set. When replacing a component in an existing installation, use the same
+checkpoint and device as its other components. The compressor also writes the
+six entropy tables. Use `compile_model.py` when changing the installation's model
+or device.
+
+To select your own checkpoint without sending anything to UFL:
+
+```sh
+python3 model_registry.py --local pretrained/my_model.pt --bypass \
+  --min-dims 3 --max-dims 5
+python3 CAESAR_compressor.py cuda bypass
+```
+
+Local selection records the checkpoint hash, architecture label, and declared
+supported input ranks. It does not verify that those rank declarations have been
+tested. To produce a complete installation for in situ use, the wrapper also
+supports bypass and stages all components together:
+
+```sh
+python3 compile_model.py cuda bypass --output exported_model
+python3 model_registry.py --validate-installation exported_model
+```
+
+Bypass works without internet access. Its UFL check is advisory; it skips catalog approval, keeps the hash and metadata
+checks, and still strictly loads the state dictionary. Bypassed installations use
+registration `0` and identity `local@sha256:<hash>` when no matching saved
+registration can be validated. A valid saved UFL registration keeps its original
+identity even with bypass; it does not trigger the unsupported-model warning.
+For unregistered models, Python prints an all-caps unsupported/unsafe warning and
+submission instructions; C++ warns when loading a local installation.
+The compressed data records the local identity, so decoding must use that same
+identity. Registering the same bytes later gives a different UFL identity; keep
+the local installation for previously encoded data.
+
+On a networked login node, install Git and GitHub CLI, authenticate, and submit:
+
+```sh
+gh auth login
+python3 register_model.py add \
+  --name my_model --display-name "My model" \
+  --description "Training data, intended use, and provenance" \
+  --checkpoint /path/to/my_model.pt --min-dims 3 --max-dims 5
+```
+
+This opens the UFL_MODELS registration pull request. Bypass never uploads the
+checkpoint or opens a pull request. After approval, select the registered model
+with `python3 model_registry.py my_model` and compile without bypass. See
+[registration setup and submission](model_registration.md#submit-a-model).
+
+### Architecture changes and remaining constraints
+
+Previously, compilation required a catalog snapshot even if the selection and
+checkpoint hash were valid. Individual scripts required staging environment
+variables from `compile_model.py`, so they could not be run directly for testing.
+The registry checks, checkpoint integrity, and compilation setup were coupled.
+
+Now legacy selection validation works offline, and the shared `export_context()`
+resolves either a staged installation or the arguments of one direct exporter.
+The complete installer retains its lock, frozen checkpoint, staging, and rollback.
+Local identities are accepted by the Python installation validator and C++ metadata
+reader without claiming a positive UFL registration. No network layers, tensor
+shapes, entropy coding, or serialized buffer layout changed.
+
+The exporters still duplicate network definitions and construct a fixed
+`caesar-bcrn-v1` configuration (`dim=16`, `sr_dim=16`, one input/output channel).
+The architecture label in a JSON file does not make another network compatible:
+strict loading rejects missing, extra, or differently shaped parameters. Supporting
+a new architecture requires updating all three exporters and checking their
+interface against the C++ runners and entropy tables. A future refactor could
+share the network definition to prevent these copies drifting apart.
 
 ## Inspect the selected model
 

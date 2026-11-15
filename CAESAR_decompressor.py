@@ -515,5 +515,5 @@ with torch.no_grad():
         package_path=str(export_dir / f"{model_name}.pt2"),
     )
     print()
-    print(f"decompress model saved to exported_model/{model_name}.pt2")
+    print(f"decompress model saved to {export_dir}/{model_name}.pt2")
     print()

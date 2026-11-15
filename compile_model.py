@@ -13,6 +13,7 @@ import tempfile
 from model_registry import (
     COMPONENTS,
     atomic_json,
+    check_current_registration,
     read_selection,
     selection_catalog,
     write_installation,
@@ -43,9 +44,10 @@ def compilation_device_name(device):
     raise ValueError(f"Unsupported compilation device: {device}")
 
 
-def compile_installation(device, selection, output):
+def compile_installation(device, selection, output, bypass=False):
     selection = Path(selection).resolve()
-    model, _ = read_selection(selection)
+    model, _ = read_selection(selection, bypass=bypass)
+    check_current_registration(model)
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     # A second installer must never interleave publication of a different model.
@@ -70,20 +72,28 @@ def compile_installation(device, selection, output):
             # Freeze selection for all three subprocesses, even if another download occurs.
             frozen = Path(temporary) / "checkpoint"
             frozen.mkdir()
-            _, checkpoint = read_selection(selection)
+            _, checkpoint = read_selection(selection, bypass=bypass)
             shutil.copyfile(checkpoint, frozen / model["filename"])
-            catalog = selection_catalog(
-                json.loads(selection.read_text(encoding="utf-8"))
+            catalog = (
+                None
+                if model["registration_id"] == 0
+                else selection_catalog(
+                    json.loads(selection.read_text(encoding="utf-8"))
+                )
             )
             atomic_json(
                 frozen / "selected_model.json",
                 {
                     "schema_version": 1,
                     "model": model,
-                    "catalog": catalog,
+                    **({"catalog": catalog} if catalog is not None else {}),
                 },
             )
-            atomic_json(stage / "model_catalog.json", catalog)
+            if model["registration_id"] == 0:
+                atomic_json(stage / "local_model_selection.json", {"model": model})
+            else:
+                atomic_json(stage / "model_catalog.json", catalog)
+            env["CAESAR_MODEL_BYPASS"] = "1" if bypass else "0"
             env["CAESAR_MODEL_SELECTION"] = str(frozen / "selected_model.json")
             for component in COMPONENTS:
                 script = Path(__file__).with_name(
@@ -113,10 +123,21 @@ def compile_installation(device, selection, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("device", choices=("cpu", "cuda", "mps", "xpu"))
+    parser.add_argument("mode", nargs="?", choices=("bypass",))
+    parser.add_argument(
+        "--bypass",
+        action="store_true",
+        help="Compile a local selection without catalog approval; still verify its hash",
+    )
     parser.add_argument("--selection", default="pretrained/selected_model.json")
     parser.add_argument("--output", default="exported_model")
     args = parser.parse_args()
-    compile_installation(args.device, args.selection, args.output)
+    compile_installation(
+        args.device,
+        args.selection,
+        args.output,
+        bypass=args.bypass or args.mode == "bypass",
+    )
 
 
 if __name__ == "__main__":
