@@ -31,3 +31,6 @@ build_script_atlas.sh
 pretrained
 .caesar-export-*/
 exported_model.lock/
+
+# Individual developer exports
+exported_model_dev/

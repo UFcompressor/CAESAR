@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -75,6 +76,15 @@ inline ModelMetadata read_model_metadata(const std::filesystem::path &path) {
            s.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU"
                                "VWXYZ0123456789_-") == std::string::npos;
   };
+  const bool local =
+      metadata.registration_id == "0" &&
+      metadata.id == "local@sha256:" + metadata.checkpoint_sha256;
+  const bool registered =
+      !metadata.registration_id.empty() && metadata.registration_id[0] != '0' &&
+      metadata.registration_id.find_first_not_of("0123456789") ==
+          std::string::npos &&
+      metadata.id == "ufl:" + metadata.registration_id +
+                         "@sha256:" + metadata.checkpoint_sha256;
   const std::string suffix = ".pt";
   if (!valid_name(metadata.name) || metadata.checkpoint_file.size() <= 3 ||
       metadata.checkpoint_file.substr(metadata.checkpoint_file.size() - 3) !=
@@ -84,12 +94,7 @@ inline ModelMetadata read_model_metadata(const std::filesystem::path &path) {
       metadata.checkpoint_sha256.size() != 64 ||
       metadata.checkpoint_sha256.find_first_not_of("0123456789abcdef") !=
           std::string::npos ||
-      metadata.registration_id.empty() || metadata.registration_id[0] == '0' ||
-      metadata.registration_id.find_first_not_of("0123456789") !=
-          std::string::npos ||
-      metadata.id != "ufl:" + metadata.registration_id +
-                         "@sha256:" + metadata.checkpoint_sha256 ||
-      metadata.architecture != "caesar-bcrn-v1")
+      (!local && !registered) || metadata.architecture != "caesar-bcrn-v1")
     throw std::runtime_error("Invalid CAESAR model identity or architecture");
   auto min_dims = field("min_dims"), max_dims = field("max_dims");
   if (min_dims.size() != 1 || max_dims.size() != 1 || min_dims[0] < '2' ||
@@ -101,6 +106,12 @@ inline ModelMetadata read_model_metadata(const std::filesystem::path &path) {
       metadata.device != "mps" && metadata.device != "xpu")
     throw std::runtime_error("Invalid CAESAR compiled device: " +
                              metadata.device);
+  if (local)
+    std::cerr
+        << "WARNING: THIS IS NOT AN OFFICIALLY SUPPORTED MODEL AND CAN BE "
+           "UNSAFE. "
+           "REGISTER THIS MODEL ON A LOGIN NODE OR ANOTHER NETWORKED MACHINE "
+           "USING register_model.py BEFORE OFFICIAL USE.\n";
   metadata.directory = std::filesystem::canonical(path).parent_path();
   return metadata;
 }

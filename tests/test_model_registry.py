@@ -177,14 +177,20 @@ class ModelRegistryTests(unittest.TestCase):
             ):
                 self.assertEqual(registry.read_selection(path)[0], self.model)
 
-    def test_selection_alone_does_not_register_checkpoint(self):
+    def test_legacy_selection_compiles_offline_without_catalog(self):
         registry.download(self.model, self.root / "pretrained", self.source)
         selection = self.root / "pretrained/selected_model.json"
         data = json.loads(selection.read_text())
         del data["catalog"]
         selection.write_text(json.dumps(data))
-        with self.assertRaisesRegex(ValueError, "Missing local model catalog snapshot"):
-            registry.read_selection(self.root / "pretrained/selected_model.json")
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            registry, "urlopen", side_effect=AssertionError("offline")
+        ):
+            selected, checkpoint = registry.read_selection(selection)
+            self.assertEqual(selected, self.model)
+            checkpoint.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                registry.read_selection(selection)
 
     def test_altered_registration_metadata_rejected(self):
         altered = copy.deepcopy(self.model)
@@ -197,6 +203,123 @@ class ModelRegistryTests(unittest.TestCase):
         with patch.object(registry, "load_catalog", return_value=self.catalog):
             with self.assertRaisesRegex(ValueError, "does not match"):
                 registry.read_selection(self.root / "pretrained/selected_model.json")
+
+    def test_local_selection_requires_bypass_and_still_checks_hash(self):
+        selection = self.root / "pretrained/selected_model.json"
+        with patch(
+            "sys.argv",
+            [
+                "model_registry.py",
+                "--local",
+                str(self.source / self.model["filename"]),
+                "--bypass",
+                "--output",
+                str(selection.parent),
+            ],
+        ):
+            registry.main()
+        with self.assertRaisesRegex(ValueError, "positive UFL registration"):
+            registry.read_selection(selection)
+        model, checkpoint = registry.read_selection(selection, bypass=True)
+        self.assertEqual(model["id"], "local@sha256:" + self.model["sha256"])
+        checkpoint.write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            registry.read_selection(selection, bypass=True)
+
+    def test_bypass_skips_catalog_but_rejects_incompatible_architecture(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        data = json.loads(selection.read_text())
+        data["catalog"] = {"schema_version": 999}
+        registry.atomic_json(selection, data)
+        warning = io.StringIO()
+        with patch("sys.stderr", warning):
+            model, _ = registry.read_selection(selection, bypass=True)
+        self.assertEqual(model["registration_id"], 0)
+        self.assertIn("NOT AN OFFICIALLY SUPPORTED MODEL", warning.getvalue())
+        self.assertIn("register_model.py add", warning.getvalue())
+        self.assertIn("--checkpoint", warning.getvalue())
+        data["model"]["architecture"] = "different-network"
+        registry.atomic_json(selection, data)
+        with self.assertRaisesRegex(ValueError, "unsupported model architecture"):
+            registry.read_selection(selection, bypass=True)
+
+    def test_individual_export_context_all_devices(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        for device in ("cpu", "cuda", "mps", "xpu"):
+            with self.subTest(device=device), patch.dict(
+                os.environ, {}, clear=True
+            ), patch(
+                "sys.argv",
+                [
+                    "CAESAR_compressor.py",
+                    device,
+                    "bypass",
+                    "--selection",
+                    str(selection),
+                ],
+            ), patch.object(
+                compile_model.subprocess, "run"
+            ) as run:
+                model, checkpoint, output = registry.export_context()
+                self.assertEqual(model["registration_id"], 0)
+                self.assertEqual(checkpoint.name, self.model["filename"])
+                self.assertEqual(output, Path("exported_model_dev"))
+                run.assert_not_called()
+
+    def test_bypass_compile_freezes_selection_and_marks_installation_local(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        output = self.root / "exported_model"
+        calls = []
+
+        def export(command, env, **kwargs):
+            self.assertEqual(env["CAESAR_MODEL_BYPASS"], "1")
+            model, _ = registry.read_selection(
+                env["CAESAR_MODEL_SELECTION"], bypass=True
+            )
+            self.assertEqual(model["registration_id"], 0)
+            calls.append(command)
+            stage = Path(env["CAESAR_EXPORT_DIR"])
+            for filename in (
+                *[f"{c}.pt2" for c in registry.COMPONENTS],
+                *registry.TABLES,
+            ):
+                (stage / filename).write_bytes(b"artifact")
+
+        with patch.object(
+            compile_model.subprocess, "run", side_effect=export
+        ), patch.object(
+            compile_model, "compilation_device_name", return_value="CPU: test"
+        ), patch.object(
+            registry, "urlopen", side_effect=AssertionError("offline")
+        ):
+            compile_model.compile_installation("cpu", selection, output, bypass=True)
+        self.assertEqual(len(calls), 3)
+        self.assertFalse((output / "model_catalog.json").exists())
+        self.assertEqual(registry.validate_installation(output)["registration_id"], 0)
+
+    def test_explicit_database_check_present_missing_and_unavailable(self):
+        registry.download(self.model, self.root / "pretrained", self.source)
+        selection = self.root / "pretrained/selected_model.json"
+        before = selection.read_bytes()
+        with patch("sys.stdout", io.StringIO()):
+            self.assertEqual(registry.check_registration(selection), 0)
+        # A saved registration remains compilable after current DB removal.
+        self.catalog["models"].remove(self.model)
+        self.upstream = json.dumps(self.catalog).encode()
+        warning = io.StringIO()
+        with patch("sys.stderr", warning):
+            self.assertEqual(registry.check_registration(selection), 1)
+        self.assertIn("SUBMIT IT TO UFL", warning.getvalue())
+        self.assertEqual(registry.read_selection(selection)[0], self.model)
+        with patch.object(registry, "urlopen", side_effect=OSError("offline")), patch(
+            "sys.stderr", io.StringIO()
+        ) as warning:
+            self.assertEqual(registry.check_registration(selection), 2)
+            self.assertIn("COULD NOT CHECK", warning.getvalue())
+        self.assertEqual(selection.read_bytes(), before)
 
     def test_failed_compile_preserves_installation(self):
         output = self.root / "exported_model"

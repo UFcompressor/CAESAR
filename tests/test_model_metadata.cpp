@@ -57,6 +57,13 @@ int main() {
     malformed.replace(malformed.find("ufl:1"), 5, "ufl:9");
     write(malformed);
     must_fail([&] { read_model_metadata(path); }, "identity");
+    auto local = valid;
+    local.replace(local.find("registration_id=1"), 17, "registration_id=0");
+    local.replace(local.find("ufl:1@sha256:"), 13, "local@sha256:");
+    write(local);
+    auto local_metadata = read_model_metadata(path);
+    check(local_metadata.registration_id == "0", "Local registration");
+    local_metadata.require("local@sha256:" + hash);
     write("schema_version=1\n");
     must_fail([&] { read_model_metadata(path); }, "schema");
     fs::remove(path);

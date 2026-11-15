@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 from urllib.request import urlopen
 
@@ -31,14 +32,47 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def validate_model(model):
+LOCAL_WARNING = (
+    "WARNING: THIS IS NOT AN OFFICIALLY SUPPORTED MODEL AND CAN BE UNSAFE. "
+    "REGISTER THIS MODEL ON A LOGIN NODE OR ANOTHER NETWORKED MACHINE "
+    "USING register_model.py BEFORE OFFICIAL USE."
+)
+
+
+def warn_local():
+    print(LOCAL_WARNING, file=sys.stderr)
+    print(
+        "HOW TO SUBMIT TO UFL (ON A NETWORKED LOGIN NODE):\n"
+        "  gh auth login\n"
+        "  python3 register_model.py add --name MY_MODEL --display-name 'My model' "
+        "--description 'Training data, intended use, and provenance' "
+        "--checkpoint /path/to/model.pt --min-dims 3 --max-dims 5\n"
+        "Replace the example values with your checkpoint details. "
+        "See docs/model_registration.md for setup. Nothing is submitted by bypass.",
+        file=sys.stderr,
+    )
+
+
+def validate_model(model, allow_local=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", model["name"]):
         raise ValueError("Invalid model name")
     if not re.fullmatch(r"[0-9a-f]{64}", model["sha256"]):
         raise ValueError("Invalid checkpoint SHA-256")
-    if type(model.get("registration_id")) is not int or model["registration_id"] <= 0:
+    local = (
+        allow_local
+        and type(model.get("registration_id")) is int
+        and model["registration_id"] == 0
+    )
+    if not local and (
+        type(model.get("registration_id")) is not int or model["registration_id"] <= 0
+    ):
         raise ValueError("A positive UFL registration number is required")
-    if model["id"] != f'ufl:{model["registration_id"]}@sha256:{model["sha256"]}':
+    identity = (
+        f'local@sha256:{model["sha256"]}'
+        if local
+        else f'ufl:{model["registration_id"]}@sha256:{model["sha256"]}'
+    )
+    if model["id"] != identity:
         raise ValueError(
             "Model identity does not match registration number and checkpoint hash"
         )
@@ -52,7 +86,7 @@ def validate_model(model):
         raise ValueError("Supported dimensions must be within 2D–5D")
     if not model.get("description") or model.get("architecture") != ARCHITECTURE:
         raise ValueError("Missing description or unsupported model architecture")
-    if not model["url"].startswith("https://"):
+    if not local and not model["url"].startswith("https://"):
         raise ValueError("Checkpoint URL must use HTTPS")
     return model
 
@@ -161,12 +195,19 @@ def download(model, destination, source_dir=None, catalog=None):
     return target
 
 
-def read_selection(path):
+def read_selection(path, bypass=False):
     path = Path(path).resolve()
     selected = json.loads(path.read_text(encoding="utf-8"))
     if selected["schema_version"] != 1:
         raise ValueError("Unsupported selection schema")
-    model = validate_model(selected["model"])
+    model = validate_model(selected["model"], allow_local=bypass)
+    checkpoint = path.parent / model["filename"]
+    verify_checkpoint(checkpoint, model)
+    if bypass:
+        # Never present a bypassed installation as an approved UFL registration.
+        model = dict(model, registration_id=0, id=f'local@sha256:{model["sha256"]}')
+        warn_local()
+        return model, checkpoint
     # Downloads carry their validated registration snapshot onto offline nodes.
     registered = select_model(selection_catalog(selected), model["id"])
     if model != registered:
@@ -179,8 +220,6 @@ def read_selection(path):
             "Selection does not match its registered UFL catalog entry: "
             + repr(differences)
         )
-    checkpoint = path.parent / model["filename"]
-    verify_checkpoint(checkpoint, model)
     return model, checkpoint
 
 
@@ -190,22 +229,38 @@ def selection_catalog(selected):
     local = os.environ.get("CAESAR_MODEL_CATALOG")
     if local and not local.startswith("https://"):
         return load_catalog(local)
-    raise ValueError(
-        "Missing local model catalog snapshot. On a login node, rerun "
-        "model_registry.py for this model (the verified checkpoint is reused), "
-        "or set CAESAR_MODEL_CATALOG to a local catalog file."
-    )
+    # Legacy selections already contain the complete model record and hash.
+    # This snapshot preserves that record; it does not query upstream approval.
+    if "model" not in selected:
+        raise ValueError(
+            "Missing local model catalog snapshot. Recompile with compile_model.py."
+        )
+    model = validate_model(selected["model"])
+    return {"schema_version": 1, "default_model": model["name"], "models": [model]}
 
 
 def export_context():
-    """All exporters must receive one verified selection and a staging directory."""
+    """Resolve a staged installation or a direct, individual exporter invocation."""
     selection = os.environ.get("CAESAR_MODEL_SELECTION")
     output = os.environ.get("CAESAR_EXPORT_DIR")
+    bypass = os.environ.get("CAESAR_MODEL_BYPASS") == "1"
     if not selection or not output:
-        raise RuntimeError(
-            "Run compile_model.py <device> to export a complete installation"
+        parser = argparse.ArgumentParser(
+            description="Compile this model component only; use compile_model.py for a complete installation"
         )
-    model, checkpoint = read_selection(selection)
+        parser.add_argument("device", choices=("cpu", "cuda", "mps", "xpu"))
+        parser.add_argument("mode", nargs="?", choices=("bypass",))
+        parser.add_argument("--bypass", action="store_true")
+        parser.add_argument("--selection", default="pretrained/selected_model.json")
+        parser.add_argument("--output", default="exported_model_dev")
+        args = parser.parse_args()
+        selection, output = args.selection, args.output
+        bypass = args.bypass or args.mode == "bypass"
+        print(
+            "COMPILING ONE COMPONENT ONLY. USE compile_model.py FOR A COMPLETE INSTALLATION.",
+            file=sys.stderr,
+        )
+    model, checkpoint = read_selection(selection, bypass=bypass)
     return model, checkpoint, Path(output)
 
 
@@ -243,9 +298,18 @@ def validate_installation(directory):
         if not separator or not value or key in fields:
             raise ValueError("Malformed installation metadata")
         fields[key] = value
-    snapshot = directory / "model_catalog.json"
-    catalog = load_catalog(snapshot) if snapshot.is_file() else selection_catalog({})
-    model = select_model(catalog, fields.get("model_id", "unregistered"))
+    local_selection = directory / "local_model_selection.json"
+    if local_selection.is_file():
+        model = validate_model(
+            json.loads(local_selection.read_text())["model"], allow_local=True
+        )
+        warn_local()
+    else:
+        snapshot = directory / "model_catalog.json"
+        catalog = (
+            load_catalog(snapshot) if snapshot.is_file() else selection_catalog({})
+        )
+        model = select_model(catalog, fields.get("model_id", "unregistered"))
     expected = dict(
         schema_version="1",
         registration_id=str(model["registration_id"]),
@@ -259,7 +323,7 @@ def validate_installation(directory):
         device=fields.get("device"),
     )
     if fields != expected or fields.get("device") not in ("cpu", "cuda", "mps", "xpu"):
-        raise ValueError("Installation metadata does not match a registered UFL model")
+        raise ValueError("Installation metadata does not match the selected model")
     for filename in (*[f"{c}.pt2" for c in COMPONENTS], *TABLES):
         if (
             not (directory / filename).is_file()
@@ -267,6 +331,54 @@ def validate_installation(directory):
         ):
             raise ValueError(f"Incomplete model installation: {filename}")
     return model
+
+
+def check_registration(selection, catalog_path=None):
+    """Check current UFL membership explicitly; never alter a local selection."""
+    path = Path(selection).resolve()
+    selected = json.loads(path.read_text(encoding="utf-8"))
+    if selected["schema_version"] != 1:
+        raise ValueError("Unsupported selection schema")
+    model = validate_model(selected["model"], allow_local=True)
+    verify_checkpoint(path.parent / model["filename"], model)
+    try:
+        # Deliberately check today's database rather than the saved snapshot.
+        catalog = load_catalog(catalog_path or DEFAULT_CATALOG)
+    except (OSError, ValueError) as error:
+        print(
+            f"WARNING: COULD NOT CHECK THE UFL DATABASE: {error}. "
+            "LOCAL COMPILATION REMAINS AVAILABLE; RETRY ON A NETWORKED LOGIN NODE.",
+            file=sys.stderr,
+        )
+        return 2
+    matches = [
+        entry for entry in catalog["models"] if entry["sha256"] == model["sha256"]
+    ]
+    if matches:
+        registered = matches[0]
+        print(
+            f"Checkpoint is registered in UFL: {registered['name']} ({registered['id']})"
+        )
+        if registered["id"] != model["id"]:
+            print(
+                "Your selection uses a different identity. To select the UFL registration, run: "
+                f"python3 model_registry.py {registered['name']}"
+            )
+        return 0
+    retired = any(
+        entry.get("sha256") == model["sha256"]
+        for entry in catalog.get("retired_models", [])
+    )
+    print(
+        (
+            "WARNING: THIS CHECKPOINT IS RETIRED FROM UFL."
+            if retired
+            else "WARNING: THIS CHECKPOINT IS NOT IN THE UFL DATABASE. SUBMIT IT TO UFL."
+        ),
+        file=sys.stderr,
+    )
+    warn_local()
+    return 1
 
 
 def main():
@@ -279,17 +391,65 @@ def main():
         help="Catalog path or HTTPS URL (default: UFL_MODELS; override with CAESAR_MODEL_CATALOG)",
     )
     parser.add_argument("--list", action="store_true")
+    parser.add_argument(
+        "--check-registration",
+        nargs="?",
+        const="pretrained/selected_model.json",
+        metavar="SELECTION",
+        help="Check the selected checkpoint against the current UFL database; does not compile or change files",
+    )
+    parser.add_argument(
+        "--local",
+        metavar="CHECKPOINT",
+        help="Select a local checkpoint without a registry merge (requires --bypass)",
+    )
+    parser.add_argument("--bypass", action="store_true")
+    parser.add_argument("--min-dims", type=int, default=2)
+    parser.add_argument("--max-dims", type=int, default=5)
     parser.add_argument("--validate-installation", metavar="DIRECTORY")
     parser.add_argument("--output", default="pretrained")
     parser.add_argument(
         "--source-dir", help="Read checkpoints from a local UFL_MODELS checkout"
     )
     args = parser.parse_args()
+    if args.check_registration:
+        raise SystemExit(check_registration(args.check_registration, args.catalog))
+    if args.local:
+        if not args.bypass:
+            parser.error("--local requires --bypass")
+        source = Path(args.local).resolve()
+        digest = sha256(source)
+        model = dict(
+            name=source.stem,
+            filename=source.name,
+            registration_id=0,
+            id=f"local@sha256:{digest}",
+            sha256=digest,
+            architecture=ARCHITECTURE,
+            description="Local unregistered checkpoint",
+            min_dims=args.min_dims,
+            max_dims=args.max_dims,
+        )
+        validate_model(model, allow_local=True)
+        destination = Path(args.output)
+        destination.mkdir(parents=True, exist_ok=True)
+        target = destination / source.name
+        if target.resolve() != source:
+            shutil.copyfile(source, target)
+        verify_checkpoint(target, model)
+        atomic_json(
+            destination / "selected_model.json", {"schema_version": 1, "model": model}
+        )
+        warn_local()
+        print(f"Selected local checkpoint: {target}")
+        return
+    if args.bypass:
+        parser.error("--bypass requires --local")
     if args.catalog:
         os.environ["CAESAR_MODEL_CATALOG"] = args.catalog
     if args.validate_installation:
         model = validate_installation(args.validate_installation)
-        print(f"Registered installation: {model['id']}")
+        print(f"Validated installation: {model['id']}")
         return
     catalog = load_catalog(args.catalog)
     if args.list:
