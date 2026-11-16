@@ -1,6 +1,7 @@
 #include "../CAESAR/cli_result_header.h"
 #include "../CAESAR/models/caesar_compress.h"
 #include "../CAESAR/models/caesar_decompress.h"
+#include "benchmark_options.h"
 
 std::vector<std::string> load_encoded_streams(const std::string &filename) {
   std::vector<std::string> out;
@@ -249,8 +250,8 @@ int main() {
     });
 
     const std::string out_dir = "./output/";
-    const std::string raw_path = "TCf48.bin.f32";
-    const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
+    const auto raw_path = caesar_test::input_path();
+    const auto shape = caesar_test::shape();
 
     std::cout << "\n===== DECOMPRESSION =====\n";
 
@@ -303,9 +304,12 @@ int main() {
     // Decompress
     torch::Device decompression_device = select_model_device();
 
-    auto start_timeD = std::chrono::high_resolution_clock::now();
+    caesar_test::require_gpu(decompression_device);
     Decompressor decompressor;
+    caesar_test::synchronize(decompression_device);
+    auto start_timeD = std::chrono::high_resolution_clock::now();
     torch::Tensor recon = decompressor.decompress(comp);
+    caesar_test::synchronize(decompression_device);
     auto end_timeD = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> secondsD =
@@ -313,6 +317,9 @@ int main() {
                                                                   start_timeD);
     std::cout << "\nTime taken for decompression: " << secondsD.count()
               << " s\n";
+
+    caesar_test::metric("decompression", secondsD.count(),
+                        raw_for_metrics.numel() * sizeof(float));
 
     if (!recon.defined() || recon.numel() == 0) {
       std::cerr << "FAIL: Reconstructed tensor is empty\n";
@@ -349,7 +356,8 @@ int main() {
     std::cout << "NRMSE <= Error bound: "
               << (nrmse <= rel_eb + tolerance ? "YES" : "NO") << "\n";
 
-    bool passed = nrmse <= rel_eb + tolerance;
+    bool passed = std::isfinite(nrmse) && nrmse <= rel_eb + tolerance &&
+                  recon_cpu.sizes() == torch::IntArrayRef(comp.original_shape);
     std::cout << "\n";
     if (passed) {
       std::cout << "┌─────────────────────────────────────────┐\n";

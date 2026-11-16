@@ -1,4 +1,6 @@
+#include "benchmark_options.h"
 #include "nglr.h"
+#include "nglr_gpu_workload.h"
 #include "nglr_training_stop.h"
 
 #include <functional>
@@ -21,8 +23,12 @@ void rejects(const std::function<void()> &call) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--gpu-workload") {
+      test_nglr_gpu_workload();
+      return 0;
+    }
     nglr::detail::ZeroLossStop stop;
     check(!stop.observe(0.0), "stopped after one zero epoch");
     check(!stop.observe(0.0), "stopped after two zero epochs");
@@ -32,6 +38,7 @@ int main() {
     nglr::detail::ZeroLossStop tiny;
     check(!tiny.observe(1e-20) && !tiny.observe(1e-20) && !tiny.observe(1e-20),
           "treated a nonzero loss as zero");
+    const auto device = caesar_test::test_device();
     torch::set_num_threads(1);
     torch::manual_seed(7);
     nglr::NGLRTrainOptions options;
@@ -51,7 +58,7 @@ int main() {
     // re-enable autograd and own normal tensors without changing caller mode.
     {
       c10::InferenceMode inference;
-      nglr::compress(x, r, 0.01, meta, bytes, options);
+      nglr::compress(x, r, 0.01, meta, bytes, options, device, device);
       check(c10::InferenceMode::is_enabled(),
             "training changed caller inference mode");
     }
@@ -64,15 +71,15 @@ int main() {
           updated |= v != 0;
     check(updated, "optimizer did not update zero-initialized output weights");
     // Unit test of the correction codec, independent of any foundation model.
-    auto decoded = nglr::decompress(r, meta, bytes);
+    auto decoded = nglr::decompress(r, meta, bytes, device);
     const auto &m = meta.quantization;
     auto rn = (r - m.x_mean) / m.scale;
     auto q = torch::round((((x - m.x_mean) / m.scale) - rn) / m.step);
     auto expected = (rn + q * m.step) * m.scale + m.x_mean;
     check(torch::equal(decoded, expected),
           "strict codec did not recover the quantized residual");
-    auto trained = nglr::NGLRModel(meta);
-    auto features = trained.encode_recons(r.slice(1, 0, 1));
+    auto trained = nglr::NGLRModel(meta, device);
+    auto features = trained.encode_recons(r.slice(1, 0, 1).to(device));
     auto weights = meta.weights;
     weights[0].name = "missing";
     rejects([&] { trained.load_weights(weights); });
@@ -81,30 +88,33 @@ int main() {
     rejects([&] { trained.load_weights(weights); });
     auto truncated = bytes;
     truncated.pop_back();
-    rejects([&] { nglr::decompress(r, meta, truncated); });
+    rejects([&] { nglr::decompress(r, meta, truncated, device); });
     auto extra = bytes;
     extra.push_back(0);
-    rejects([&] { nglr::decompress(r, meta, extra); });
+    rejects([&] { nglr::decompress(r, meta, extra, device); });
     auto badmeta = meta;
     ++badmeta.schema_version;
-    rejects([&] { nglr::decompress(r, badmeta, bytes); });
+    rejects([&] { nglr::decompress(r, badmeta, bytes, device); });
     badmeta = meta;
     badmeta.weights.clear();
-    rejects([&] { nglr::decompress(r, badmeta, bytes); });
-    rejects([&] { nglr::compress(x, r, 0, meta, bytes, options); });
+    rejects([&] { nglr::decompress(r, badmeta, bytes, device); });
+    rejects(
+        [&] { nglr::compress(x, r, 0, meta, bytes, options, device, device); });
     auto badoptions = options;
     badoptions.epochs = 0;
-    rejects([&] { nglr::compress(x, r, 0.01, meta, bytes, badoptions); });
-    nglr::compress(x, x, 0.01, meta, bytes, options);
+    rejects([&] {
+      nglr::compress(x, r, 0.01, meta, bytes, badoptions, device, device);
+    });
+    nglr::compress(x, x, 0.01, meta, bytes, options, device, device);
     check(!meta.correction_occurred && meta.weights.empty() && bytes.empty(),
           "no-correction case retained a model");
-    check(torch::equal(nglr::decompress(x, meta, bytes), x),
+    check(torch::equal(nglr::decompress(x, meta, bytes, device), x),
           "no-correction path changed input");
     auto constant = torch::full_like(x, 3.25);
-    nglr::compress(constant, r, 0.01, meta, bytes, options);
+    nglr::compress(constant, r, 0.01, meta, bytes, options, device, device);
     check(meta.constant_input && bytes.empty(),
           "constant field was not handled");
-    check(torch::equal(nglr::decompress(r, meta, bytes), constant),
+    check(torch::equal(nglr::decompress(r, meta, bytes, device), constant),
           "constant field changed");
     std::cout << "NGLR training, weights and correction unit tests passed\n";
     return 0;

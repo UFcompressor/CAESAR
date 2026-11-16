@@ -1,6 +1,6 @@
-#include <caesar/models/model_metadata.h>
-#include <caesar/models/range_coder/rans_coder.hpp>
 #include <iostream>
+#include <models/model_metadata.h>
+#include <models/range_coder/rans_coder.hpp>
 #include <stdexcept>
 
 int main(int argc, char **argv) {

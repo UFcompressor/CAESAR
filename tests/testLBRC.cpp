@@ -1,4 +1,5 @@
 #include "../CAESAR/models/lbrc.h"
+#include "benchmark_options.h"
 #include <cassert>
 #include <cmath>
 #include <random>
@@ -197,6 +198,10 @@ static void test_api_roundtrip() {
 
   torch::Tensor orig = torch::from_blob(xv.data(), {B, C, T, H, W}).clone();
   torch::Tensor recon = torch::from_blob(x0v.data(), {B, C, T, H, W}).clone();
+
+  const auto device = caesar_test::test_device();
+  orig = orig.to(device);
+  recon = recon.to(device);
 
   // compress
   LBRCMetaData meta;
