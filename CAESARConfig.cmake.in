@@ -1,8 +1,8 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
 
-set(Torch_DIR "@Torch_DIR@")
-find_dependency(Torch REQUIRED)
+# Keep the build-time Torch location as a hint without overriding the consumer.
+find_dependency(Torch REQUIRED HINTS "@Torch_DIR@")
 
 if(NOT TARGET zstd_target)
     find_package(PkgConfig QUIET)

@@ -114,7 +114,9 @@ foreach(t IN ITEMS test_model_cache test_caesarCD test_caesarC test_caesarD test
         endif()
     endif()
 
-    target_precompile_headers(${t} REUSE_FROM caesar_objs)
+    if(NOT MSVC)
+        target_precompile_headers(${t} REUSE_FROM caesar_objs)
+    endif()
 endforeach()
 
 # Arithmetic tests run without CUDA or model files.
@@ -138,3 +140,12 @@ add_executable(test_model_metadata test_model_metadata.cpp)
 # Buffer serialization tests require no compiled-model execution.
 add_executable(test_serialization test_serialization.cpp)
 target_link_libraries(test_serialization PRIVATE caesar "${TORCH_LIBRARIES}")
+
+# Release builds must still execute the assert() checks in Windows tests.
+# These tests cannot reuse the library PCH because its NDEBUG setting differs.
+if(MSVC)
+    get_property(CAESAR_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(test_target IN LISTS CAESAR_TEST_TARGETS)
+        target_compile_options(${test_target} PRIVATE /UNDEBUG)
+    endforeach()
+endif()

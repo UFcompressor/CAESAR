@@ -238,19 +238,6 @@ jobs:
           ./build/tests/test_serialization
           ./build/tests/test_rans_kernels
 
-      - name: Run CLI round-trip tests
-        shell: bash
-        run: |
-          export CAESAR_MODEL_DIR="$PWD/exported_model"
-          export CAESAR_TEST_DATA="$PWD/build/tests/TCf48.bin.f32"
-          export CAESAR_TEST_SHAPE="1,1,20,256,256"
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH:-}"
-            export OMP_NUM_THREADS=1
-          fi
-          cd build/CAESAR
-          bash ../../tests/test_CLI.sh
-
       - name: Run test_LBRC
         shell: bash
         run: |
@@ -263,6 +250,33 @@ jobs:
           fi
 
           ./test_LBRC
+
+      - name: Run CLI executable round-trip tests
+        shell: bash
+        run: |
+          export CAESAR_TEST_EXE="./caesar"
+          export CAESAR_MODEL_DIR="$PWD/exported_model"
+          export CAESAR_TEST_DATA="$PWD/build/tests/TCf48.bin.f32"
+          export CAESAR_TEST_SHAPE="1,1,20,256,256"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH:-}"
+            export OMP_NUM_THREADS=1
+          fi
+          cd build/CAESAR
+          bash ../../tests/test_CLI.sh
+
+      - name: Stage installation for downstream test
+        if: matrix.os == 'ubuntu-latest'
+        run: cmake --install build --prefix "${{ runner.temp }}/caesar-install"
+
+      - name: Upload staged installation
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: caesar-linux-install
+          path: ${{ runner.temp }}/caesar-install/
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Check test results
         shell: bash
@@ -480,7 +494,7 @@ jobs:
           .\build\tests\test_rans_kernels.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Run CLI round-trip tests
+      - name: Run CLI executable round-trip tests
         run: |
           $torchLib = (conda run -n compress_env python -c "import pathlib, torch; print(pathlib.Path(torch.__file__).parent / 'lib')").Trim()
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -497,3 +511,59 @@ jobs:
       - name: Check test results
         run: |
           echo "Test completed successfully on windows-latest!"
+
+  sanitizer-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build CPU tests with AddressSanitizer and UndefinedBehaviorSanitizer
+        run: |
+          mkdir -p build-sanitizers
+          clang++ -std=c++17 -g -O1 -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -fno-sanitize-recover=all \
+            tests/test_rans_kernels.cpp CAESAR/models/range_coder/rans_coder.cpp \
+            -o build-sanitizers/test_rans_kernels
+          clang++ -std=c++17 -g -O1 -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -fno-sanitize-recover=all \
+            tests/test_model_metadata.cpp -o build-sanitizers/test_model_metadata
+      - name: Run instrumented CPU tests
+        run: |
+          ./build-sanitizers/test_rans_kernels
+          ./build-sanitizers/test_model_metadata
+
+  install-test:
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install consumer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libzstd-dev
+          python -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu
+      - uses: actions/download-artifact@v4
+        with:
+          name: caesar-linux-install
+          path: ${{ runner.temp }}/caesar-install
+      - name: Build and run a consumer of the installed package
+        shell: bash
+        run: |
+          INSTALL_DIR="${{ runner.temp }}/caesar-install"
+          TORCH_PREFIX=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+          TORCH_LIB=$(python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib")')
+          export LD_LIBRARY_PATH="$INSTALL_DIR/lib:$TORCH_LIB:${LD_LIBRARY_PATH:-}"
+          cmake -S tests/install_consumer -B build-consumer \
+            -DCMAKE_PREFIX_PATH="$INSTALL_DIR;$TORCH_PREFIX"
+          cmake --build build-consumer --parallel 2
+          ./build-consumer/install_consumer "$INSTALL_DIR/share/caesar/models"
+          chmod +x "$INSTALL_DIR/bin/caesar"
+          "$INSTALL_DIR/bin/caesar" --help
+          CAESAR_MODEL_DIR="$INSTALL_DIR/share/caesar/models" "$INSTALL_DIR/bin/caesar" --model-info
