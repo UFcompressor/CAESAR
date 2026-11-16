@@ -36,7 +36,9 @@ class SlurmRunnerTests(unittest.TestCase):
             report.write_text(
                 report.read_text().replace("from run_suite import", "from gate import")
             )
-        (root / ".bashrc").write_text('export SETUP_ORDER="bashrc"\n')
+        (root / ".bashrc").write_text(
+            'export SETUP_ORDER="bashrc"\n' + ("false\n" if failure == "bashrc" else "")
+        )
         site = root / "site.sh"
         site.write_text('export SETUP_ORDER="$SETUP_ORDER,site"\n')
         venv = root / "venv/bin"
@@ -46,7 +48,7 @@ class SlurmRunnerTests(unittest.TestCase):
         commands.mkdir()
         mocks = {
             "git": '#!/bin/bash\nif [[ "$*" == *show-toplevel* ]]; then echo "$MOCK_ROOT"; else printf "%040d\\n" 0; fi\n',
-            "python3": '#!/bin/bash\n[[ "$SETUP_ORDER" == "bashrc,site,venv" && "$PYTHONNOUSERSITE" == 1 ]] || exit 91\nif [[ "${1:-}" == -c ]]; then\n  if [[ "$2" == *cmake_prefix_path* ]]; then echo /mock/torch; else echo nvidia; fi\nelse\n  exec "$REAL_PYTHON" "$@"\nfi\n',
+            "python3": '#!/bin/bash\n[[ "$SETUP_ORDER" == "bashrc,site,venv" && "$PYTHONNOUSERSITE" == 1 ]] || exit 91\nif [[ "${1:-}" == -c ]]; then\n  if [[ "$2" == *cmake_prefix_path* ]]; then echo /mock/torch; elif [[ "$2" == *torch.version.hip* ]]; then echo nvidia; fi\nelse\n  exec "$REAL_PYTHON" "$@"\nfi\n',
             "cmake": '#!/bin/bash\n[[ "$MOCK_FAIL" != build ]] || exit 7\n',
             "make": '#!/bin/bash\n[[ "$*" == *-j6* ]] || exit 92\n',
             "gh": '#!/bin/bash\ncat > "$MOCK_PUBLISHED"\n',
@@ -85,6 +87,13 @@ class SlurmRunnerTests(unittest.TestCase):
                 self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
                 self.assertEqual(payload["state"], "success")
                 self.assertEqual(payload["context"], f"gpu-tests/nvidia/{mode}")
+
+    def test_nonzero_bashrc_does_not_skip_site_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process, payload = self.run_mock_job(directory, "correctness", "bashrc")
+            self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+            self.assertEqual(payload["state"], "success")
+            self.assertIn("WARNING: ~/.bashrc returned nonzero", process.stderr)
 
     def test_build_and_suite_failures_are_reported_and_remain_failures(self):
         for failure in ("build", "suite"):

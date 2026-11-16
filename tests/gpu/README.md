@@ -35,6 +35,10 @@ source /lustre/blue2/ranka/eklasky/caesar_venv/bin/activate
 No script installs PyTorch or downloads a dataset. User-site Python packages
 are disabled so `~/.local` cannot override the selected virtual environment.
 On another cluster, set `CAESAR_ENV_FILE` and `CAESAR_VENV` to your own paths.
+The job prints each setup/build/test stage and the Python executable. A nonzero
+return from interactive `.bashrc` prints a warning and does not skip the
+explicit site/venv setup. Site setup and activation failures remain fatal;
+errors include the stage and source line in the log and saved result.
 
 From the repository root, submit these scripts (no initial build is required):
 
