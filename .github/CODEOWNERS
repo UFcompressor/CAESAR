@@ -1,0 +1,4 @@
+# Ethan Klasky (@E53klasky) owns all CAESAR source, tests, documentation,
+# build configuration, and GitHub workflows, including this file.
+# Enforce with "Require review from Code Owners" in the branch ruleset.
+* @E53klasky
