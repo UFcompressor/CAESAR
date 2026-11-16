@@ -548,6 +548,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ libzstd-dev
+          python -m pip install "numpy<2"
           python -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu
       - uses: actions/download-artifact@v4
         with:
@@ -567,3 +568,17 @@ jobs:
           chmod +x "$INSTALL_DIR/bin/caesar"
           "$INSTALL_DIR/bin/caesar" --help
           CAESAR_MODEL_DIR="$INSTALL_DIR/share/caesar/models" "$INSTALL_DIR/bin/caesar" --model-info
+
+  gpu-script-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Slurm shell syntax
+        run: |
+          bash -n tests/gpu/run.sh
+          bash -n tests/gpu/setup_env.sh
+          bash -n tests/gpu/gpu-performance.slurm
+          bash -n tests/gpu/gpu-correctness.slurm
+      - name: Test GPU performance thresholds and result reporting on CPU
+        run: python3 -m unittest discover -s tests/gpu -p 'test_*.py' -v

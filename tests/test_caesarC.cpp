@@ -1,5 +1,6 @@
 #include "../CAESAR/cli_result_header.h"
 #include "../CAESAR/models/caesar_compress.h"
+#include "benchmark_options.h"
 
 bool save_encoded_streams(const std::vector<std::string> &streams,
                           const std::string &filename) {
@@ -340,8 +341,8 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    const std::vector<int64_t> shape = {1, 1, 20, 256, 256};
-    const std::string raw_path = "TCf48.bin.f32";
+    const auto shape = caesar_test::shape();
+    const auto raw_path = caesar_test::input_path();
     const std::string out_dir = "./output/";
 
     std::filesystem::create_directories(out_dir);
@@ -362,12 +363,15 @@ int main(int argc, char *argv[]) {
 
     config.n_frame = n_frame;
 
+    caesar_test::require_gpu(compression_device);
+    caesar_test::synchronize(compression_device);
     std::cout << "Error bound for compression: " << rel_eb << "\n";
     auto start_timeC = std::chrono::high_resolution_clock::now();
     // Select the correction method through the compression configuration.
     const auto correction_method = caesar::CorrectionMethod::GAE;
     config.correction_method = correction_method;
     CompressionResult comp = compressor.compress(config, rel_eb);
+    caesar_test::synchronize(compression_device);
     auto end_timeC = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> secondsC =
         std::chrono::duration_cast<std::chrono::duration<double>>(end_timeC -
@@ -414,6 +418,8 @@ int main(int argc, char *argv[]) {
     for (auto d : shape)
       num_elements *= static_cast<uint64_t>(d);
     uint64_t uncompressed_bytes = num_elements * sizeof(float);
+
+    caesar_test::metric("compression", secondsC.count(), uncompressed_bytes);
 
     size_t comp_all_meta_size = calculate_metadata_size(comp);
 

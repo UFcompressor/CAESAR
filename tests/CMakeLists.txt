@@ -1,3 +1,5 @@
+option(CAESAR_TEST_ASSERTIONS "Keep test assertions enabled in Release builds" OFF)
+
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
@@ -114,7 +116,7 @@ foreach(t IN ITEMS test_model_cache test_caesarCD test_caesarC test_caesarD test
         endif()
     endif()
 
-    if(NOT MSVC)
+    if(NOT MSVC AND NOT CAESAR_TEST_ASSERTIONS)
         target_precompile_headers(${t} REUSE_FROM caesar_objs)
     endif()
 endforeach()
@@ -149,3 +151,15 @@ if(MSVC)
         target_compile_options(${test_target} PRIVATE /UNDEBUG)
     endforeach()
 endif()
+
+if(CAESAR_TEST_ASSERTIONS AND NOT MSVC)
+    get_property(CAESAR_ASSERT_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(test_target IN LISTS CAESAR_ASSERT_TARGETS)
+        target_compile_options(${test_target} PRIVATE -UNDEBUG)
+    endforeach()
+endif()
+
+# Stage entry points next to test executables; input data remains untouched.
+foreach(script IN ITEMS gpu-performance.slurm gpu-correctness.slurm)
+    configure_file(gpu/${script} ${CMAKE_CURRENT_BINARY_DIR}/${script} COPYONLY)
+endforeach()
