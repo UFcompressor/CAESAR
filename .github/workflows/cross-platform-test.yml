@@ -577,6 +577,7 @@ jobs:
       - name: Validate Slurm shell syntax
         run: |
           bash -n tests/gpu/run.sh
+          bash -n tests/gpu/setup_env.sh
           bash -n tests/gpu/gpu-performance.slurm
           bash -n tests/gpu/gpu-correctness.slurm
       - name: Test GPU performance thresholds and result reporting on CPU

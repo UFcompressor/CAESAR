@@ -55,11 +55,15 @@ def main():
     ).strip()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     work = build / "tests" / "gpu-results" / f"{sha[:12]}-{args.mode}-{stamp}"
-    work.mkdir(parents=True)
+    report_path = os.environ.get("CAESAR_GPU_RESULT")
+    if report_path:
+        work = Path(report_path).resolve().parent
+    work.mkdir(parents=True, exist_ok=bool(report_path))
     result = {
         "schema_version": 1,
         "sha": sha,
         "mode": args.mode,
+        "backend": os.environ.get("CAESAR_GPU_BACKEND", "nvidia"),
         "passed": False,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "work_directory": str(work),
@@ -222,8 +226,9 @@ def main():
         report = work / "result.json"
         report.write_text(json.dumps(result, indent=2) + "\n")
         print(f"GPU RESULT: {report}")
-        print("Report from a network-connected node using:")
-        print(f"python3 {root / 'tests/gpu/report.py'} {report} --repo OWNER/REPO")
+        print("The Slurm runner reports automatically. To retry reporting manually:")
+        repo = os.environ.get("CAESAR_GPU_REPO", "UFcompressor/CAESAR")
+        print(f"python3 {root / 'tests/gpu/report.py'} {report} --repo {repo}")
     return 0 if result["passed"] else 1
 
 

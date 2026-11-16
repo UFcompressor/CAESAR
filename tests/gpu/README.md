@@ -23,16 +23,22 @@ separate nine-dataset/five-error-bound campaign.
 ## Submit jobs
 
 Commit the changes, check out the exact commit you want to test on the cluster,
-and prepare/export its GPU models using your usual environment. No script
-installs PyTorch or downloads a dataset. An existing GPU-enabled PyTorch must
-already be in the selected Python environment.
+and prepare/export its GPU models using your usual environment. Before Python
+runs, both jobs source these three files in order:
+
+```bash
+source ~/.bashrc
+source /lustre/blue2/ranka/eklasky/data/test/set_env_ufl_caesar.sh
+source /lustre/blue2/ranka/eklasky/caesar_venv/bin/activate
+```
+
+No script installs PyTorch or downloads a dataset. User-site Python packages
+are disabled so `~/.local` cannot override the selected virtual environment.
+On another cluster, set `CAESAR_ENV_FILE` and `CAESAR_VENV` to your own paths.
 
 From the repository root, submit these scripts (no initial build is required):
 
 ```bash
-# Optional, if you normally need this environment setup:
-export CAESAR_ENV_FILE=/absolute/path/to/set_env_ufl_caesar.sh
-
 sbatch tests/gpu/gpu-performance.slurm
 sbatch tests/gpu/gpu-correctness.slurm
 ```
@@ -72,7 +78,9 @@ srun --ntasks=1 --cpus-per-task=6 bash tests/gpu/run.sh correctness
 For AMD/Frontier use your site's normal Slurm allocation options and existing
 ROCm build environment. The B200 partition/resource defaults are not Frontier
 settings. The runner detects ROCm, exercises the portable tests, and explicitly
-skips NVIDIA-only CUDA rANS and nvCOMP tests. NVIDIA rANS is mandatory on NVIDIA;
+skips NVIDIA-only CUDA rANS and nvCOMP tests. Set `CAESAR_GPU_BACKEND=amd` for AMD jobs so even setup failures are reported
+to the AMD check (the backend is otherwise detected after Torch loads).
+NVIDIA rANS is mandatory on NVIDIA;
 nvCOMP is optional and its absence is recorded in the report.
 
 ## GitHub waiting checks
@@ -89,22 +97,28 @@ Request external GPU tests → Run workflow**, selecting the branch/tag and
 NVIDIA or AMD backend. AMD creates corresponding `gpu-tests/amd/...` checks.
 Manual dispatch requires the workflow on the default branch.
 
-After a suite finishes, its Slurm log prints the path to `result.json` and the
-report command. From a network-connected login node/workstation with `gh`
-already authenticated for that repository, run:
+After a suite finishes, the job automatically runs `report.py` for
+`UFcompressor/CAESAR`, including when tests fail. Setup/configuration/build
+failures also generate a failed report. Authenticate `gh` once using `gh auth
+login` on the cluster; credentials must be available to the batch job.
+Override the repository with `CAESAR_GPU_REPO=OWNER/REPO` if needed.
+
+If the compute node cannot reach GitHub or authentication fails, the batch job
+exits nonzero and prints the saved `result.json` path and an exact retry command.
+From a network-connected login node/workstation, run:
 
 ```bash
 python3 tests/gpu/report.py /path/to/result.json --repo OWNER/REPO --dry-run
 python3 tests/gpu/report.py /path/to/result.json --repo OWNER/REPO
 ```
 
-Report both result files. This updates only the exact commit recorded at test
-time; it never marks a newer commit successful. Tokens are not needed on GPU
-compute nodes. Reports contain logs, executable hashes, GPU/PyTorch details,
+Both jobs report their own result files. This updates only the exact commit recorded at test
+time; it never marks a newer commit successful. Automatic reporting uses your existing `gh` authentication on the compute
+node; no token is embedded in a script. Reports contain logs, executable hashes, GPU/PyTorch details,
 all five timings, thresholds, and pass/fail results. Keep the results directory
 for review. The reporter trusts maintainer-provided files; it is not a signed
-attestation. Build failures/timeouts leave the check pending: fix/retry rather
-than manually marking success.
+attestation. Hard kills/timeouts that prevent the exit handler from finishing can leave
+the check pending: retry the job or report an existing saved result.
 
 Pending statuses block merging only when the repository's rules require those
 checks. Configure that separately; no branch protection is changed by this PR.
