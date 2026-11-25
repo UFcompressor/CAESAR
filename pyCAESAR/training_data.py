@@ -2,12 +2,15 @@
 
 import math
 import os
+import time
+from bisect import bisect_right
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
-from itertools import accumulate
+from itertools import accumulate, product
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+
 
 from pyCAESAR.dataset import BaseDataset, block_hw, deblock_hw
 
@@ -30,6 +33,7 @@ class Volume:
     section: int | None = None
     block: int | None = None
     boundaries: tuple = ()
+    writer_blocks: tuple = ()
 
     def read(self, reader, frame, length):
         start = [self.frame_start + frame, 0, 0]
@@ -95,7 +99,13 @@ def describe_bp(reader, options):
         )
 
         def add(
-            step_group, spatial, axis=None, section=None, block=None, boundaries=()
+            step_group,
+            spatial,
+            axis=None,
+            section=None,
+            block=None,
+            boundaries=(),
+            writer_blocks=(),
         ):
             frames = selected_indices(spatial[0], options.get("frame_range"))
             if not frames:
@@ -110,9 +120,25 @@ def describe_bp(reader, options):
                     section,
                     block,
                     boundaries,
+                    writer_blocks,
                 )
             )
 
+        # Preserve the complete native extent. Multiple 4D sections can refer
+        # to the same physical writer block; read it once for all its sections.
+        layouts = {}
+        if shape:
+            for step, blocks in zip(steps, block_info):
+                extents = tuple(
+                    (
+                        step,
+                        dimensions(b["Start"]),
+                        dimensions(b["Count"]),
+                        int(b["BlockID"]),
+                    )
+                    for b in blocks
+                )
+                layouts[step] = extents if len(extents) > 1 else ()
         if not shape:
             for step, blocks in zip(steps, block_info):
                 for block in blocks:
@@ -125,13 +151,22 @@ def describe_bp(reader, options):
         elif len(shape) == 2:
             if len(steps) == 1:
                 raise ValueError(f"{name}: a 2D field needs multiple selected steps")
-            add(steps, (len(steps), *shape))
+            add(
+                steps,
+                (len(steps), *shape),
+                writer_blocks=(
+                    tuple(extent for step in steps for extent in layouts[step])
+                    if all(layouts.values())
+                    else ()
+                ),
+            )
         elif len(shape) == 3:
             for step, blocks in zip(steps, block_info):
                 starts = {dimensions(block["Start"]) for block in blocks}
                 add(
                     (step,),
                     shape,
+                    writer_blocks=layouts[step],
                     boundaries=tuple(sorted({start[0] for start in starts if start})),
                 )
         elif len(shape) == 4:
@@ -150,7 +185,13 @@ def describe_bp(reader, options):
             spatial = shape[:axis] + shape[axis + 1 :]
             for step in steps:
                 for section in range(shape[axis]):
-                    add((step,), spatial, axis=axis, section=section)
+                    add(
+                        (step,),
+                        spatial,
+                        axis=axis,
+                        section=section,
+                        writer_blocks=layouts[step],
+                    )
         else:
             raise ValueError(f"{name}: unsupported ADIOS shape {shape}")
     if not volumes:
@@ -192,7 +233,7 @@ def plan_windows(volumes, width, stride, rank, world_size):
             length = min(volume.shape[0] - start, (count - 1) * stride + width)
             # Include frames needed to reproduce reflection at the global tail.
             tail = (count - 1) * stride + width - length
-            halo = max(0, tail - length)
+            halo = min(start, max(0, tail - length))
             yield volume, start - halo, length + halo, count, halo, tail
 
 
@@ -202,9 +243,139 @@ def open_bp(options):
     return FileReader(options["data_path"])
 
 
+def block_intersection(volume, extent, frame, length):
+    """Map the intersection of a native writer block and a 3D shard to both arrays."""
+    step, origin, count, _ = extent
+    lower = [volume.frame_start + frame, 0, 0]
+    upper = [lower[0] + length, *volume.shape[1:]]
+    if len(origin) == 2:
+        origin = (step - volume.steps[0], *origin)
+        count = (1, *count)
+    if volume.axis is not None:
+        lower.insert(volume.axis, volume.section)
+        upper.insert(volume.axis, volume.section + 1)
+    start = [max(a, b) for a, b in zip(lower, origin)]
+    end = [min(a, b + c) for a, b, c in zip(upper, origin, count)]
+    shape = [b - a for a, b in zip(start, end)]
+    if min(shape) <= 0:
+        return None
+    source = [slice(a - o, b - o) for a, b, o in zip(start, end, origin)]
+    dest = [slice(a - o, b - o) for a, b, o in zip(start, end, lower)]
+    if volume.axis is not None:
+        source[volume.axis] = source[volume.axis].start
+        del dest[volume.axis]
+        del shape[volume.axis]
+    elif len(extent[1]) == 2:
+        source = source[1:]
+    return tuple(source), tuple(dest), tuple(shape)
+
+
+def load_writer_blocks(reader, plans, volumes, rank, group, plan_only):
+    """One disk owner per block. Forward only intersecting boundary pieces."""
+    import torch.distributed as dist
+    from adios2 import Mode
+
+    requests = defaultdict(list)
+    arrays = {}
+    filled = defaultdict(int)
+    for owner, entries in enumerate(plans):
+        for vi, (volume, start, length, *_) in entries.items():
+            if not volume.writer_blocks:
+                continue
+            if owner == rank and not plan_only:
+                arrays[vi] = np.empty((length, *volume.shape[1:]), dtype=np.float32)
+            for extent in volume.writer_blocks:
+                part = block_intersection(volume, extent, start, length)
+                if part is not None:
+                    requests[volume.variable, extent].append((owner, vi, *part))
+
+    get_seconds = 0.0
+
+    def distribute(batch):
+        nonlocal get_seconds
+        if not batch:
+            return
+        if any(owner == rank for owner, _, _, _ in batch):
+            start = time.monotonic()
+            reader.engine.perform_gets()
+            get_seconds += time.monotonic() - start
+        for owner, values, parts, _ in batch:
+            for target, vi, source, dest, shape in parts:
+                if rank == owner:
+                    piece = values[source].reshape(shape)
+                    if target == rank:
+                        arrays[vi][dest] = piece
+                    else:
+                        data = np.asarray(piece, dtype=np.float32, order="C")
+                        dist.send(torch.from_numpy(data), target, group=group)
+                elif rank == target:
+                    piece = torch.empty(shape, dtype=torch.float32)
+                    dist.recv(piece, owner, group=group)
+                    arrays[vi][dest] = piece.numpy()
+                if rank == target:
+                    filled[vi] += math.prod(shape)
+
+    batch = []
+    pending_bytes = 0
+    logical_bytes = 0
+    block_count = 0
+    assigned_bytes = [0] * len(plans)
+    variables = {
+        name: reader.inquire_variable(name) for name in {key[0] for key in requests}
+    }
+    for name, extent in sorted(requests):
+        step, _, count, block_id = extent
+        parts = requests[name, extent]
+        sizes = defaultdict(int)
+        for target, _, _, _, shape in parts:
+            sizes[target] += math.prod(shape)
+        owner = max(
+            sizes, key=lambda candidate: (sizes[candidate], -assigned_bytes[candidate])
+        )
+        var = variables[name]
+        dtype = np.float64 if var.type() == "double" else np.float32
+        size = math.prod(count) * np.dtype(dtype).itemsize
+        assigned_bytes[owner] += size
+        if owner == rank:
+            logical_bytes += size
+            block_count += 1
+        if plan_only:
+            continue
+        if pending_bytes + size > 128 * 1024**2 or len(batch) >= 64:
+            distribute(batch)
+            batch = []
+            pending_bytes = 0
+        values = None
+        if owner == rank:
+            values = np.empty(count, dtype=dtype)
+            var.set_step_selection([step, 1])
+            var.set_block_selection(block_id)
+            reader.engine.get(var, values, Mode.Deferred)
+        batch.append((owner, values, parts, size))
+        pending_bytes += size
+    distribute(batch)
+    for vi, array in arrays.items():
+        if filled[vi] != array.size:
+            raise ValueError(f"Incomplete block coverage for {volumes[vi].variable}")
+    if requests:
+        print(
+            f"rank={rank} writer_blocks={block_count} selected_bytes={logical_bytes} deferred_get_seconds={get_seconds:.3f}",
+            flush=True,
+        )
+    return arrays
+
+
 class ShardDataset(BaseDataset):
     def __init__(
-        self, options, rank, world_size, open_source, describe, plan_only=False
+        self,
+        options,
+        rank,
+        world_size,
+        open_source,
+        describe,
+        plan_only=False,
+        group=None,
+        use_writer_blocks=True,
     ):
         super().__init__(options)
         if not self.inst_norm:
@@ -218,10 +389,23 @@ class ShardDataset(BaseDataset):
         self.length = 0
         with open_source(options) as reader:
             volumes = describe(reader, options)
-            for volume, start, length, count, halo, tail in plan_windows(
-                volumes, self.n_frame, self.stride, rank, world_size
-            ):
-                retained = (length + tail) * math.prod(volume.shape[1:]) * 4
+            indices = {id(v): i for i, v in enumerate(volumes)}
+            plans = [
+                {
+                    indices[id(entry[0])]: entry
+                    for entry in plan_windows(
+                        volumes, self.n_frame, self.stride, owner, world_size
+                    )
+                }
+                for owner in range(world_size)
+            ]
+            arrays = (
+                load_writer_blocks(reader, plans, volumes, rank, group, plan_only)
+                if use_writer_blocks and any(v.writer_blocks for v in volumes)
+                else {}
+            )
+            for vi, (volume, start, length, count, halo, tail) in plans[rank].items():
+                retained = length * math.prod(volume.shape[1:]) * 4
                 print(
                     f"rank={rank} {self.dataset_name} {volume.variable} "
                     f"steps={volume.steps} section={volume.section} block={volume.block} "
@@ -231,9 +415,11 @@ class ShardDataset(BaseDataset):
                 )
                 if not plan_only:
                     try:
-                        raw = volume.read(reader, start, length)
-                        if tail:
-                            raw = pad_frames(raw, length + tail)
+                        raw = (
+                            arrays.pop(vi)
+                            if vi in arrays
+                            else volume.read(reader, start, length)
+                        )
                         self.shards.append((torch.from_numpy(raw), halo))
                     except Exception as exc:
                         raise RuntimeError(
@@ -250,17 +436,154 @@ class ShardDataset(BaseDataset):
         return self.visible_length
 
     def __getitem__(self, index):
-        from bisect import bisect_right
-
         index %= self.length
         shard = bisect_right(self.ends, index)
         base = self.ends[shard - 1] if shard else 0
-        raw, halo = self.shards[shard]
-        start = (index - base) * self.stride + halo
-        crop = self.apply_padding_or_crop(
-            self.apply_augments(raw[start : start + self.n_frame])
+        start = (index - base) * self.stride + self.shards[shard][1]
+        return {"dataset": self.dataset_name, "index": (shard, start)}
+
+
+class DeviceBatch:
+    """Cache bounded 3D tiles on the rank device and assemble crops there."""
+
+    def __init__(self, datasets, device, cache_bytes=512 * 1024**2):
+        self.datasets = {d.dataset_name: d for d in datasets}
+        self.device = device
+        self.cache = OrderedDict()
+        self.bytes = 0
+        if cache_bytes < 4:
+            raise ValueError("Tile cache must fit at least one float32 value")
+        self.limit = cache_bytes
+        self.profile = (
+            device.type == "cuda" and os.environ.get("CAESAR_PROFILE_BATCH") == "1"
         )
-        return {"input": crop[None], "index": (shard, start - halo)}
+        self.copy_time = 0.0
+        self.batch_events = []
+        self.volume_bytes = 0
+
+    def tile(self, name, shard, raw, origin, tile_shape):
+        key = (name, shard, *origin)
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        selection = tuple(slice(o, o + n) for o, n in zip(origin, tile_shape))
+        src = raw[selection]
+        size = src.numel() * src.element_size()
+        while self.cache and self.bytes + size > self.limit:
+            old = self.cache.popitem(last=False)[1]
+            self.bytes -= old.numel() * old.element_size()
+        before = time.monotonic() if self.profile else 0.0
+        tile = src.to(self.device, memory_format=torch.contiguous_format)
+        if self.profile:
+            self.copy_time += time.monotonic() - before
+            self.volume_bytes += size
+        self.cache[key] = tile
+        self.bytes += size
+        return tile
+
+    def sample(self, name, shard, frame):
+        ds = self.datasets[name]
+        raw = ds.shards[shard][0]
+        aug = ds.augment_type
+        stride = aug.get("downsample", 1)
+        if "randsample" in aug and "downsample" not in aug:
+            stride = int(torch.randint(1, aug["randsample"] + 1, ()))
+        if stride < 1:
+            raise ValueError("Downsampling stride must be positive")
+        # Schedule only tiles touched by the random crop. Tensor slicing,
+        # striding, boundary assembly, and padding operate on the GPU.
+        depth = len(raw)
+        tail = max(0, frame + ds.n_frame - depth)
+        first = max(0, min(frame, depth - tail))
+        start = [first]
+        shape = [min(depth, frame + ds.n_frame) - first]
+        for extent in raw.shape[1:]:
+            available = (extent + stride - 1) // stride
+            length = min(ds.train_size, available)
+            start.append(int(torch.randint(available - length + 1, ())) * stride)
+            shape.append(length)
+        result = torch.empty(shape, device=self.device)
+
+        tile_shape = [
+            min(d, k)
+            for d, k in zip(raw.shape, (ds.n_frame * 2, ds.train_size, ds.train_size))
+        ]
+        while math.prod(tile_shape) * raw.element_size() > self.limit:
+            longest = max(range(len(tile_shape)), key=tile_shape.__getitem__)
+            tile_shape[longest] = (tile_shape[longest] + 1) // 2
+        chunks = []
+        for offset, length, step, tile_size in zip(
+            start, shape, (1, stride, stride), tile_shape
+        ):
+            axis = []
+            pos = 0
+            while pos < length:
+                coord = offset + pos * step
+                origin = coord // tile_size * tile_size
+                n = min(length - pos, (origin + tile_size - coord + step - 1) // step)
+                axis.append(
+                    (
+                        origin,
+                        slice(coord - origin, coord - origin + n * step, step),
+                        slice(pos, pos + n),
+                    )
+                )
+                pos += n
+            chunks.append(axis)
+        for parts in product(*chunks):
+            origin, src, dest = zip(*parts)
+            result[dest].copy_(self.tile(name, shard, raw, origin, tile_shape)[src])
+        if tail:
+            positions = (torch.arange(ds.n_frame, device=self.device) + frame) % (
+                2 * depth
+            )
+            positions = torch.minimum(positions, 2 * depth - 1 - positions)
+            result = result.index_select(0, positions - first)
+        h, w = shape[1:]
+        dh, dw = ds.train_size - h, ds.train_size - w
+        if dh or dw:
+            result = torch.nn.functional.pad(
+                result[None],
+                (dw // 2, dw - dw // 2, dh // 2, dh - dh // 2),
+                mode="reflect",
+            )[0]
+        return result[None]
+
+    def __call__(self, batch):
+        shards, starts = batch["index"]
+        if self.profile:
+            begin = torch.cuda.Event(enable_timing=True)
+            begin.record()
+        result = {
+            **batch,
+            "input": torch.stack(
+                [
+                    self.sample(name, shard, start)
+                    for name, shard, start in zip(
+                        batch["dataset"], shards.tolist(), starts.tolist()
+                    )
+                ]
+            ),
+        }
+        if self.profile:
+            end = torch.cuda.Event(enable_timing=True)
+            end.record()
+            self.batch_events.append((begin, end))
+        return result
+
+    def report_profile(self, rank):
+        if self.profile:
+            # Called after epoch losses have been copied to the host.
+            elapsed = sum(start.elapsed_time(end) for start, end in self.batch_events)
+            print(
+                f"rank={rank} staged_bytes={self.volume_bytes} "
+                f"blocking_transfer_seconds={self.copy_time:.3f} "
+                f"batch_assembly_including_transfer_seconds={elapsed/1000:.3f}",
+                flush=True,
+            )
+            self.batch_events.clear()
+            self.copy_time = 0.0
+            self.volume_bytes = 0
 
 
 def pad_frames(raw, width):

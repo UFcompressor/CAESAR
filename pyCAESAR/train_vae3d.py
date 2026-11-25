@@ -139,6 +139,7 @@ def train_epoch_vae(
     debug=False,
     max_iterations=None,
     norm_type=None,
+    prepare_batch=None,
 ):
     """Train the model for one epoch."""
     model.train()
@@ -156,7 +157,8 @@ def train_epoch_vae(
         if max_iterations is not None and iteration >= max_iterations:
             break
         t0 = time.time()
-        # inputs = data_dict["input"].to(device, non_blocking=True)
+        if prepare_batch is not None:
+            data_dict = prepare_batch(data_dict)
         inputs = (
             data_dict["input"]
             .to(device, non_blocking=True)
@@ -241,6 +243,11 @@ def train_epoch_vae(
 
         sample_count += inputs.size(0)
         iteration += 1
+        if iteration == 1 and prepare_batch is not None and dist.get_rank() == 0:
+            print(
+                f"First optimizer update complete, loss={loss.detach().item():.6g}",
+                flush=True,
+            )
         if debug and iteration < 30:
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -447,10 +454,18 @@ def run_training(args, rank, world_size, device, staging):
     train_args = convert_args(args, train=True)
     test_args = convert_args(args, train=False)
     norm_type = None
+    prepare_batch = None
     test_loaders = []
     startup = time.monotonic()
+    if os.environ.get("CAESAR_IO_BENCHMARK") and not distributed:
+        raise ValueError("Launch the distributed reader benchmark with torchrun")
     if distributed or args.plan_only:
-        from pyCAESAR.training_data import ShardDataset, source_for, stage_npz
+        from pyCAESAR.training_data import (
+            DeviceBatch,
+            ShardDataset,
+            source_for,
+            stage_npz,
+        )
 
         if distributed and not args.plan_only:
             staging = stage_npz(
@@ -464,20 +479,42 @@ def run_training(args, rank, world_size, device, staging):
         if len(norms) != 1:
             raise ValueError("Distributed training requires a common norm_type")
         norm_type = norms.pop()
+        boundary_group = (
+            dist.new_group(backend="gloo")
+            if distributed and not args.plan_only
+            else None
+        )
+        io_mode = os.environ.get("CAESAR_IO_BENCHMARK", "")
+        if io_mode not in ("", "writer", "slab"):
+            raise ValueError("CAESAR_IO_BENCHMARK must be writer or slab")
         train_datasets = []
         for options in train_args.values():
             source, describe = source_for(options, staging, args.plan_only)
             train_datasets.append(
                 ShardDataset(
-                    options, rank, world_size, source, describe, args.plan_only
+                    options,
+                    rank,
+                    world_size,
+                    source,
+                    describe,
+                    args.plan_only,
+                    boundary_group,
+                    io_mode != "slab",
                 )
             )
+        if io_mode:
+            print(
+                f"rank={rank} reader={io_mode} local_load_seconds={time.monotonic()-startup:.3f}",
+                flush=True,
+            )
+            return
         if args.plan_only:
             if sum(map(len, train_datasets)) < local_batch_size:
                 raise ValueError(
                     f"Rank {rank} has fewer windows than one complete batch"
                 )
             return
+        prepare_batch = DeviceBatch(train_datasets, device)
         # Match the single-process weighting by repeating smaller datasets locally.
         largest = max(map(len, train_datasets))
         for dataset in train_datasets:
@@ -512,6 +549,10 @@ def run_training(args, rank, world_size, device, staging):
     )
     epoch_batches = len(train_loader)
     if distributed:
+        print(
+            f"rank={rank} local_load_complete seconds={time.monotonic()-startup:.2f}",
+            flush=True,
+        )
         common_batches = torch.tensor(epoch_batches, device=device)
         dist.all_reduce(common_batches, op=dist.ReduceOp.MIN)
         epoch_batches = int(common_batches)
@@ -654,6 +695,7 @@ def run_training(args, rank, world_size, device, staging):
             debug=args.debug,
             max_iterations=limit,
             norm_type=norm_type,
+            prepare_batch=prepare_batch,
         )
         train_loss = mse_loss + bbp_loss
 
@@ -662,10 +704,13 @@ def run_training(args, rank, world_size, device, staging):
             loss = torch.tensor([mse_loss, bbp_loss], device=device)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             train_loss = float(loss.sum()) / world_size
+            elapsed = time.monotonic() - training_start
+            prepare_batch.report_profile(rank)
             if rank == 0:
                 print(
                     f"step={cur_iters}/{args.iterations} loss={train_loss:.6f} "
-                    f"training_seconds={time.monotonic() - training_start:.2f}",
+                    f"training_seconds={elapsed:.2f} seconds_per_update={elapsed/batches:.4f} "
+                    f"samples_per_second={args.batch_size*batches/elapsed:.2f}",
                     flush=True,
                 )
                 interval = args.validate_every
@@ -758,7 +803,25 @@ def main():
 
     try:
         if world_size > 1:
-            dist.init_process_group("nccl", timeout=timedelta(hours=2))
+            check_only = os.environ.get("CAESAR_NCCL_CHECK_ONLY") == "1"
+            dist.init_process_group(
+                "nccl",
+                timeout=timedelta(minutes=2) if check_only else timedelta(hours=2),
+            )
+            print(
+                f"rank={rank} host={os.uname().nodename} local_rank={local_rank} "
+                f"visible={os.environ.get('CUDA_VISIBLE_DEVICES')} "
+                f"gpu={getattr(torch.cuda.get_device_properties(device), 'uuid', device)} "
+                "starting NCCL check",
+                flush=True,
+            )
+            probe = torch.tensor(rank + 1, device=device)
+            dist.all_reduce(probe)
+            if int(probe) != world_size * (world_size + 1) // 2:
+                raise RuntimeError("Unexpected NCCL reduction result")
+            print(f"rank={rank} NCCL check passed", flush=True)
+            if check_only:
+                return
         with ExitStack() as stack:
             if world_size > 1:
                 from pyCAESAR.training_data import npz_staging
