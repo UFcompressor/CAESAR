@@ -6,7 +6,7 @@ The first prototype covers the Python foundation-model trainer and will be hande
 
 - Run one `torchrun` launcher per node with one process per GPU. Use `LOCAL_RANK` for CUDA device selection, `RANK` for shard ownership, and `WORLD_SIZE` for the total number of GPU processes. Use NCCL for DDP. Each GPU holds a full model replica and DDP synchronizes gradients.
 - Treat `--batch_size` as global. Two nodes with two GPUs each and a global batch of 64 give each rank 16 samples per step. Require the batch size to divide evenly by the world size.
-- Treat `--iterations` as thousands of rank-iterations across the run. With `--iterations 100`, one GPU performs 100,000 optimizer updates. Four GPUs perform 25,000 local iterations each and 25,000 synchronized optimizer updates. Require the budget to divide evenly by the world size. Base the learning-rate schedule and validation cadence on synchronized optimizer steps. Compare equal optimizer step counts when measuring strong scaling at a fixed global batch size.
+- Treat `--iterations` as thousands of rank-iterations across the run. With `--iterations 100`, one GPU performs 100,000 optimizer updates. Four GPUs perform 25,000 local iterations each and 25,000 synchronized optimizer updates. Round the budget down to whole synchronized steps and log any unused rank-iterations. Base the learning-rate schedule and validation cadence on synchronized optimizer steps. Compare equal optimizer step counts when measuring strong scaling at a fixed global batch size.
 
 ## Initial load and data decomposition
 

@@ -337,7 +337,7 @@ class ScientificDataset(BaseDataset):
             else slice(section_range[0], section_range[1])
         )
 
-        if data_path.rstrip("/").endswith((".bp", ".bp4", ".bp5")):
+        if data_path.rstrip("/").endswith((".bp", ".bp3", ".bp4", ".bp5")):
             from adios2 import FileReader
 
             # Keep the V axis even when variable_idx is an int
