@@ -10,12 +10,9 @@
 #SBATCH --account=CSC143
 #SBATCH --cpus-per-gpu=16
 
-cd "${SLURM_SUBMIT_DIR:?Submit from the CAESAR repository root}"
 source ~/.bashrc
 source ~/set_env_riker.sh
 source ../caesar_venv/bin/activate
-set -euo pipefail
-python3 -c 'import sys, adios2; print(sys.executable, adios2.__version__, adios2.__file__)'
 
 export OMP_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
