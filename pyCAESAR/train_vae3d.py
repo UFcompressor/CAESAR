@@ -6,6 +6,8 @@ AOTI inference model.
 """
 
 import os
+import logging
+import sys
 from contextlib import ExitStack, nullcontext
 from datetime import timedelta
 import numpy as np
@@ -27,6 +29,8 @@ from pyCAESAR.models.utils import (
     relative_rmse_error_ornl,
     save_json,
 )
+
+logger = logging.getLogger("pyCAESAR.training")
 
 
 def remove_module_prefix(state_dict):
@@ -243,7 +247,7 @@ def train_epoch_vae(
 
         sample_count += inputs.size(0)
         iteration += 1
-        if iteration == 1 and prepare_batch is not None and dist.get_rank() == 0:
+        if iteration == 1 and (not dist.is_initialized() or dist.get_rank() == 0):
             print(
                 f"First optimizer update complete, loss={loss.detach().item():.6g}",
                 flush=True,
@@ -321,7 +325,9 @@ class Info:
         )
 
     def save_last_model(self, model):
-        torch.save(model.state_dict(), self.model_path.replace(".pt", "_final.pt"))
+        path = self.model_path.replace(".pt", "_final.pt")
+        torch.save(model.state_dict(), path)
+        print(f"Saved weights to {path}", flush=True)
 
     def update(self, model, epoch, nrmse, bpp, dname):
         assert self.data_name == dname
@@ -331,6 +337,7 @@ class Info:
 
         if nrmse <= self.best_nrmse:
             torch.save(model.state_dict(), self.model_path)
+            print(f"Saved best weights to {self.model_path}", flush=True)
             self.best_nrmse = nrmse
             self.best_nrmse_cr = self.bpp / bpp
             self.best_epoch = epoch
@@ -389,7 +396,14 @@ def get_argument():
     parser.add_argument("--model_dim", type=int, default=16, help="loss beta")
     parser.add_argument("--pretrain", type=str, default="", help="pretrain path")
 
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
+        "--release",
+        dest="debug",
+        action="store_false",
+        help="Show normal training progress (default)",
+    )
+    modes.add_argument(
         "--debug",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -408,6 +422,7 @@ def get_argument():
     parser.add_argument("--test_set", type=str, default="E3SM_test")
     parser.add_argument("--config", type=str, default="./configs/config_vae3d.yaml")
 
+    parser.set_defaults(debug=False)
     args = parser.parse_args()
     if args.iterations <= 0:
         parser.error("The iteration budget must be positive")
@@ -445,11 +460,11 @@ def run_training(args, rank, world_size, device, staging):
         )
     budget_label = f"{args.iterations}k"
     args.iterations = steps
-    print(
-        f"rank={rank}/{world_size} device={device} global_batch={args.batch_size} "
-        f"local_batch={local_batch_size} synchronized_steps={steps}",
-        flush=True,
-    )
+    if rank == 0:
+        print(
+            f"Loading data: ranks={world_size} global_batch={args.batch_size} local_batch={local_batch_size} synchronized_steps={steps}",
+            flush=True,
+        )
 
     train_args = convert_args(args, train=True)
     test_args = convert_args(args, train=False)
@@ -549,9 +564,8 @@ def run_training(args, rank, world_size, device, staging):
     )
     epoch_batches = len(train_loader)
     if distributed:
-        print(
-            f"rank={rank} local_load_complete seconds={time.monotonic()-startup:.2f}",
-            flush=True,
+        logger.debug(
+            "rank=%s local_load_complete seconds=%.2f", rank, time.monotonic() - startup
         )
         common_batches = torch.tensor(epoch_batches, device=device)
         dist.all_reduce(common_batches, op=dist.ReduceOp.MIN)
@@ -560,11 +574,14 @@ def run_training(args, rank, world_size, device, staging):
             raise ValueError(
                 "At least one rank has fewer windows than a complete batch"
             )
-        print(
-            f"rank={rank} local_batches={len(train_loader)} common_batches={epoch_batches} "
-            f"load_seconds={time.monotonic() - startup:.2f}",
-            flush=True,
+        logger.debug(
+            "rank=%s local_batches=%s common_batches=%s",
+            rank,
+            len(train_loader),
+            epoch_batches,
         )
+    if rank == 0:
+        print(f"Data loaded in {time.monotonic() - startup:.2f}s", flush=True)
 
     save_path = args.save_path
     model_path = os.path.join(
@@ -608,7 +625,7 @@ def run_training(args, rank, world_size, device, staging):
             d3=True,
             sr_dim=args.sr_dim,
         )
-        print("Load Model with SR")
+        logger.debug("Load Model with SR")
 
     else:
         # The same training module exposes the compressor without its SR wrapper.
@@ -625,10 +642,10 @@ def run_training(args, rank, world_size, device, staging):
             out_channels=1,
             d3=True,
         )
-        print("Load Model without SR")
+        logger.debug("Load Model without SR")
 
     if args.pretrain != "":
-        print("Load pretrain model:", args.pretrain)
+        logger.debug("Loading pretrained weights from %s", args.pretrain)
         state_dict = torch.load(args.pretrain, map_location="cpu")
         state_dict = remove_module_prefix(state_dict)
         model.load_state_dict(state_dict)
@@ -643,7 +660,7 @@ def run_training(args, rank, world_size, device, staging):
         model = nn.DataParallel(model)
     if args.compile:
         model = torch.compile(model)
-    print(f"Training execution: {'compiled' if args.compile else 'eager'}")
+    logger.debug(f"Training execution: {'compiled' if args.compile else 'eager'}")
     # Loss function and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -659,7 +676,7 @@ def run_training(args, rank, world_size, device, staging):
     cur_iters = 0
     evaluated_progress = set()
 
-    print(
+    logger.debug(
         f"Learning rate milestones: {[int(i/5*args.iterations) for i in range(1, 5)]}"
     )
 
@@ -765,13 +782,21 @@ def run_training(args, rank, world_size, device, staging):
                 )
                 del original_data, recons_data
 
-            print()
-
-    print("Training complete.")
+    if rank == 0:
+        print("Training complete.", flush=True)
 
 
 def main():
     args = get_argument()
+    check_only = os.environ.get("CAESAR_NCCL_CHECK_ONLY") == "1"
+    diagnostics = (
+        args.debug
+        or args.plan_only
+        or check_only
+        or bool(os.environ.get("CAESAR_IO_BENCHMARK"))
+    )
+    logging.basicConfig(stream=sys.stdout, format="%(message)s")
+    logger.setLevel(logging.DEBUG if diagnostics else logging.WARNING)
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -795,31 +820,39 @@ def main():
             )
         device = torch.device("cuda", local_rank)
         torch.cuda.set_device(device)
-        print(
-            f"rank={rank} PyTorch={torch.__version__} CUDA={torch.version.cuda} "
-            f"NCCL={torch.cuda.nccl.version()}",
-            flush=True,
-        )
+        if diagnostics:
+            logger.debug(
+                "rank=%s PyTorch=%s CUDA=%s NCCL=%s",
+                rank,
+                torch.__version__,
+                torch.version.cuda,
+                torch.cuda.nccl.version(),
+            )
 
     try:
         if world_size > 1:
-            check_only = os.environ.get("CAESAR_NCCL_CHECK_ONLY") == "1"
             dist.init_process_group(
                 "nccl",
                 timeout=timedelta(minutes=2) if check_only else timedelta(hours=2),
             )
-            print(
-                f"rank={rank} host={os.uname().nodename} local_rank={local_rank} "
-                f"visible={os.environ.get('CUDA_VISIBLE_DEVICES')} "
-                f"gpu={getattr(torch.cuda.get_device_properties(device), 'uuid', device)} "
-                "starting NCCL check",
-                flush=True,
-            )
+            if diagnostics:
+                print(
+                    f"rank={rank} host={os.uname().nodename} local_rank={local_rank} "
+                    f"visible={os.environ.get('CUDA_VISIBLE_DEVICES')} "
+                    f"gpu={getattr(torch.cuda.get_device_properties(device), 'uuid', device)} "
+                    "starting NCCL check",
+                    flush=True,
+                )
+            elif rank == 0:
+                print(f"Checking NCCL across {world_size} ranks", flush=True)
             probe = torch.tensor(rank + 1, device=device)
             dist.all_reduce(probe)
             if int(probe) != world_size * (world_size + 1) // 2:
                 raise RuntimeError("Unexpected NCCL reduction result")
-            print(f"rank={rank} NCCL check passed", flush=True)
+            if diagnostics:
+                print(f"rank={rank} NCCL check passed", flush=True)
+            elif rank == 0:
+                print("NCCL check passed", flush=True)
             if check_only:
                 return
         with ExitStack() as stack:

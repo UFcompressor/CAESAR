@@ -106,7 +106,7 @@ python -m pyCAESAR.train_vae3d \
   --model_dim 16 --sr_dim 16 --no-debug
 ```
 
-Debugging is off by default. Add `--debug` to enable finite-value checks,
+Release mode is the default. Use `--release` for normal progress from rank 0, including load time, saved weights and validation metrics. Add `--debug` for rank and data layout details and to enable finite-value checks,
 autograd anomaly detection, failure snapshots/replays, and initial batch timing;
 `--no-debug` explicitly disables them. `--iterations 100` means 100,000 optimizer
 steps. Training stops at that limit and includes evaluation at 100% progress.

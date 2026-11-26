@@ -1,5 +1,6 @@
 """Plan scientific training windows before reading their payloads."""
 
+import logging
 import math
 import os
 import time
@@ -13,6 +14,8 @@ import torch
 
 
 from pyCAESAR.dataset import BaseDataset, block_hw, deblock_hw
+
+logger = logging.getLogger("pyCAESAR.training")
 
 
 def selected_indices(length, bounds):
@@ -92,10 +95,9 @@ def describe_bp(reader, options):
         block_info = [reader.engine.blocks_info(name, step) for step in steps]
         if any(tuple(variable.shape(step)) != shape for step in steps):
             raise ValueError(f"{name}: shape changes across selected steps")
-        print(
+        logger.debug(
             f"{options['name']} {name}: shape={shape}, "
             f"stored blocks per selected step={[len(b) for b in block_info]}",
-            flush=True,
         )
 
         def add(
@@ -179,7 +181,7 @@ def describe_bp(reader, options):
                         f"{name}: set independent_dim for a 4D field with multiple steps"
                     )
                 axis = 0
-                print(f"{name}: using independent_dim=0", flush=True)
+                logger.debug(f"{name}: using independent_dim=0")
             if axis not in range(4):
                 raise ValueError(f"{name}: independent_dim must be in [0, 3]")
             spatial = shape[:axis] + shape[axis + 1 :]
@@ -358,9 +360,8 @@ def load_writer_blocks(reader, plans, volumes, rank, group, plan_only):
         if filled[vi] != array.size:
             raise ValueError(f"Incomplete block coverage for {volumes[vi].variable}")
     if requests:
-        print(
+        logger.debug(
             f"rank={rank} writer_blocks={block_count} selected_bytes={logical_bytes} deferred_get_seconds={get_seconds:.3f}",
-            flush=True,
         )
     return arrays
 
@@ -406,12 +407,11 @@ class ShardDataset(BaseDataset):
             )
             for vi, (volume, start, length, count, halo, tail) in plans[rank].items():
                 retained = length * math.prod(volume.shape[1:]) * 4
-                print(
+                logger.debug(
                     f"rank={rank} {self.dataset_name} {volume.variable} "
                     f"steps={volume.steps} section={volume.section} block={volume.block} "
                     f"frame={volume.frame_start + start} read_frames={length} "
                     f"windows={count} host_bytes={retained}",
-                    flush=True,
                 )
                 if not plan_only:
                     try:
