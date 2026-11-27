@@ -6,6 +6,7 @@ This file contains the original trainable network. Do not use or modify
 three-part AOTI inference/compilation path.
 """
 
+import logging
 import torch.nn as nn
 from .network_components_4_train import ResnetBlock, FlexiblePrior, Downsample, Upsample
 from .utils import quantize, NormalDistribution
@@ -13,6 +14,8 @@ import time
 import yaml
 from .BCRN.bcrn_model import BluePrintConvNeXt_SR
 import torch
+
+logger = logging.getLogger("pyCAESAR.training")
 
 
 def load_yaml(file_path):
@@ -35,7 +38,7 @@ def super_resolution_model(
         loaded_params, not_loaded_params = sr_model.load_part_model(
             "./pretrain/HAT-S_SRx4.pth"
         )
-        print("Loading HAT model")
+        logger.debug("Loading HAT model")
         return sr_model, loaded_params, not_loaded_params
 
     if sr_type == "BCRN":
@@ -46,7 +49,7 @@ def super_resolution_model(
             )
         else:
             loaded_params, not_loaded_params = [], sr_model.parameters()
-        print("Loading BCRN model")
+        logger.debug("Loading BCRN model")
 
         return sr_model, loaded_params, not_loaded_params
 

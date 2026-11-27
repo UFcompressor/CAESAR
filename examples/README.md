@@ -32,6 +32,30 @@ above requests 100,000 steps. To load an existing checkpoint, add
 The repository-level `train.sh` contains the same launcher pattern for a real
 multi-dataset training run.
 
+### Distributed training
+
+Launch one `torchrun` worker per GPU. Supply a configuration file containing
+your datasets, then select its dataset names with `--train_set` and
+`--test_set`. For example, on a single node with two GPUs:
+
+```bash
+torchrun --standalone --nnodes=1 --nproc-per-node=2 \
+  --module pyCAESAR.train_vae3d \
+  --config examples/config_adios.example.yaml \
+  --train_set example_adios --test_set example_adios \
+  --save_path snapshots/distributed-example \
+  --batch_size 8 --iterations 100
+```
+
+For multiple nodes, launch `torchrun` once per node with the same node count,
+master address, master port, and configuration. Set each launcher's node rank
+to its Slurm node index. The batch size is global across all GPU workers and
+must divide evenly across them. Each GPU uses `--batch_size / total_GPU_workers`
+samples per optimizer step. For example, batch size 8 across two GPUs gives
+each GPU a local batch of 4. `--iterations` is thousands of rank-iterations,
+rounded down to complete synchronized optimizer steps. Release progress is the
+default; add `--debug` for detailed diagnostics.
+
 ### ADIOS input
 
 Use [config_adios.example.yaml](config_adios.example.yaml) for `.bp`, `.bp4`,
@@ -106,7 +130,7 @@ python -m pyCAESAR.train_vae3d \
   --model_dim 16 --sr_dim 16 --no-debug
 ```
 
-Debugging is off by default. Add `--debug` to enable finite-value checks,
+Release mode is the default. Use `--release` for normal progress from rank 0, including load time, saved weights and validation metrics. Add `--debug` for rank and data layout details and to enable finite-value checks,
 autograd anomaly detection, failure snapshots/replays, and initial batch timing;
 `--no-debug` explicitly disables them. `--iterations 100` means 100,000 optimizer
 steps. Training stops at that limit and includes evaluation at 100% progress.

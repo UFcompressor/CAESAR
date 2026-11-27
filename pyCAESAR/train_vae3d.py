@@ -6,22 +6,31 @@ AOTI inference model.
 """
 
 import os
-from contextlib import nullcontext
+import logging
+import sys
+from contextlib import ExitStack, nullcontext
+from datetime import timedelta
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel
 import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 import argparse
+import math
 import shutil
 import time
 from collections import OrderedDict
+from itertools import islice
 from pyCAESAR.models.utils import (
     build_dataset,
     convert_args,
     relative_rmse_error_ornl,
     save_json,
 )
+
+logger = logging.getLogger("pyCAESAR.training")
 
 
 def remove_module_prefix(state_dict):
@@ -133,6 +142,8 @@ def train_epoch_vae(
     iteration=0,
     debug=False,
     max_iterations=None,
+    norm_type=None,
+    prepare_batch=None,
 ):
     """Train the model for one epoch."""
     model.train()
@@ -145,16 +156,23 @@ def train_epoch_vae(
         if debug:
             check_finite(name, tensor, current_iteration, batch)
 
+    replay = debug and not isinstance(model, DistributedDataParallel)
     for data_dict in loader:
         if max_iterations is not None and iteration >= max_iterations:
             break
         t0 = time.time()
-        # inputs = data_dict["input"].to(device, non_blocking=True)
+        if prepare_batch is not None:
+            data_dict = prepare_batch(data_dict)
         inputs = (
             data_dict["input"]
             .to(device, non_blocking=True)
             .to(memory_format=torch.channels_last_3d)
         )
+        if norm_type is not None:
+            from pyCAESAR.training_data import normalize_batch
+
+            inputs, offset, scale = normalize_batch(inputs, norm_type)
+            data_dict = {**data_dict, "offset": offset, "scale": scale}
         targets = inputs
 
         check("input", inputs, iteration + 1, data_dict)
@@ -163,7 +181,7 @@ def train_epoch_vae(
 
         optimizer.zero_grad(set_to_none=True)
 
-        if debug:
+        if replay:
             rng_state = torch.get_rng_state()
             cuda_rng_state = torch.cuda.get_rng_state_all()
             buffers = {
@@ -198,7 +216,7 @@ def train_epoch_vae(
                             data_dict,
                         )
         except RuntimeError:
-            if debug:
+            if replay:
                 try:
                     debug_backward_failure(
                         model,
@@ -229,6 +247,11 @@ def train_epoch_vae(
 
         sample_count += inputs.size(0)
         iteration += 1
+        if iteration == 1 and (not dist.is_initialized() or dist.get_rank() == 0):
+            print(
+                f"First optimizer update complete, loss={loss.detach().item():.6g}",
+                flush=True,
+            )
         if debug and iteration < 30:
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -302,7 +325,9 @@ class Info:
         )
 
     def save_last_model(self, model):
-        torch.save(model.state_dict(), self.model_path.replace(".pt", "_final.pt"))
+        path = self.model_path.replace(".pt", "_final.pt")
+        torch.save(model.state_dict(), path)
+        print(f"Saved weights to {path}", flush=True)
 
     def update(self, model, epoch, nrmse, bpp, dname):
         assert self.data_name == dname
@@ -312,6 +337,7 @@ class Info:
 
         if nrmse <= self.best_nrmse:
             torch.save(model.state_dict(), self.model_path)
+            print(f"Saved best weights to {self.model_path}", flush=True)
             self.best_nrmse = nrmse
             self.best_nrmse_cr = self.bpp / bpp
             self.best_epoch = epoch
@@ -336,7 +362,22 @@ def get_argument():
         "--iterations",
         type=int,
         default=400,
-        help="Training optimizer steps in thousands (100 means 100,000 steps)",
+        help="Thousands of rank-iterations, rounded down to whole synchronized steps",
+    )
+
+    parser.add_argument(
+        "--plan_only",
+        action="store_true",
+        help="Inspect distributed shards without loading payloads",
+    )
+    parser.add_argument(
+        "--validate_every",
+        type=int,
+        default=0,
+        help="Distributed validation interval in steps (0 validates at completion)",
+    )
+    parser.add_argument(
+        "--loader_workers", type=int, help="Training loader workers per rank"
     )
 
     parser.add_argument(
@@ -355,7 +396,14 @@ def get_argument():
     parser.add_argument("--model_dim", type=int, default=16, help="loss beta")
     parser.add_argument("--pretrain", type=str, default="", help="pretrain path")
 
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
+        "--release",
+        dest="debug",
+        action="store_false",
+        help="Show normal training progress (default)",
+    )
+    modes.add_argument(
         "--debug",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -374,67 +422,186 @@ def get_argument():
     parser.add_argument("--test_set", type=str, default="E3SM_test")
     parser.add_argument("--config", type=str, default="./configs/config_vae3d.yaml")
 
+    parser.set_defaults(debug=False)
     args = parser.parse_args()
     if args.iterations <= 0:
-        parser.error("--iterations must be positive")
+        parser.error("The iteration budget must be positive")
+    if args.batch_size <= 0:
+        parser.error("--batch_size must be positive")
+    if args.validate_every < 0 or (
+        args.loader_workers is not None and args.loader_workers < 0
+    ):
+        parser.error("Validation interval and loader workers must be nonnegative")
 
     return args
 
 
-if __name__ == "__main__":
-    args = get_argument()
+def resolve_budget(args, world_size):
+    if args.batch_size % world_size:
+        raise ValueError(
+            f"Global batch size {args.batch_size} must divide across {world_size} ranks"
+        )
+    steps = args.iterations * 1000 // world_size
+    if steps == 0:
+        raise ValueError(
+            "The iteration budget must cover at least one synchronized step"
+        )
+    return args.batch_size // world_size, steps
 
-    save_path = args.save_path
 
-    # Ensure save path exists
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-
-    shutil.copy(args.config, save_path + "/config_vae3d.yaml")
-
-    # Paths for model and JSON files
-    model_path = os.path.join(
-        save_path, f"model_bs{args.batch_size}_ep{args.iterations}k.pt"
-    )
-    json_path = os.path.join(
-        save_path, f"model_bs{args.batch_size}_ep{args.iterations}k.json"
-    )
-
-    args.iterations = args.iterations * 1000
-    save_json(json_path, {"argument": vars(args)})
+def run_training(args, rank, world_size, device, staging):
+    distributed = world_size > 1
+    local_batch_size, steps = resolve_budget(args, world_size)
+    unused_iterations = args.iterations * 1000 - steps * world_size
+    if rank == 0 and unused_iterations:
+        print(
+            f"Unused rank-iterations after rounding down: {unused_iterations}",
+            flush=True,
+        )
+    budget_label = f"{args.iterations}k"
+    args.iterations = steps
+    if rank == 0:
+        print(
+            f"Loading data: ranks={world_size} global_batch={args.batch_size} local_batch={local_batch_size} synchronized_steps={steps}",
+            flush=True,
+        )
 
     train_args = convert_args(args, train=True)
-
-    print(train_args)
-    train_datasets = build_dataset(train_args, syn_length=True)
-    print("Length for Each dataset", [len(dataset) for dataset in train_datasets])
-    merged_dataset = ConcatDataset(train_datasets)
-
-    train_loader = DataLoader(
-        merged_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-
     test_args = convert_args(args, train=False)
-    test_datasets = build_dataset(test_args, syn_length=False)
-    test_loaders = [
-        DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=2,
-            pin_memory=True,
-            persistent_workers=True,
+    norm_type = None
+    prepare_batch = None
+    test_loaders = []
+    startup = time.monotonic()
+    if os.environ.get("CAESAR_IO_BENCHMARK") and not distributed:
+        raise ValueError("Launch the distributed reader benchmark with torchrun")
+    if distributed or args.plan_only:
+        from pyCAESAR.training_data import (
+            DeviceBatch,
+            ShardDataset,
+            source_for,
+            stage_npz,
         )
-        for dataset in test_datasets
-    ]
 
-    # Model and device setup
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if distributed and not args.plan_only:
+            staging = stage_npz(
+                (*train_args.values(), *test_args.values()),
+                staging,
+                int(os.environ["LOCAL_RANK"]),
+            )
+        norms = {
+            options.get("norm_type", "mean_range") for options in train_args.values()
+        }
+        if len(norms) != 1:
+            raise ValueError("Distributed training requires a common norm_type")
+        norm_type = norms.pop()
+        boundary_group = (
+            dist.new_group(backend="gloo")
+            if distributed and not args.plan_only
+            else None
+        )
+        io_mode = os.environ.get("CAESAR_IO_BENCHMARK", "")
+        if io_mode not in ("", "writer", "slab"):
+            raise ValueError("CAESAR_IO_BENCHMARK must be writer or slab")
+        train_datasets = []
+        for options in train_args.values():
+            source, describe = source_for(options, staging, args.plan_only)
+            train_datasets.append(
+                ShardDataset(
+                    options,
+                    rank,
+                    world_size,
+                    source,
+                    describe,
+                    args.plan_only,
+                    boundary_group,
+                    io_mode != "slab",
+                )
+            )
+        if io_mode:
+            print(
+                f"rank={rank} reader={io_mode} local_load_seconds={time.monotonic()-startup:.3f}",
+                flush=True,
+            )
+            return
+        if args.plan_only:
+            if sum(map(len, train_datasets)) < local_batch_size:
+                raise ValueError(
+                    f"Rank {rank} has fewer windows than one complete batch"
+                )
+            return
+        prepare_batch = DeviceBatch(train_datasets, device)
+        # Match the single-process weighting by repeating smaller datasets locally.
+        largest = max(map(len, train_datasets))
+        for dataset in train_datasets:
+            dataset.visible_length = largest
+    else:
+        train_datasets = build_dataset(train_args, syn_length=True)
+        for dataset in build_dataset(test_args, syn_length=False):
+            test_loaders.append(
+                DataLoader(
+                    dataset,
+                    batch_size=local_batch_size,
+                    shuffle=False,
+                    num_workers=2,
+                    pin_memory=device.type == "cuda",
+                    persistent_workers=True,
+                )
+            )
+
+    workers = (
+        args.loader_workers
+        if args.loader_workers is not None
+        else (0 if distributed else 4)
+    )
+    train_loader = DataLoader(
+        ConcatDataset(train_datasets),
+        batch_size=local_batch_size,
+        shuffle=True,
+        drop_last=distributed,
+        num_workers=workers,
+        pin_memory=device.type == "cuda",
+        persistent_workers=workers > 0,
+    )
+    epoch_batches = len(train_loader)
+    if distributed:
+        logger.debug(
+            "rank=%s local_load_complete seconds=%.2f", rank, time.monotonic() - startup
+        )
+        common_batches = torch.tensor(epoch_batches, device=device)
+        dist.all_reduce(common_batches, op=dist.ReduceOp.MIN)
+        epoch_batches = int(common_batches)
+        if not epoch_batches:
+            raise ValueError(
+                "At least one rank has fewer windows than a complete batch"
+            )
+        logger.debug(
+            "rank=%s local_batches=%s common_batches=%s",
+            rank,
+            len(train_loader),
+            epoch_batches,
+        )
+    if rank == 0:
+        print(f"Data loaded in {time.monotonic() - startup:.2f}s", flush=True)
+
+    save_path = args.save_path
+    model_path = os.path.join(
+        save_path, f"model_bs{args.batch_size}_ep{budget_label}.pt"
+    )
+    json_path = os.path.join(
+        save_path, f"model_bs{args.batch_size}_ep{budget_label}.json"
+    )
+    if rank == 0:
+        os.makedirs(save_path, exist_ok=True)
+        shutil.copy(args.config, os.path.join(save_path, "config_vae3d.yaml"))
+        save_json(
+            json_path,
+            {
+                "argument": vars(args),
+                "world_size": world_size,
+                "local_batch_size": local_batch_size,
+            },
+        )
+
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -458,7 +625,7 @@ if __name__ == "__main__":
             d3=True,
             sr_dim=args.sr_dim,
         )
-        print("Load Model with SR")
+        logger.debug("Load Model with SR")
 
     else:
         # The same training module exposes the compressor without its SR wrapper.
@@ -475,24 +642,25 @@ if __name__ == "__main__":
             out_channels=1,
             d3=True,
         )
-        print("Load Model without SR")
+        logger.debug("Load Model without SR")
 
     if args.pretrain != "":
-        print("Load pretrain model:", args.pretrain)
-        state_dict = torch.load(args.pretrain)
+        logger.debug("Loading pretrained weights from %s", args.pretrain)
+        state_dict = torch.load(args.pretrain, map_location="cpu")
         state_dict = remove_module_prefix(state_dict)
         model.load_state_dict(state_dict)
 
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs!")
-        model = nn.DataParallel(model)  # Wrap model with DataParallel for multi-GPU
-    else:
-        print("Using a single GPU!")
-
     model = model.to(device)
+    checkpoint_model = model
+    if distributed:
+        model = DistributedDataParallel(
+            model, device_ids=[device.index], find_unused_parameters=True
+        )
+    elif torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
     if args.compile:
         model = torch.compile(model)
-    print(f"Training execution: {'compiled' if args.compile else 'eager'}")
+    logger.debug(f"Training execution: {'compiled' if args.compile else 'eager'}")
     # Loss function and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -502,17 +670,15 @@ if __name__ == "__main__":
         gamma=args.lr_gamma,
     )
 
-    test_names = [loader.dataset.dataset_name for loader in test_loaders]
+    test_names = test_args if rank == 0 else ()
     loggers = {name: Info(name, 32, model_path, json_path) for name in test_names}
 
     cur_iters = 0
     evaluated_progress = set()
 
-    print(
+    logger.debug(
         f"Learning rate milestones: {[int(i/5*args.iterations) for i in range(1, 5)]}"
     )
-
-    #     estimate the remaining time
 
     while cur_iters < args.iterations:
 
@@ -522,9 +688,21 @@ if __name__ == "__main__":
             else args.end_beta
         )
 
+        limit = args.iterations
+        if distributed:
+            beta_transition = math.ceil(args.iterations * args.beta_start)
+            if cur_iters < beta_transition:
+                limit = min(limit, beta_transition)
+            if args.validate_every:
+                next_validation = (
+                    cur_iters // args.validate_every + 1
+                ) * args.validate_every
+                limit = min(limit, next_validation)
+        batches = min(epoch_batches, limit - cur_iters)
+        training_start = time.monotonic()
         mse_loss, bbp_loss, cur_iters = train_epoch_vae(
             model,
-            train_loader,
+            islice(train_loader, batches),
             optimizer,
             scheduler,
             criterion,
@@ -532,12 +710,49 @@ if __name__ == "__main__":
             device,
             cur_iters,
             debug=args.debug,
-            max_iterations=args.iterations,
+            max_iterations=limit,
+            norm_type=norm_type,
+            prepare_batch=prepare_batch,
         )
         train_loss = mse_loss + bbp_loss
 
         eval_index = min(100, cur_iters * 100 // args.iterations)
-        if eval_index not in evaluated_progress:
+        if distributed:
+            loss = torch.tensor([mse_loss, bbp_loss], device=device)
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            train_loss = float(loss.sum()) / world_size
+            elapsed = time.monotonic() - training_start
+            prepare_batch.report_profile(rank)
+            if rank == 0:
+                print(
+                    f"step={cur_iters}/{args.iterations} loss={train_loss:.6f} "
+                    f"training_seconds={elapsed:.2f} seconds_per_update={elapsed/batches:.4f} "
+                    f"samples_per_second={args.batch_size*batches/elapsed:.2f}",
+                    flush=True,
+                )
+                interval = args.validate_every
+                if cur_iters == args.iterations or (
+                    interval and cur_iters % interval == 0
+                ):
+                    from pyCAESAR.training_data import source_for, validate_volumes
+
+                    validation_start = time.monotonic()
+                    for name, options in test_args.items():
+                        source, describe = source_for(options, staging)
+                        nrmse, bpp = validate_volumes(
+                            checkpoint_model, options, device, source, describe
+                        )
+                        loggers[name].update(
+                            checkpoint_model, cur_iters, nrmse, bpp, name
+                        )
+                        loggers[name].save_last_model(checkpoint_model)
+                        print(
+                            f"{name}: step={cur_iters} NRMSE={nrmse:.6g} BPP={bpp:.6g} "
+                            f"validation_seconds={time.monotonic() - validation_start:.2f}",
+                            flush=True,
+                        )
+            dist.barrier()
+        elif eval_index not in evaluated_progress:
             evaluated_progress.add(eval_index)
 
             for test_loader in test_loaders:
@@ -555,8 +770,8 @@ if __name__ == "__main__":
                 nrmse = relative_rmse_error_ornl(original_data, recons_data)
                 nrmse = float(nrmse)
 
-                loggers[dname].update(model, cur_iters, nrmse, bpp, dname)
-                loggers[dname].save_last_model(model)
+                loggers[dname].update(checkpoint_model, cur_iters, nrmse, bpp, dname)
+                loggers[dname].save_last_model(checkpoint_model)
 
                 print(
                     dname,
@@ -567,6 +782,89 @@ if __name__ == "__main__":
                 )
                 del original_data, recons_data
 
-            print()
+    if rank == 0:
+        print("Training complete.", flush=True)
 
-    print("Training complete.")
+
+def main():
+    args = get_argument()
+    check_only = os.environ.get("CAESAR_NCCL_CHECK_ONLY") == "1"
+    diagnostics = (
+        args.debug
+        or args.plan_only
+        or check_only
+        or bool(os.environ.get("CAESAR_IO_BENCHMARK"))
+    )
+    logging.basicConfig(stream=sys.stdout, format="%(message)s")
+    logger.setLevel(logging.DEBUG if diagnostics else logging.WARNING)
+    rank = int(os.environ.get("RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
+    if not 0 <= rank < world_size or not 0 <= local_rank < local_world_size:
+        raise ValueError("Invalid torchrun rank topology")
+    resolve_budget(args, world_size)
+
+    if args.plan_only:
+        run_training(args, rank, world_size, torch.device("cpu"), None)
+        return
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if world_size > 1:
+        if (
+            not torch.cuda.is_available()
+            or local_world_size > torch.cuda.device_count()
+        ):
+            raise RuntimeError(
+                "Distributed training requires one visible CUDA GPU per local rank"
+            )
+        device = torch.device("cuda", local_rank)
+        torch.cuda.set_device(device)
+        if diagnostics:
+            logger.debug(
+                "rank=%s PyTorch=%s CUDA=%s NCCL=%s",
+                rank,
+                torch.__version__,
+                torch.version.cuda,
+                torch.cuda.nccl.version(),
+            )
+
+    try:
+        if world_size > 1:
+            dist.init_process_group(
+                "nccl",
+                timeout=timedelta(minutes=2) if check_only else timedelta(hours=2),
+            )
+            if diagnostics:
+                print(
+                    f"rank={rank} host={os.uname().nodename} local_rank={local_rank} "
+                    f"visible={os.environ.get('CUDA_VISIBLE_DEVICES')} "
+                    f"gpu={getattr(torch.cuda.get_device_properties(device), 'uuid', device)} "
+                    "starting NCCL check",
+                    flush=True,
+                )
+            elif rank == 0:
+                print(f"Checking NCCL across {world_size} ranks", flush=True)
+            probe = torch.tensor(rank + 1, device=device)
+            dist.all_reduce(probe)
+            if int(probe) != world_size * (world_size + 1) // 2:
+                raise RuntimeError("Unexpected NCCL reduction result")
+            if diagnostics:
+                print(f"rank={rank} NCCL check passed", flush=True)
+            elif rank == 0:
+                print("NCCL check passed", flush=True)
+            if check_only:
+                return
+        with ExitStack() as stack:
+            if world_size > 1:
+                from pyCAESAR.training_data import npz_staging
+
+            staging = stack.enter_context(npz_staging()) if world_size > 1 else None
+            run_training(args, rank, world_size, device, staging)
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()

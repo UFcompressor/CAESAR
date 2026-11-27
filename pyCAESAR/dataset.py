@@ -1,3 +1,4 @@
+import logging
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
@@ -7,6 +8,8 @@ import numpy as np
 from copy import deepcopy
 
 import math
+
+logger = logging.getLogger("pyCAESAR.training")
 
 
 def center_crop(x, tshape):
@@ -260,7 +263,7 @@ class ScientificDataset(BaseDataset):
     def __init__(self, args):
         super().__init__(args)
 
-        print(f"*************** Loading {self.dataset_name} ***************")
+        logger.debug("Loading dataset %s", self.dataset_name)
 
         data = self.load_dataset(
             self.data_path, self.variable_idx, self.section_range, self.frame_range
@@ -337,7 +340,7 @@ class ScientificDataset(BaseDataset):
             else slice(section_range[0], section_range[1])
         )
 
-        if data_path.rstrip("/").endswith((".bp", ".bp4", ".bp5")):
+        if data_path.rstrip("/").endswith((".bp", ".bp3", ".bp4", ".bp5")):
             from adios2 import FileReader
 
             # Keep the V axis even when variable_idx is an int
@@ -403,10 +406,9 @@ class ScientificDataset(BaseDataset):
                         field = field[:, section_range, frame_range]
                         field = field.astype(np.float32, copy=False)
 
-                    print(
+                    logger.debug(
                         f"ADIOS: loaded {name} (idx {v}): steps={n_steps}, "
                         f"shape={field.shape}",
-                        flush=True,
                     )
                     fields.append(field)
 
